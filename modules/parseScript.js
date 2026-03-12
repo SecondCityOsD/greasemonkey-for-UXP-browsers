@@ -1,3 +1,35 @@
+/**
+ * @file parseScript.js
+ * @overview Parses the source code of a userscript and produces a Script object.
+ *
+ * The parser reads the ==UserScript== metadata block (extracted by
+ * extractMeta.js) and maps each @keyword to the appropriate Script property.
+ * Unknown keywords (e.g. @connect, @supportURL, @antifeature) fall through
+ * the switch statement silently — they do not cause a parse failure.
+ *
+ * Supported metadata keywords:
+ *   @author, @copyright              — stored verbatim
+ *   @name, @description              — stored with optional locale suffix
+ *   @namespace, @version             — stored verbatim
+ *   @noframes                        — boolean flag
+ *   @include, @exclude               — glob patterns
+ *   @match                           — strict URL match patterns (MatchPattern)
+ *   @grant                           — API grants (GM_* or GM.*)
+ *   @icon                            — script icon URL
+ *   @require                         — additional JS files to load before script
+ *   @resource                        — named binary resources
+ *   @run-at                          — document-start | document-end | document-idle
+ *   @downloadURL, @updateURL,
+ *   @homepageURL, @installURL        — various URL metadata
+ *
+ * Security note on @require / @resource:
+ *   When a script is loaded from a local file://, dependency URLs must be
+ *   descendants of the script's directory (enforced by checkUrls()).
+ *   This can be relaxed via the fileDependencyUrlIsDescendantOfDownloadUrl pref.
+ *
+ * @exports parse
+ */
+
 const EXPORTED_SYMBOLS = ["parse"];
 
 if (typeof Cc === "undefined") {
@@ -28,7 +60,22 @@ const META_SEPARATOR = "\0";
 
 const SOMETHING_REGEXP = new RegExp(".+", "g");
 
-// Parse the source of a script; produce Script object.
+/**
+ * Parses the source of a userscript and produces a populated Script object.
+ *
+ * If no ==UserScript== block is found and aFailWhenMissing is true, returns
+ * null.  If aFailWhenMissing is false (the default), a Script with default
+ * values is returned so that the script can still run (no metadata = match all).
+ *
+ * @param {string}     aSource          - Full source text of the script.
+ * @param {nsIURI|null} aUri            - The URI the script was fetched from,
+ *   used to resolve relative @require / @resource / URL metadata.
+ *   May be null for inline/local scripts.
+ * @param {boolean}    [aFailWhenMissing=false] - If true, return null when
+ *   no metadata block is present.
+ * @returns {Script|null} Populated Script object, or null if aFailWhenMissing
+ *   is true and no metadata block was found.
+ */
 function parse(aSource, aUri, aFailWhenMissing) {
   var meta = extractMeta(aSource).match(SOMETHING_REGEXP);
   if (aFailWhenMissing && !meta) {
@@ -272,6 +319,14 @@ function parse(aSource, aUri, aFailWhenMissing) {
   return script;
 }
 
+/**
+ * Applies default values to a partially-parsed Script object:
+ *   - If no @updateURL was set, falls back to @downloadURL.
+ *   - If @run-at is missing or invalid, defaults to "document-end".
+ *   - If no @include and no @match patterns were set, adds "*" (match all).
+ *
+ * @param {Script} aScript - The Script object to fill in defaults for.
+ */
 function setDefaults(aScript) {
   if (!aScript.updateURL && aScript.downloadURL) {
     aScript.updateURL = aScript.downloadURL;
@@ -287,6 +342,21 @@ function setDefaults(aScript) {
   }
 }
 
+/**
+ * Validates that a dependency URL is safe relative to the script's source URL.
+ *
+ * When the "fileDependencyUrlIsDescendantOfDownloadUrl" preference is enabled
+ * and both URLs are file://, checks that the dependency file is inside the
+ * directory of the script file.  This prevents scripts from @require-ing
+ * arbitrary files from the filesystem.
+ *
+ * For non-file:// URLs (http, https, etc.) the check always passes.
+ *
+ * @param {nsIURI} aUri    - The script's source URI.
+ * @param {nsIURI} aDepUri - The dependency's URI to validate.
+ * @returns {boolean} True if the dependency is allowed, false if it should
+ *   be rejected.
+ */
 function checkUrls(aUri, aDepUri) {
   let check = GM_prefRoot.getValue(
       "fileDependencyUrlIsDescendantOfDownloadUrl");

@@ -1,3 +1,24 @@
+/**
+ * @file requestObserver.js
+ * @overview HTTP request observer that intercepts navigation to .user.js URLs
+ *   and redirects them into Greasemonkey's script install flow.
+ *
+ * Two responsibilities are handled by a single "http-on-modify-request" observer:
+ *
+ *   1. Script installation detection (installObserver):
+ *      When the browser navigates to a URL ending in ".user.js" via HTTP/S,
+ *      the request is suspended and GM_util.showInstallDialog() is called
+ *      instead.  POST requests and disallowed schemes (chrome:, view-source:,
+ *      greasemonkey-script:) are ignored.
+ *
+ *   2. Script update checking (checkScriptRefresh):
+ *      On every top-level document/subdocument navigation, notifies the
+ *      Greasemonkey service so it can check whether any installed scripts have
+ *      a new version available from their @updateURL.
+ *
+ * Local file:// .user.js installs are handled separately by installPolicy.js.
+ */
+
 "use strict";
 
 const EXPORTED_SYMBOLS = [];
@@ -20,9 +41,14 @@ Cu.import("chrome://greasemonkey-modules/content/prefManager.js");
 Cu.import("chrome://greasemonkey-modules/content/util.js");
 
 
+/** Pre-compiled RegExp matching URLs that end with ".user.js". */
 const FILE_SCRIPT_EXTENSION_REGEXP = new RegExp(
-    GM_CONSTANTS.fileScriptExtensionRegexp + "$", ""); 
+    GM_CONSTANTS.fileScriptExtensionRegexp + "$", "");
 
+/**
+ * URL schemes that must never trigger a script install, even if the URL
+ * ends in ".user.js" (e.g. viewing a script source in a chrome: window).
+ */
 var SCHEMES_DISALLOWED = {
   "chrome": 1,
   "view-source": 1,
@@ -32,6 +58,13 @@ Object.freeze(SCHEMES_DISALLOWED);
 
 // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ //
 
+/**
+ * Notifies the Greasemonkey service that a page navigation has occurred so
+ * it can check for script updates on the relevant installed scripts.
+ * Only fires for top-level document and subdocument (iframe) loads.
+ *
+ * @param {nsIChannel} aChannel - The HTTP channel for the request being observed.
+ */
 function checkScriptRefresh(aChannel) {
   // .loadInfo is part of nsiChannel -> implicit QI needed.
   if (!(aChannel instanceof Ci.nsIChannel)) {
@@ -71,6 +104,18 @@ function checkScriptRefresh(aChannel) {
 
 // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ //
 
+/**
+ * "http-on-modify-request" observer callback.
+ * Inspects each HTTP request and, if it looks like a .user.js navigation,
+ * suspends the request and triggers the install dialog instead.
+ *
+ * Skips: Greasemonkey disabled, non-document loads, disallowed schemes,
+ * POST requests, and URLs not ending in ".user.js".
+ *
+ * @param {nsISupports} aSubject - The nsIHttpChannel being modified.
+ * @param {string}      aTopic   - Always "http-on-modify-request".
+ * @param {string}      aData    - Unused.
+ */
 function installObserver(aSubject, aTopic, aData) {
   // When observing a new request, inspect it to determine
   // if it should be a user script install.

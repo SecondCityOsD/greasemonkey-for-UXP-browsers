@@ -1,3 +1,26 @@
+/**
+ * @file storageBack.js
+ * @overview Back-end (privileged / component-scope) implementation of
+ *   GM_ScriptStorageBack — the SQLite-based persistent key/value store for
+ *   userscript GM_getValue / GM_setValue / GM_deleteValue / GM_listValues.
+ *
+ * Each script gets its own SQLite database file located at:
+ *   <profile>/gm_scripts/<baseDirName>.db
+ *
+ * The database contains a single table "scriptvals" with (name TEXT, value TEXT)
+ * where values are JSON-serialised to support all JS primitive types.
+ *
+ * This module is loaded into the privileged parent process.  The unprivileged
+ * content-side counterpart is storageFront.js, which talks to this module via
+ * IPC messages.
+ *
+ * SQLite PRAGMA notes (see bug #1879):
+ *   auto_vacuum=INCREMENTAL — reclaims free pages gradually rather than on VACUUM.
+ *   journal_mode=MEMORY     — keeps the write-ahead journal in memory for speed.
+ *   synchronous=OFF         — trades crash safety for performance (profile data only).
+ *   wal_autocheckpoint=10   — checkpoints the WAL every 10 pages.
+ */
+
 // The "back end" implementation of GM_ScriptStorageBack().
 // This is loaded into the component scope and is capable of accessing
 // the file based SQL store.
@@ -26,11 +49,28 @@ const MESSAGE_ERROR_PREFIX = "Script storage back end: ";
 
 // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ //
 
+/**
+ * Back-end storage object for a single userscript.
+ * Manages a per-script SQLite database and exposes CRUD operations.
+ *
+ * @constructor
+ * @param {Script} aScript - The Script object whose storage this instance manages.
+ *                           Must have a .baseDirName property used to derive
+ *                           the database file path.
+ */
 function GM_ScriptStorageBack(aScript) {
   this._db = null;
   this._script = aScript;
 }
 
+/**
+ * Lazy getter for the open SQLite database connection.
+ * On first access the database file is opened (or created), PRAGMAs are
+ * applied, and the "scriptvals" table is created if it does not yet exist.
+ * Subsequent accesses return the cached connection.
+ *
+ * @type {mozIStorageConnection}
+ */
 Object.defineProperty(GM_ScriptStorageBack.prototype, "db", {
   "get": function GM_ScriptStorageBack_getDb() {
     if (null == this._db) {
@@ -60,6 +100,12 @@ Object.defineProperty(GM_ScriptStorageBack.prototype, "db", {
   "enumerable": true,
 });
 
+/**
+ * Lazy getter that returns the nsIFile pointing to this script's .db file.
+ * The path is: <profile>/gm_scripts/<baseDirName>.db
+ *
+ * @type {nsIFile}
+ */
 Object.defineProperty(GM_ScriptStorageBack.prototype, "dbFile", {
   "get": function GM_ScriptStorageBack_getDbFile() {
     let file = GM_util.scriptDir();
@@ -70,10 +116,23 @@ Object.defineProperty(GM_ScriptStorageBack.prototype, "dbFile", {
   "enumerable": true,
 });
 
+/**
+ * Closes the SQLite database connection.
+ * Should be called when the script is uninstalled or the extension shuts down.
+ */
 GM_ScriptStorageBack.prototype.close = function () {
   this._db.close();
 };
 
+/**
+ * Persists a key/value pair for this script.
+ * The value is JSON-serialised, so any JSON-safe JS value is accepted.
+ * Fires a "val-set" changed notification on the owning Script object.
+ *
+ * @param {string} aName - The storage key.
+ * @param {*}      aVal  - The value to store (must be JSON-serialisable).
+ * @throws {Error} If called with fewer or more than 2 arguments.
+ */
 GM_ScriptStorageBack.prototype.setValue = function (aName, aVal) {
   if (arguments.length !== 2) {
     throw new Error(
@@ -95,6 +154,13 @@ GM_ScriptStorageBack.prototype.setValue = function (aName, aVal) {
   this._script.changed("val-set", aName);
 };
 
+/**
+ * Retrieves a stored value by key.
+ *
+ * @param {string} aName - The storage key to look up.
+ * @returns {string|null} The raw JSON string stored for that key, or null if
+ *                        the key does not exist or a database error occurs.
+ */
 GM_ScriptStorageBack.prototype.getValue = function (aName) {
   let value = null;
   let stmt = this.db.createStatement(
@@ -115,6 +181,12 @@ GM_ScriptStorageBack.prototype.getValue = function (aName) {
   return value;
 };
 
+/**
+ * Removes a key/value pair from storage.
+ * Fires a "val-del" changed notification on the owning Script object.
+ *
+ * @param {string} aName - The storage key to delete.
+ */
 GM_ScriptStorageBack.prototype.deleteValue = function (aName) {
   let stmt = this.db.createStatement(
       "DELETE FROM scriptvals WHERE name = :name");
@@ -128,6 +200,11 @@ GM_ScriptStorageBack.prototype.deleteValue = function (aName) {
   this._script.changed("val-del", aName);
 };
 
+/**
+ * Returns all stored key names for this script.
+ *
+ * @returns {string[]} Array of key names (may be empty).
+ */
 GM_ScriptStorageBack.prototype.listValues = function () {
   let valueNames = [];
 

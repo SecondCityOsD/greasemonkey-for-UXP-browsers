@@ -1,3 +1,18 @@
+/**
+ * @file prefManager.js
+ * @overview Thin wrapper around the Firefox/UXP preferences service
+ *   (nsIPrefService) for Greasemonkey.
+ *
+ * All preferences live under the "extensions.greasemonkey." branch.
+ * GM_PrefManager instances can be scoped to a sub-branch by passing a
+ * start-point string to the constructor.
+ *
+ * A shared root instance (GM_prefRoot) is exported for modules that need
+ * to read top-level Greasemonkey preferences without constructing their own.
+ *
+ * Supported value types: boolean, integer (32-bit signed), string.
+ */
+
 const EXPORTED_SYMBOLS = ["GM_PrefManager", "GM_prefRoot"];
 
 if (typeof Cc === "undefined") {
@@ -14,9 +29,13 @@ Cu.import("chrome://greasemonkey-modules/content/constants.js");
 
 
 /**
- * Simple API on top of preferences for greasemonkey.
- * Construct an instance by passing the startPoint of a preferences subtree.
- * "greasemonkey." prefix is assumed.
+ * Simple API on top of preferences for Greasemonkey.
+ * Construct an instance by passing the start-point of a preferences subtree.
+ * The "extensions.greasemonkey." prefix is prepended automatically.
+ *
+ * @constructor
+ * @param {string} [aStartPoint=""] - Sub-branch suffix, e.g. "scriptvals."
+ *   to scope this manager to extensions.greasemonkey.scriptvals.
  */
 function GM_PrefManager(aStartPoint) {
   aStartPoint = "extensions.greasemonkey." + (aStartPoint || "");
@@ -28,26 +47,38 @@ function GM_PrefManager(aStartPoint) {
   this.observers = new Map();
 };
 
+/** Minimum value accepted for integer preferences (−2 147 483 648). */
 GM_PrefManager.prototype.MIN_INT_32 = -0x80000000;
+/** Maximum value accepted for integer preferences (2 147 483 647). */
 GM_PrefManager.prototype.MAX_INT_32 = 0x7FFFFFFF;
+/** Cached reference to nsISupportsString interface, used for string prefs. */
 GM_PrefManager.prototype.nsISupportsString = Ci.nsISupportsString;
 
 /**
- * Whether a preference exists.
+ * Whether a preference exists in this branch.
+ *
+ * @param {string} aPrefName - Preference name relative to this branch.
+ * @returns {boolean}
  */
 GM_PrefManager.prototype.exists = function (aPrefName) {
   return this.pref.getPrefType(aPrefName) != 0;
 };
 
 /**
- * Enumerate preferences.
+ * Returns the names of all preferences in this branch.
+ *
+ * @returns {string[]} Array of preference name strings.
  */
 GM_PrefManager.prototype.listValues = function () {
   return this.pref.getChildList("", {});
 };
 
 /**
- * Returns the named preference, or defaultValue if it does not exist.
+ * Returns the value of a preference, or aDefaultValue if it does not exist.
+ *
+ * @param {string} aPrefName      - Preference name relative to this branch.
+ * @param {*}      [aDefaultValue] - Value to return when the pref is missing.
+ * @returns {boolean|number|string|null}
  */
 GM_PrefManager.prototype.getValue = function (aPrefName, aDefaultValue) {
   let prefType = this.pref.getPrefType(aPrefName);
@@ -75,8 +106,14 @@ GM_PrefManager.prototype.getValue = function (aPrefName, aDefaultValue) {
 };
 
 /**
- * Sets the named preference to the specified value. values must be booleans,
- * integers, or strings.
+ * Sets a preference to the given value.
+ * Accepted types: boolean, string, integer (32-bit signed only).
+ * If the existing pref has a different type it is deleted first to avoid
+ * a type-mismatch exception from the underlying preferences service.
+ *
+ * @param {string}              aPrefName - Preference name relative to this branch.
+ * @param {boolean|number|string} aValue  - New value.
+ * @throws {Error} If aValue is not a supported type or is an out-of-range number.
  */
 GM_PrefManager.prototype.setValue = function (aPrefName, aValue) {
   let prefType = typeof aValue;
@@ -128,14 +165,20 @@ GM_PrefManager.prototype.setValue = function (aPrefName, aValue) {
 };
 
 /**
- * Deletes the named preference or subtree.
+ * Deletes a preference or an entire sub-branch.
+ *
+ * @param {string} aPrefName - Preference name or branch suffix to delete.
  */
 GM_PrefManager.prototype.remove = function (aPrefName) {
   this.pref.deleteBranch(aPrefName);
 };
 
 /**
- * Call a function whenever the named preference subtree changes.
+ * Registers a callback to be invoked whenever a preference in the named
+ * subtree changes.  The callback receives the changed preference name.
+ *
+ * @param {string}   aPrefName - Preference name or branch prefix to observe.
+ * @param {function} aWatcher  - Called with (aPrefName) whenever the pref changes.
  */
 GM_PrefManager.prototype.watch = function (aPrefName, aWatcher) {
   // Construct an observer.
@@ -153,7 +196,10 @@ GM_PrefManager.prototype.watch = function (aPrefName, aWatcher) {
 };
 
 /**
- * Stop watching.
+ * Unregisters a previously registered preference observer.
+ *
+ * @param {string}   aPrefName - Same prefix passed to watch().
+ * @param {function} aWatcher  - The exact function reference passed to watch().
  */
 GM_PrefManager.prototype.unwatch = function (aPrefName, aWatcher) {
   let observer = this.observers.get(aWatcher);
@@ -164,4 +210,10 @@ GM_PrefManager.prototype.unwatch = function (aPrefName, aWatcher) {
   }
 };
 
+/**
+ * Shared root-level preferences manager for the "extensions.greasemonkey."
+ * branch.  Imported by other modules that need global Greasemonkey prefs.
+ *
+ * @type {GM_PrefManager}
+ */
 var GM_prefRoot = new GM_PrefManager();

@@ -1,3 +1,30 @@
+/**
+ * @file ipcScript.js
+ * @overview IPC-safe, frozen representation of a userscript for use in
+ *   content processes.
+ *
+ * The privileged parent process holds the full Script objects.  When
+ * Greasemonkey needs to run scripts in a content process it serialises each
+ * Script into an IPCScript (a plain, frozen object that extends AbstractScript)
+ * and sends the array to content via the "greasemonkey:scripts-update" IPC
+ * message.
+ *
+ * IPCScript inherits the matchesURL() algorithm from AbstractScript and adds:
+ *   - info()         — returns the GM_info payload object visible to scripts.
+ *   - scriptsForUrl()— filters the global script list to those that match a URL.
+ *   - getByUuid()    — looks up a script by UUID in the global list.
+ *
+ * The module also maintains the global gScripts array (updated via IPC) and
+ * patches IPCScript.prototype.globalExcludes to reflect the current list
+ * received from the parent.
+ *
+ * Initialisation strategy (Firefox 41+ vs older):
+ *   - Firefox 41+ supports initialProcessData, so the first update is
+ *     synchronously available without a blocking message.
+ *   - Older builds fall back to a synchronous "greasemonkey:scripts-update"
+ *     message to avoid a race condition at startup.
+ */
+
 const EXPORTED_SYMBOLS = ["IPCScript"];
 
 if (typeof Cc === "undefined") {
@@ -18,6 +45,16 @@ Cu.import("chrome://greasemonkey-modules/content/abstractScript.js");
 Cu.import("chrome://greasemonkey-modules/content/util.js");
 
 
+/**
+ * Constructs an IPC-safe, frozen snapshot of a Script object.
+ * Converts complex types (MatchPattern objects, file references, etc.) to
+ * plain JSON-serialisable values that can be sent across process boundaries.
+ *
+ * @constructor
+ * @param {Script} aScript       - The full Script object from the parent process.
+ * @param {string} aAddonVersion - The current Greasemonkey extension version,
+ *                                 included in the GM_info payload.
+ */
 function IPCScript(aScript, aAddonVersion) {
   this.addonVersion = aAddonVersion;
   this.author = aScript.author || "";
@@ -82,6 +119,16 @@ IPCScript.prototype = Object.create(AbstractScript.prototype, {
   },
 });
 
+/**
+ * Filters the global script list to those that should execute on aUrl
+ * at the given run-at phase.
+ *
+ * @param {string} aUrl      - The page URL to match against.
+ * @param {string} aWhen     - Run-at phase: "document-start", "document-end",
+ *                             or "document-idle".
+ * @param {*}      aWindowId - Ignored; present for API compatibility.
+ * @returns {IPCScript[]} Scripts that match the URL and run-at phase.
+ */
 IPCScript.scriptsForUrl = function (aUrl, aWhen, aWindowId /* ignore */) {
   let result = gScripts.filter(function (aScript) {
     try {
@@ -97,6 +144,13 @@ IPCScript.scriptsForUrl = function (aUrl, aWhen, aWindowId /* ignore */) {
   return result;
 };
 
+/**
+ * Builds and returns the GM_info object that is injected into the script
+ * sandbox and exposed to the userscript as GM_info / GM.info.
+ *
+ * @returns {object} Plain object matching the GM_info specification:
+ *   { script: {...}, scriptHandler, scriptWillUpdate, uuid, version }
+ */
 IPCScript.prototype.info = function () {
   let resources = this.resources.map(function (aRes) {
     return {
@@ -134,8 +188,21 @@ IPCScript.prototype.info = function () {
   };
 };
 
+/**
+ * The current list of all installed userscripts for this content process.
+ * Replaced entirely on each "greasemonkey:scripts-update" IPC message.
+ *
+ * @type {IPCScript[]}
+ */
 var gScripts = [];
 
+/**
+ * Promotes a plain deserialized object to an IPCScript prototype chain so
+ * that it inherits matchesURL() etc., then freezes it to prevent mutation.
+ *
+ * @param {object} aObj - Plain object received over IPC.
+ * @returns {IPCScript} Frozen IPCScript instance.
+ */
 function objectToScript(aObj) {
   var script = Object.create(IPCScript.prototype);
 
@@ -148,12 +215,27 @@ function objectToScript(aObj) {
   return script;
 }
 
+/**
+ * Finds a script in the global list by its UUID.
+ *
+ * @param {string} aId - The script UUID to search for.
+ * @returns {IPCScript|undefined} The matching script, or undefined if not found.
+ */
 IPCScript.getByUuid = function (aId) {
   return gScripts.find(function (e) {
     return e.uuid == aId;
   });
 }
 
+/**
+ * Replaces the global script list with fresh data from the parent process.
+ * Also updates the globalExcludes getter on IPCScript.prototype so that
+ * matchesURL() uses the current site-wide exclude list.
+ *
+ * @param {object|null} aData - Payload from the "greasemonkey:scripts-update"
+ *   message: { scripts: [...], globalExcludes: [...] }, or null/undefined on
+ *   first load if no data is available yet.
+ */
 function updateData(aData) {
   if (!aData) {
     return undefined;
