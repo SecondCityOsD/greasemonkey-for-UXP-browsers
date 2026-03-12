@@ -1,3 +1,9 @@
+/**
+ * @file alert.js
+ * @overview Provides an alert() function usable in XPCOM module/component scope
+ * where the global alert() is not available.
+ */
+
 const EXPORTED_SYMBOLS = ["alert"];
 
 if (typeof Cc === "undefined") {
@@ -16,6 +22,11 @@ Cu.import("chrome://greasemonkey-modules/content/util.js");
 
 
 // Because alert is not defined in component/module scope.
+/**
+ * Displays a modal alert dialog with the Greasemonkey handler name as title.
+ * @param {string} aMsg - The message text to display in the alert dialog.
+ * @returns {void}
+ */
 function alert(aMsg) {
   Cc["@mozilla.org/embedcomp/prompt-service;1"]
       .getService(Ci.nsIPromptService)

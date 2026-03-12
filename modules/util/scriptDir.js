@@ -1,3 +1,9 @@
+/**
+ * @file scriptDir.js
+ * @overview Resolves and caches the Greasemonkey scripts directory (nsIFile),
+ * creating it if it does not yet exist.
+ */
+
 const EXPORTED_SYMBOLS = ["scriptDir"];
 
 if (typeof Cc === "undefined") {
@@ -27,6 +33,10 @@ if (!gDirectoryScript.exists()) {
 // e.g. in case of symlinks.
 gDirectoryScript.normalize();
 
+/**
+ * Returns a clone of the Greasemonkey scripts directory nsIFile.
+ * @returns {nsIFile} A clone of the scripts directory object.
+ */
 function scriptDir() {
   return gDirectoryScript.clone();
 }

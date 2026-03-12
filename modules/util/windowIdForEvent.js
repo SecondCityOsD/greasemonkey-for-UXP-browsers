@@ -1,3 +1,9 @@
+/**
+ * @file windowIdForEvent.js
+ * @overview Extracts the window ID from a DOM event whose originalTarget is an
+ * HTML document, returning null for non-document targets.
+ */
+
 const EXPORTED_SYMBOLS = ["windowIdForEvent"];
 
 if (typeof Cc === "undefined") {
@@ -13,6 +19,11 @@ if (typeof Cu === "undefined") {
 Cu.import("chrome://greasemonkey-modules/content/util.js");
 
 
+/**
+ * Returns the window ID for the content window associated with a DOM event.
+ * @param {Event} aEvent - The DOM event whose originalTarget must be an nsIDOMHTMLDocument.
+ * @returns {number|null} The window ID for the event's document view, or null if the target is not an HTML document.
+ */
 function windowIdForEvent(aEvent) {
   let doc = aEvent.originalTarget;
   try {

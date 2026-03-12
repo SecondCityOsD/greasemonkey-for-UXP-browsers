@@ -1,3 +1,9 @@
+/**
+ * @file windowIsClosed.js
+ * @overview Safely tests whether a content window has been closed, guarding
+ * against dead wrappers and other edge cases introduced after bug 695480.
+ */
+
 const EXPORTED_SYMBOLS = ["windowIsClosed"];
 
 if (typeof Cc === "undefined") {
@@ -21,6 +27,11 @@ after http://bugzil.la/695480.
 This routine takes care of being careful to not trigger any of those broken
 edge cases.
 */
+/**
+ * Safely checks whether a content window has been closed or is otherwise unusable.
+ * @param {nsIDOMWindow} aWin - The window to check.
+ * @returns {boolean} True if the window is closed or dead, false if it is still open.
+ */
 function windowIsClosed(aWin) {
   try {
     // If isDeadWrapper (Firefox 15+ only) tells us the window is dead.

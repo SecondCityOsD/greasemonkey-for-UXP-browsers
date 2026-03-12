@@ -1,3 +1,9 @@
+/**
+ * @file isGreasemonkeyable.js
+ * @overview Determines whether Greasemonkey scripts should be allowed to run
+ * on a given URL based on its scheme and user preferences.
+ */
+
 const EXPORTED_SYMBOLS = ["isGreasemonkeyable"];
 
 if (typeof Cc === "undefined") {
@@ -15,6 +21,11 @@ Cu.import("chrome://greasemonkey-modules/content/constants.js");
 Cu.import("chrome://greasemonkey-modules/content/prefManager.js");
 
 
+/**
+ * Determines whether Greasemonkey scripts are permitted to run on the given URL.
+ * @param {string} aUrl - The URL to check.
+ * @returns {boolean} True if scripts may run on this URL, false otherwise.
+ */
 function isGreasemonkeyable(aUrl) {
   let scheme = GM_CONSTANTS.ioService.extractScheme(aUrl);
 

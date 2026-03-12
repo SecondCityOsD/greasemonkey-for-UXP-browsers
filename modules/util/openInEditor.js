@@ -1,3 +1,9 @@
+/**
+ * @file openInEditor.js
+ * @overview Opens a user script file in the configured external editor,
+ * falling back to the Scratchpad DevTools panel when no editor is set.
+ */
+
 const EXPORTED_SYMBOLS = ["openInEditor"];
 
 if (typeof Cc === "undefined") {
@@ -38,6 +44,13 @@ Cu.import("chrome://greasemonkey-modules/content/prefManager.js");
 Cu.import("chrome://greasemonkey-modules/content/util.js");
 
 
+/**
+ * Opens a user script in the configured external editor or, if none is set, in Scratchpad.
+ * On macOS the editor is launched via /usr/bin/open.
+ * @param {object} aScript - The script object with file (nsIFile) and textContent properties.
+ * @returns {void}
+ * @throws {Error} Re-throws any error from launching the editor after clearing the editor preference.
+ */
 function openInEditor(aScript) {
   let editor = GM_util.getEditor();
   if (!editor) {

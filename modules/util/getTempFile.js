@@ -1,3 +1,9 @@
+/**
+ * @file getTempFile.js
+ * @overview Creates and returns a uniquely-named temporary file under the
+ * system temp directory (or a provided root directory).
+ */
+
 const EXPORTED_SYMBOLS = ["getTempFile"];
 
 if (typeof Cc === "undefined") {
@@ -17,6 +23,12 @@ const DIRECTORY_TEMP = GM_CONSTANTS.directoryService
     .get(GM_CONSTANTS.directoryServiceTempName, Ci.nsIFile);
 const FILE_TYPE = Ci.nsIFile.NORMAL_FILE_TYPE;
 
+/**
+ * Creates a uniquely-named temporary file and returns it.
+ * @param {nsIFile} [aRoot] - Parent directory for the new temp file; defaults to the system temp directory.
+ * @param {string} [aLeaf] - Base leaf name for the temp file; defaults to the configured temp name constant.
+ * @returns {nsIFile} The newly created temporary file.
+ */
 function getTempFile(aRoot, aLeaf) {
   let file = (aRoot || DIRECTORY_TEMP).clone();
   file.append(aLeaf || GM_CONSTANTS.directoryTempName);

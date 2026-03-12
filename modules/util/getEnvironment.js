@@ -1,3 +1,9 @@
+/**
+ * @file getEnvironment.js
+ * @overview Detects the current runtime environment including e10s status,
+ * operating system, and content sandbox level.
+ */
+
 const EXPORTED_SYMBOLS = ["getEnvironment"];
 
 if (typeof Cc === "undefined") {
@@ -17,6 +23,11 @@ Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("chrome://greasemonkey-modules/content/util.js");
 
 
+/**
+ * Detects the current browser runtime environment.
+ * @returns {{e10s: boolean, osLinux: boolean, osMac: boolean, osWindows: boolean, sandboxContentLevel: number|null}}
+ *   An object with flags for multiprocess mode, OS type, and content sandbox level.
+ */
 function getEnvironment() {
   let e10s = false;
 

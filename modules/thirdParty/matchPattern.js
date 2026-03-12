@@ -122,6 +122,11 @@ if (GM_prefRoot.getValue("api.@match.better")) {
 
 // For the format of "pattern".
 // http://code.google.com/chrome/extensions/match_patterns.html
+/**
+ * Constructs a MatchPattern that can test URLs against a Chrome-style match pattern.
+ * @param {string} aPattern - A match pattern string such as "*://example.com/*" or "<all_urls>".
+ * @throws {Error} If aPattern cannot be parsed or contains an invalid scheme, host, or path.
+ */
 function MatchPattern(aPattern) {
   this._pattern = aPattern;
 
@@ -218,6 +223,11 @@ Object.defineProperty(MatchPattern.prototype, "pattern", {
   "enumerable": true,
 });
 
+/**
+ * Tests whether a URL string matches this pattern.
+ * @param {string} aUriSpec - The URL string to test.
+ * @returns {boolean} True if the URL matches the pattern's scheme, host, and path.
+ */
 MatchPattern.prototype.doMatch = function (aUriSpec) {
   let matchURI = GM_util.getUriFromUrl(aUriSpec);
 

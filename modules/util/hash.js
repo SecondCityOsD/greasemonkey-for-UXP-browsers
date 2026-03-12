@@ -1,3 +1,9 @@
+/**
+ * @file hash.js
+ * @overview Computes the SHA-1 hex digest of a Unicode string for use as a
+ * stable identifier (e.g. script sync key).  Results are memoized.
+ */
+
 const EXPORTED_SYMBOLS = ["hash"];
 
 if (typeof Cc === "undefined") {
@@ -15,6 +21,12 @@ Cu.import("chrome://greasemonkey-modules/content/constants.js");
 Cu.import("chrome://greasemonkey-modules/content/util.js");
 
 
+/**
+ * Computes the SHA-1 hex digest of a Unicode string.
+ * Results are memoized.
+ * @param {string} aUnicode - The input string to hash.
+ * @returns {string} A lowercase hexadecimal SHA-1 digest string.
+ */
 function hash(aUnicode) {
   let unicodeConverter = Components
       .classes["@mozilla.org/intl/scriptableunicodeconverter"]

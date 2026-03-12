@@ -1,3 +1,8 @@
+/**
+ * @file getUriFromFile.js
+ * @overview Converts an nsIFile to a file:// nsIURI using the IO service.
+ */
+
 const EXPORTED_SYMBOLS = ["getUriFromFile"];
 
 if (typeof Cc === "undefined") {
@@ -13,6 +18,11 @@ if (typeof Cu === "undefined") {
 Cu.import("chrome://greasemonkey-modules/content/constants.js");
 
 
+/**
+ * Converts an nsIFile to a file:// nsIURI.
+ * @param {nsIFile} aFile - The local file to convert.
+ * @returns {nsIURI} The corresponding file:// URI.
+ */
 function getUriFromFile(aFile) {
   return GM_CONSTANTS.ioService.newFileURI(aFile);
 }

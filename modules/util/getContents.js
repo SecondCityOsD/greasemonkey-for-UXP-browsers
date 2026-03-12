@@ -1,3 +1,9 @@
+/**
+ * @file getContents.js
+ * @overview Reads the text contents of an nsIFile and converts it from the
+ * specified charset to a Unicode string.
+ */
+
 const EXPORTED_SYMBOLS = ["getContents"];
 
 if (typeof Cc === "undefined") {
@@ -23,6 +29,14 @@ const SCRIPTABLE_UNICODE_CONVERTER =
     Cc["@mozilla.org/intl/scriptableunicodeconverter"]
     .createInstance(Ci.nsIScriptableUnicodeConverter);
 
+/**
+ * Reads and returns the text contents of an nsIFile as a Unicode string.
+ * @param {nsIFile} aFile - The file to read; must be a regular file.
+ * @param {string} [aCharset] - The character set to use for decoding; defaults to the script charset constant.
+ * @param {boolean} [aFatal] - If true, re-throws charset conversion errors instead of returning the raw bytes.
+ * @returns {string} The decoded text contents, or an empty string if the file cannot be opened.
+ * @throws {Error} If aFile is not a regular file, or if aFatal is true and conversion fails.
+ */
 function getContents(aFile, aCharset, aFatal) {
   if (!aFile.isFile()) {
     throw new Error(

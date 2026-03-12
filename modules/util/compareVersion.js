@@ -1,3 +1,9 @@
+/**
+ * @file compareVersion.js
+ * @overview Compares the current application version (and optionally build ID)
+ * against a target version using the XPCOM version comparator service.
+ */
+
 const EXPORTED_SYMBOLS = ["compareVersion"];
 
 if (typeof Cc === "undefined") {
@@ -13,6 +19,13 @@ if (typeof Cu === "undefined") {
 Cu.import("chrome://greasemonkey-modules/content/constants.js");
 
 
+/**
+ * Compares the running application version to a target version string,
+ * optionally refining the comparison with a build ID when versions are equal.
+ * @param {string} aTarget - The version string to compare against.
+ * @param {string} [aTargetBuildID] - Optional build ID to use as a tiebreaker when versions match.
+ * @returns {number} Negative if current < target, 0 if equal, positive if current > target.
+ */
 function compareVersion(aTarget, aTargetBuildID) {
   let versionChecker = Cc["@mozilla.org/xpcom/version-comparator;1"]
       .getService(Ci.nsIVersionComparator);

@@ -1,3 +1,9 @@
+/**
+ * @file uuid.js
+ * @overview Generates a random UUID string (without surrounding braces) using
+ * the XPCOM nsIUUIDGenerator service.
+ */
+
 const EXPORTED_SYMBOLS = ["uuid"];
 
 if (typeof Cc === "undefined") {
@@ -11,6 +17,10 @@ if (typeof Cu === "undefined") {
 }
 
 
+/**
+ * Generates a new random UUID string without surrounding braces.
+ * @returns {string} A UUID string in the form "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx".
+ */
 function uuid() {
   let uuid = Cc["@mozilla.org/uuid-generator;1"]
       .getService(Ci.nsIUUIDGenerator)

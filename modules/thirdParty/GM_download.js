@@ -209,6 +209,13 @@ if (typeof GM_xmlhttpRequest != "function") {
       .replace("%1", typeof GM_xmlhttpRequest));
 }
 
+/**
+ * Downloads a file from a URL and triggers the browser's save dialog via an
+ * anchor-click mechanism.  Validates the filename extension against a whitelist.
+ * @param {string|object} aDetailsOrUrl - A URL string, or a details object with url, name, and callback properties.
+ * @param {string} [aName] - Filename override; takes precedence over details.name when provided.
+ * @returns {object|false} The GM_xmlhttpRequest return value on success, or false on validation/error failure.
+ */
 function GM_download(aDetailsOrUrl, aName) {
   let _functionEmpty = function () {};
 

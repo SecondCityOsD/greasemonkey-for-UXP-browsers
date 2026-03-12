@@ -1,3 +1,9 @@
+/**
+ * @file sniffGrants.js
+ * @overview Scans a script's source text for references to Greasemonkey API
+ * names and returns the list of grants that should be auto-applied.
+ */
+
 const EXPORTED_SYMBOLS = ["sniffGrants"];
 
 if (typeof Cc === "undefined") {
@@ -15,6 +21,11 @@ Cu.import("chrome://greasemonkey-modules/content/constants.js");
 Cu.import("chrome://greasemonkey-modules/content/util.js");
 
 
+/**
+ * Scans a script's source for Greasemonkey API usage and returns the grants that should be applied.
+ * @param {object} aScript - The script object whose source will be scanned.
+ * @returns {string[]} An array of API name strings to grant, or ["none"] if no API is referenced.
+ */
 function sniffGrants(aScript) {
   let src = GM_util.getScriptSource(aScript);
   let grants = [];

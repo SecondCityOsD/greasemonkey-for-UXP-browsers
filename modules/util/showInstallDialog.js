@@ -1,3 +1,9 @@
+/**
+ * @file showInstallDialog.js
+ * @overview Downloads a remote script and opens the Greasemonkey install
+ * confirmation dialog, handling HTTP authentication and request lifecycle.
+ */
+
 const EXPORTED_SYMBOLS = ["showInstallDialog"];
 
 if (typeof Cc === "undefined") {
@@ -19,6 +25,13 @@ Cu.import("chrome://greasemonkey-modules/content/remoteScript.js");
 Cu.import("chrome://greasemonkey-modules/content/util.js");
 
 
+/**
+ * Downloads a script and opens the Greasemonkey install confirmation dialog.
+ * @param {string|RemoteScript} aUrlOrRemoteScript - A script download URL string, or an existing RemoteScript instance.
+ * @param {object} [aBrowser] - The browser element to use; defaults to the current browser window's gBrowser.
+ * @param {nsIRequest} [aRequest] - The intercepted HTTP request associated with the install trigger; may be resumed or cancelled.
+ * @returns {void}
+ */
 function showInstallDialog(aUrlOrRemoteScript, aBrowser, aRequest) {
   var rs = null;
   if (typeof aUrlOrRemoteScript == "string") {

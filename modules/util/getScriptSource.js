@@ -1,7 +1,19 @@
+/**
+ * @file getScriptSource.js
+ * @overview Assembles the full executable source of a user script by
+ * concatenating its @require dependencies followed by the script body.
+ */
+
 const EXPORTED_SYMBOLS = ["getScriptSource"];
 
 
 // Given a script, return its entire source as a plain string.
+/**
+ * Assembles and returns the complete executable source of a script.
+ * Also populates aScript.offsets with cumulative line counts for each @require file.
+ * @param {object} aScript - The script object with requires[] and textContent properties.
+ * @returns {string} The full source string with require content prepended and newline-terminated.
+ */
 function getScriptSource(aScript) {
   let parts = [];
   let offsets = [];

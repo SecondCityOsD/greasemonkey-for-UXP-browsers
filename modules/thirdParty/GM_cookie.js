@@ -57,6 +57,19 @@ function isCookieAtHost(aCookie, aHost) {
   return aCookie.host == aHost;
 }
 
+/**
+ * Implements the GM_cookie API (list, set, delete) for scripts running in the sandbox.
+ * Dispatches to internal _list, _set, or _delete helpers based on aWhat.
+ * @param {object} aWrappedContentWin - The wrapped content window (used to construct Error objects in sandbox scope).
+ * @param {object} aSandbox - The script sandbox (used to clone returned cookie objects into).
+ * @param {string} aFileURL - The script file URL, used as the source location in thrown errors.
+ * @param {string} aUrl - The page URL from which the host is extracted for cookie scope.
+ * @param {string} aWhat - The operation: "list", "set", or "delete".
+ * @param {object} [aDetails] - Operation-specific options (host, name, value, path, etc.).
+ * @returns {Array|boolean|number} For "list": a sandbox-cloned cookie array; for "set": true on success;
+ *   for "delete": the count of deleted cookies.
+ * @throws {Error} If the cookies service is unavailable, aWhat is unsupported, or required details are missing.
+ */
 function GM_cookie(
     aWrappedContentWin, aSandbox, aFileURL, aUrl, aWhat, aDetails) {
   let what = aWhat.toLowerCase();

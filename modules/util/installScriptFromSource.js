@@ -1,3 +1,9 @@
+/**
+ * @file installScriptFromSource.js
+ * @overview Parses raw script source text, writes it to a temp file, downloads
+ * any @require dependencies, installs the script, and opens it in the editor.
+ */
+
 const EXPORTED_SYMBOLS = ["installScriptFromSource"];
 
 if (typeof Cc === "undefined") {
@@ -18,6 +24,12 @@ Cu.import("chrome://greasemonkey-modules/content/remoteScript.js");
 Cu.import("chrome://greasemonkey-modules/content/util.js");
 
 
+/**
+ * Parses, downloads dependencies for, installs, and opens a script given its source text.
+ * @param {string} aSource - The raw Greasemonkey script source text.
+ * @param {Function} [aCallback] - Optional callback invoked after successful installation.
+ * @returns {void}
+ */
 function installScriptFromSource(aSource, aCallback) {
   var remoteScript = new RemoteScript();
   var script = parse(aSource);

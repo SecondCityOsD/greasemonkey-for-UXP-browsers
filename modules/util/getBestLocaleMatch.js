@@ -1,3 +1,9 @@
+/**
+ * @file getBestLocaleMatch.js
+ * @overview Selects the best matching locale from an available list given a
+ * preferred locale, preferring exact matches then language-only matches.
+ */
+
 const EXPORTED_SYMBOLS = ["getBestLocaleMatch"];
 
 if (typeof Cc === "undefined") {
@@ -25,6 +31,12 @@ const SEPARATOR = "-";
 // Partial matches without country are preferred over lang matches
 // with non-matching country.
 // If no locale matches, null is returned.
+/**
+ * Finds the best matching locale for the user's preferred locale from a list of available ones.
+ * @param {string} aPreferred - The preferred locale tag, e.g. "en-US".
+ * @param {string[]} aAvailable - Array of available locale tags to search.
+ * @returns {string|null} The best-matching locale from aAvailable, or null if none match.
+ */
 function getBestLocaleMatch(aPreferred, aAvailable) {
   let preferredLang = aPreferred.split(SEPARATOR)[0];
 

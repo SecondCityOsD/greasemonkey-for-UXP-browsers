@@ -1,3 +1,9 @@
+/**
+ * @file windowId.js
+ * @overview Returns the inner or outer window ID for a content window,
+ * returning null for chrome windows or non-Greasemonkeyable pages.
+ */
+
 const EXPORTED_SYMBOLS = ["windowId"];
 
 if (typeof Cc === "undefined") {
@@ -15,6 +21,13 @@ Cu.import("chrome://greasemonkey-modules/content/constants.js");
 Cu.import("chrome://greasemonkey-modules/content/util.js");
 
 
+/**
+ * Returns the inner or outer numeric window ID for a Greasemonkeyable content window.
+ * @param {nsIDOMWindow} aWin - The content window to identify.
+ * @param {string} [aWhich] - "outer" for the outer window ID, or omit/"inner" for the inner window ID.
+ * @returns {number|nsIDOMDocument|null} The window ID number, a fallback document for pre-Firefox 4,
+ *   or null if the window is a chrome window or is not Greasemonkeyable.
+ */
 function windowId(aWin, aWhich) {
   try {
     // Do not operate on chrome windows.

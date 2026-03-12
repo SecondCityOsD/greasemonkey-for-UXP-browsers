@@ -45,6 +45,14 @@ const TLD_REGEXP = /^([^:]+:\/\/[^\/]+)\.tld(\/.*)?$/;
 // Exposed outer method takes regex as string, and handles the magic TLD.
 // (Can't memoize a URI object, yet we want to do URL->URI outside this method,
 // once for efficiency. Compromise: memoize just the internal string handling.)
+/**
+ * Converts a glob or regex pattern string to a RegExp, substituting .tld with the
+ * actual public suffix of aUri when the pattern uses the magic ".tld" token.
+ * @param {string} aPattern - A glob pattern or /regex/ string to convert.
+ * @param {nsIURI} [aUri] - The URI used to resolve ".tld" placeholders in the pattern.
+ * @param {boolean} [aForceGlob] - If true, treat the pattern as a glob even if it looks like a /regex/.
+ * @returns {RegExp} A compiled regular expression for matching URLs against the pattern.
+ */
 function GM_convertToRegexp(aPattern, aUri, aForceGlob) {
   let strRegexp = GM_convertToRegexpInner(aPattern, aForceGlob);
 

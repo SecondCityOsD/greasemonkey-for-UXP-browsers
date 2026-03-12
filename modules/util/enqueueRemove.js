@@ -18,6 +18,12 @@ HTTP authentication: Several times enter the wrong password.
     (the attached database (file) and "enqueuedRemovals").
 */
 
+/**
+ * @file enqueueRemove.js
+ * @overview Removes files and directories on behalf of Greasemonkey, queuing
+ * failed deletions to preferences so they are retried on the next browser startup.
+ */
+
 const EXPORTED_SYMBOLS = ["enqueueRemove"];
 
 if (typeof Cc === "undefined") {
@@ -124,6 +130,13 @@ function removePath(aPath, aRecursive, aDoEnqueueFailure) {
   return true;
 }
 
+/**
+ * Attempts to remove a file or directory immediately; if removal fails, queues
+ * the path for deletion on the next browser startup.
+ * @param {nsIFile} aDirOrFile - The file or directory to remove.
+ * @param {boolean} aRecursive - Whether to remove a directory recursively.
+ * @returns {void}
+ */
 function enqueueRemove(aDirOrFile, aRecursive) {
   removePath(aDirOrFile.path, aRecursive, true);
 }

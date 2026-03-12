@@ -1,3 +1,9 @@
+/**
+ * @file getPreferredLocale.js
+ * @overview Determines and caches the user's preferred locale by checking the
+ * matchOS preference and falling back to the browser locale preference.
+ */
+
 const EXPORTED_SYMBOLS = ["getPreferredLocale"];
 
 if (typeof Cc === "undefined") {
@@ -34,6 +40,10 @@ var preferredLocale = (function () {
   return Services.prefs.getCharPref("general.useragent.locale") || "en-US";
 })();
 
+/**
+ * Returns the user's preferred locale string (e.g. "en-US"), computed once at module load time.
+ * @returns {string} The preferred locale tag.
+ */
 function getPreferredLocale() {
   return preferredLocale;
 }

@@ -1,6 +1,20 @@
+/**
+ * @file hitch.js
+ * @overview Binds a method to an object and optionally pre-fills leading
+ * arguments, returning a new bound function (similar to Function.prototype.bind).
+ */
+
 const EXPORTED_SYMBOLS = ["hitch"];
 
 
+/**
+ * Binds a method to an object with optional pre-filled leading arguments.
+ * @param {object} aObj - The object to use as "this"; may be null when aMethod is a function.
+ * @param {string|Function} aMethod - Method name on aObj, or a function to bind directly.
+ * @param {...*} [staticArgs] - Zero or more arguments prepended to every call of the returned function.
+ * @returns {Function} A new function that calls aMethod on aObj with the bound arguments prepended.
+ * @throws {string} If aMethod is a string that does not exist on aObj, or if arguments are otherwise invalid.
+ */
 function hitch(aObj, aMethod) {
   if (aObj && aMethod && (typeof aMethod == "string")) {
     if (!aObj[aMethod]) {

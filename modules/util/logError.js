@@ -1,3 +1,9 @@
+/**
+ * @file logError.js
+ * @overview Logs an error or warning message to the browser's JavaScript
+ * error console via nsIConsoleService.
+ */
+
 const EXPORTED_SYMBOLS = ["logError"];
 
 if (typeof Cc === "undefined") {
@@ -11,6 +17,14 @@ if (typeof Cu === "undefined") {
 }
 
 
+/**
+ * Logs an error or warning to the browser's JavaScript error console.
+ * @param {Error|string} e - The error object or message string to log.
+ * @param {boolean} [aWarning] - If true, logs as a warning instead of an error.
+ * @param {string} [aFileName] - Source file name to associate with the message.
+ * @param {number} [aLineNumber] - Line number to associate with the message.
+ * @returns {void}
+ */
 function logError(e, aWarning, aFileName, aLineNumber) {
   if (typeof e == "string") {
     e = new Error(e);

@@ -845,6 +845,12 @@ var _GM_parseMetaLine = /*
   };
 })();
 
+/**
+ * Parses a single Greasemonkey metadata block line (e.g. "// @name My Script").
+ * @param {string} aData - A single metadata line string to parse.
+ * @returns {object|null} A parsed metadata object with keyword/value/locale fields, or null on no match.
+ * @throws {SyntaxError} If the line matches the "// @" prefix but cannot be fully parsed.
+ */
 function parseMetaLine(aData) {
   return _GM_parseMetaLine.parse(aData);
 }

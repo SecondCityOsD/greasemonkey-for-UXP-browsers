@@ -1,3 +1,9 @@
+/**
+ * @file timeout.js
+ * @overview Schedules a one-shot callback after a delay using nsITimer,
+ * keeping a reference to prevent the timer from being garbage-collected early.
+ */
+
 const EXPORTED_SYMBOLS = ["timeout"];
 
 if (typeof Cc === "undefined") {
@@ -11,6 +17,12 @@ if (typeof Cu === "undefined") {
 }
 
 
+/**
+ * Calls aCallback once after aDelay milliseconds, using nsITimer to avoid garbage-collection issues.
+ * @param {Function} aCallback - The function to invoke after the delay.
+ * @param {number} aDelay - Delay in milliseconds before invoking the callback.
+ * @returns {void}
+ */
 function timeout(aCallback, aDelay) {
   // Create the timer object.
   var timer = Cc["@mozilla.org/timer;1"].createInstance(Ci.nsITimer);

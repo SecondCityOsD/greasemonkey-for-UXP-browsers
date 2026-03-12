@@ -1,3 +1,9 @@
+/**
+ * @file writeToFile.js
+ * @overview Safely writes a Unicode string to an nsIFile by first writing to a
+ * unique temp file and then atomically moving it into place.
+ */
+
 const EXPORTED_SYMBOLS = ["writeToFile"];
 
 if (typeof Cc === "undefined") {
@@ -24,6 +30,13 @@ var converter = Cc["@mozilla.org/intl/scriptableunicodeconverter"]
 converter.charset = GM_CONSTANTS.fileScriptCharset;
 
 // Given string data and an nsIFile, write it safely to that file.
+/**
+ * Asynchronously writes a Unicode string to an nsIFile using a temp-then-move strategy.
+ * @param {string} aData - The text content to write.
+ * @param {nsIFile} aFile - The destination file; the write is performed to a sibling temp file first.
+ * @param {Function} [aCallback] - Called with no arguments after the file has been successfully written and renamed.
+ * @returns {void}
+ */
 function writeToFile(aData, aFile, aCallback) {
   // Assume aData is a string; convert it to a UTF-8 stream.
   let istream = converter.convertToInputStream(aData);

@@ -1,3 +1,9 @@
+/**
+ * @file memoize.js
+ * @overview Provides a bounded memoization wrapper for pure functions, caching
+ * up to a configurable number of results to balance performance and memory use.
+ */
+
 // Decorate a function with a memoization wrapper, with a limited-size cache
 // to reduce peak memory utilization.
 //
@@ -25,6 +31,13 @@ if (typeof Cu === "undefined") {
 
 const LIMIT_DEF = 3000;
 
+/**
+ * Wraps a function with a bounded memoization cache.
+ * Arguments must be serializable; nsIURI objects are converted to their spec string before caching.
+ * @param {Function} aFunc - The function to memoize.
+ * @param {number} [aLimit=3000] - Maximum number of results to keep in the cache before evicting the oldest.
+ * @returns {Function} A new function that returns cached results for previously-seen argument sets.
+ */
 function memoize(aFunc, aLimit) {
   aLimit = aLimit || LIMIT_DEF;
   var cache = Object.create(null);

@@ -5,6 +5,11 @@
 const EXPORTED_SYMBOLS = ["droppedUrls"];
 
 
+/**
+ * Extracts an array of URL strings from a drag-and-drop event's data transfer.
+ * @param {DragEvent} aEvent - The drag event whose dataTransfer contains dropped items.
+ * @returns {string[]} An array of URL strings extracted from the dropped items.
+ */
 function droppedUrls(aEvent) {
   let dataTransfer = aEvent.dataTransfer;
   let urls = [];

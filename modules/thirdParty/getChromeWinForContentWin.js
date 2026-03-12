@@ -55,6 +55,12 @@ if (typeof Cu === "undefined") {
 }
 
 
+/**
+ * Walks the docshell tree from a content window up to its root chrome window.
+ * Only works when e10s (multiprocess) is disabled.
+ * @param {nsIDOMWindow} aContentWin - The content window for which to find the chrome window.
+ * @returns {nsIDOMChromeWindow|null} The owning chrome window, or null if it cannot be determined.
+ */
 function getChromeWinForContentWin(aContentWin) {
   // Only with Electrolysis (e10s) disabled.
   try {

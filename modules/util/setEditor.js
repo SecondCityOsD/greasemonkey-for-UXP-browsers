@@ -1,3 +1,9 @@
+/**
+ * @file setEditor.js
+ * @overview Allows the user to select an external editor executable via a
+ * file-picker dialog, or resets to Scratchpad mode when passed a truthy value.
+ */
+
 const EXPORTED_SYMBOLS = ["setEditor"];
 
 if (typeof Cc === "undefined") {
@@ -18,6 +24,13 @@ Cu.import("chrome://greasemonkey-modules/content/prefManager.js");
 Cu.import("chrome://greasemonkey-modules/content/util.js");
 
 
+/**
+ * Sets the external editor preference or resets to Scratchpad mode.
+ * When aScratchpad is truthy, removes the editor preference (enabling Scratchpad).
+ * Otherwise, prompts the user to choose an executable file via a file picker.
+ * @param {boolean} aScratchpad - If truthy, clears the editor preference and uses Scratchpad.
+ * @returns {boolean} True if an editor was successfully configured or cleared, false if the user cancelled or chose a non-executable.
+ */
 function setEditor(aScratchpad) {
   if (aScratchpad) {
     GM_prefRoot.remove("editor");
