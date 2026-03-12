@@ -6,11 +6,10 @@
   <Description about="urn:mozilla:install-manifest">
 
     <em:id>greasemonkeyforpm@janekptacijarabaci</em:id>
-    <em:version>3.31.4</em:version>
-    <em:creator>Aaron Boodman; http://youngpup.net/ (Pale Moon: janekptacijarabaci)</em:creator>
-    <em:homepageURL>https://github.com/janekptacijarabaci/greasemonkey/releases</em:homepageURL>
-    <!-- <em:updateURL>https://gist.githubusercontent.com/janekptacijarabaci/[uuid]/raw/update.rdf</em:updateURL> -->
-    <em:updateURL>https://github.com/janekptacijarabaci/greasemonkey/raw/_forkBranch_Pale-Moon/update.rdf</em:updateURL>
+    <em:version>2026.03.12.beta</em:version>
+    <em:creator>SecondCityOsD</em:creator>
+    <em:homepageURL>https://github.com/SecondCityOsD/greasemonkey-for-UXP-browsers</em:homepageURL>
+    <em:updateURL>https://raw.githubusercontent.com/SecondCityOsD/greasemonkey-for-UXP-browsers/master/update.rdf</em:updateURL>
     <!-- See https://bugzilla.mozilla.org/show_bug.cgi?id=267950#c9 -->    
     <!-- <em:optionsURL>javascript:opener.openDialog('chrome://greasemonkey/content/options.xul','','modal,resizable');window.close();</em:optionsURL> -->
     <em:optionsURL>chrome://greasemonkey/content/options.xul</em:optionsURL>
@@ -19,10 +18,10 @@
     <em:type>2</em:type>
     <em:multiprocessCompatible>true</em:multiprocessCompatible>
 
-    <em:name>Greasemonkey for Pale Moon</em:name>
+    <em:name>Greasemonkey for UXP</em:name>
     <em:description>A User Script Manager</em:description>
 
-    <em:developer>janekptacijarabaci</em:developer>
+    <em:developer>SecondCityOsD</em:developer>
 
     <em:contributor>aidanhs; http://aidanhs.com/</em:contributor>
     <em:contributor>Alexander Sturm; http://alex.st/</em:contributor>
@@ -124,7 +123,7 @@
       <Description>
         <em:id>{8de7fcbb-c55c-4fbe-bfc5-fc555c87dbc4}</em:id>
         <em:minVersion>27.1.0</em:minVersion>
-        <em:maxVersion>28.*</em:maxVersion>
+        <em:maxVersion>34.*</em:maxVersion>
       </Description>
     </em:targetApplication>
 

@@ -19,7 +19,7 @@ rm -rf build
 mkdir build
 cp -r \
   chrome.manifest components content defaults install.rdf locale skin \
-      modules CREDITS LICENSE.bsd LICENSE.mit LICENSE.mpl \
+      modules \
   build/
 cd build
 
