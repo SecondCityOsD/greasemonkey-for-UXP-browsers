@@ -1,3 +1,39 @@
+/**
+ * @file responseObserver.js
+ * @overview Optional CORS/CSP response-header override for Greasemonkey.
+ *
+ * When Greasemonkey is enabled and the user has turned on the cors_override or
+ * csp_override preferences, this module intercepts HTTP responses and rewrites
+ * (or removes) selected security headers so that userscripts can make
+ * cross-origin XHR requests and eval content that would otherwise be blocked.
+ *
+ * Two integration modes are supported transparently:
+ *
+ *   1. XPCOM nsIObserver (UXP / Pale Moon) — registers an observer on the
+ *      "http-on-examine-response", "http-on-examine-cached-response", and
+ *      "http-on-examine-merged-response" topics.  The channel's response
+ *      headers are mutated directly via nsIHttpChannel.setResponseHeader().
+ *
+ *   2. WebExtension webRequest.onHeadersReceived (fallback) — if the XPCOM
+ *      observer registration fails, the module falls back to
+ *      chrome.webRequest.onHeadersReceived with "blocking" mode.
+ *
+ * Headers handled:
+ *   CORS: access-control-allow-headers, access-control-allow-methods,
+ *         access-control-allow-origin, access-control-expose-headers,
+ *         x-content-type-options, x-frame-options
+ *   CSP:  content-security-policy, x-content-security-policy
+ *
+ * Preferences (all under the GM "greasemonkey." branch):
+ *   cors_override            — enable CORS header rewriting
+ *   csp_override             — enable CSP header rewriting
+ *   cors_override.excludes, cors_override.includes, cors_override.matches
+ *                            — URL filters for which sites to affect
+ *
+ * Override rules are fully configurable via preferences; see _corsOverride()
+ * and _cspOverride() for the per-header rule lookup logic.
+ */
+
 "use strict";
 
 const EXPORTED_SYMBOLS = [];
@@ -76,6 +112,16 @@ var gCorsCspOverrideDumpPrefix = "corsCspOverride";
 
 // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ //
 
+/**
+ * Tests whether CORS/CSP overrides should be applied to the given URL.
+ *
+ * Reads the cors_override.excludes / .includes / .matches preferences to build
+ * a filter: the URL must pass isGreasemonkeyable(), must not match any exclude
+ * glob, and must match at least one include glob or @match pattern.
+ *
+ * @param {string} aUrl - The response URL to test.
+ * @returns {boolean} True if the URL should have its headers overridden.
+ */
 function _corsCspTestUrl(aUrl) {
   var _internalSeparator = "_";
 
@@ -195,6 +241,13 @@ function _corsCspTestUrl(aUrl) {
   return _return;
 }
 
+/**
+ * Dispatches a single header's override logic based on its type.
+ *
+ * @param {string} aRules  - The current header value string.
+ * @param {object} aHeader - Header descriptor with .type ("cors" or "csp").
+ * @returns {string} The (possibly rewritten) header value string.
+ */
 function _corsCspRulesOverride(aRules, aHeader) {
   switch (aHeader.type) {
     case gCorsType:
@@ -207,10 +260,33 @@ function _corsCspRulesOverride(aRules, aHeader) {
   return aRules;
 }
 
+/**
+ * Array filter predicate: keeps header objects whose value is non-empty.
+ *
+ * @param {object} aObj - Header descriptor with a .value string.
+ * @returns {boolean} True if the header value is non-empty.
+ */
 function _corsCspRulesEmpty(aObj) {
   return aObj.value !== "";
 }
 
+/**
+ * Main CORS/CSP override entry point.  Called either as an XPCOM nsIObserver
+ * "observe" callback or as a WebExtension onHeadersReceived listener.
+ *
+ * Determines which integration mode is active by checking whether aSubject has
+ * a responseHeaders property (WebExtension) or is an nsIChannel (XPCOM).
+ * Only acts on HTTP 200 responses that pass _corsCspTestUrl().
+ *
+ * In XPCOM mode returns null (channel headers are mutated in place).
+ * In WebExtension mode returns a modified responseHeaders array.
+ *
+ * @param {nsISupports|object} aSubject - XPCOM subject (nsIHttpChannel) or
+ *   WebExtension request details object (has .responseHeaders, .url, etc.).
+ * @param {string} aTopic - XPCOM observer topic, or ignored in WE mode.
+ * @param {string} aData  - XPCOM extra data (unused).
+ * @returns {null|object} null in XPCOM mode; modified details in WE mode.
+ */
 function corsCspOverride(aSubject, aTopic, aData) {
   var aDetailsIn = aSubject;
   var aDetailsOut = {};
@@ -451,6 +527,17 @@ function corsCspOverride(aSubject, aTopic, aData) {
   }
 }
 
+/**
+ * Applies CORS header override rules for a single header.
+ *
+ * Checks per-header preferences to determine the target value, then
+ * rewrites the header string if it does not already match.
+ *
+ * @param {string} aCorsRules  - The current header value.
+ * @param {object} aCorsHeader - Descriptor with .value (header name) and
+ *   .rewrite (index into the default value array).
+ * @returns {string} The (possibly rewritten) header value.
+ */
 function _corsOverride(aCorsRules, aCorsHeader) {
   var rules = aCorsRules.trim();
 
@@ -494,6 +581,22 @@ function _corsOverride(aCorsRules, aCorsHeader) {
   return rules;
 }
 
+/**
+ * Applies CSP header override rules to a full CSP policy string.
+ *
+ * Splits the policy on ";" to get individual directives, then for each
+ * directive that has an override enabled:
+ *   - Rewrites the directive's value list (adding sources, removing 'none').
+ *   - Optionally strips hash-source ('sha256-…', etc.) tokens.
+ *   - Optionally strips nonce-source ('nonce-…') tokens.
+ *
+ * The resulting directives are rejoined with ";" and empty directives are
+ * filtered out.
+ *
+ * @param {string} aCspRules - The raw CSP header value (may contain multiple
+ *   ";"-separated directives).
+ * @returns {string} The rewritten CSP policy string.
+ */
 function _cspOverride(aCspRules) {
   var rulesSeparator = ";";
   var rulesValuesSeparator = " ";

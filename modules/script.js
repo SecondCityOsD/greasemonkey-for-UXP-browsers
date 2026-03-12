@@ -1,3 +1,37 @@
+/**
+ * @file script.js
+ * @overview The canonical in-memory representation of an installed userscript.
+ *
+ * Script extends AbstractScript and represents one .user.js file that has been
+ * parsed and installed.  Instances are created:
+ *   - by Config._fromDom() when loading config.xml at startup
+ *   - by RemoteScript.install() when a new script is installed
+ *   - by parseScript.parse() when parsing a downloaded file
+ *
+ * The object is also the source of truth for all on-disk state — it holds the
+ * base directory name, filename, all dependency references, and the full
+ * metadata parsed from the ==UserScript== block.
+ *
+ * Key responsibilities:
+ *   - Expose every script metadata field as a property with getter/setter.
+ *   - Fire change notifications via _changed() whenever state is modified; the
+ *     notification bubbles up to Config which persists config.xml.
+ *   - Manage remote update checks (checkForRemoteUpdate / checkRemoteVersion).
+ *   - Manage file lifecycle: setFilename, fixTimestampsOnInstall, allFiles,
+ *     allFilesExist, uninstall.
+ *   - Produce the GM_info object (Script.info()) injected into sandboxes.
+ *   - Apply updates from a newly-downloaded script (updateFromNewScript).
+ *
+ * Change events dispatched via _changed():
+ *   "edit-enabled"  — enabled state toggled
+ *   "install"       — script just installed
+ *   "modified"      — metadata or file changed (triggers config.xml write)
+ *   "uninstall"     — script removed
+ *   "cludes"        — userIncludes/userExcludes/userMatches changed
+ *   "val-set"       — GM_setValue called (no config save)
+ *   "val-del"       — GM_deleteValue called (no config save)
+ */
+
 const EXPORTED_SYMBOLS = ["Script"];
 
 if (typeof Cc === "undefined") {
@@ -37,8 +71,16 @@ AddonManager.getAddonByID(GM_CONSTANTS.addonGUID, function (aAddon) {
   gGreasemonkeyVersion = "" + aAddon.version;
 });
 
-// The <Script> element - attribute names (uppercase and lowercase letters):
-// Backward compatibility.
+/**
+ * In-memory representation of an installed userscript.
+ * Subclasses AbstractScript and adds on-disk file management, metadata
+ * persistence, remote update logic, and the GM_info payload.
+ *
+ * @constructor
+ * @param {Element} [aConfigNode] - Optional XML element from config.xml.
+ *   When provided, the script is initialised from its attributes and source
+ *   file.  When omitted, an empty Script is created (for parsing/install).
+ */
 function Script(aConfigNode) {
   this._observers = [];
 
@@ -98,6 +140,13 @@ Script.prototype = Object.create(AbstractScript.prototype, {
   },
 });
 
+/**
+ * Fires a change notification up to the Config object.
+ * "val-del" and "val-set" events skip the config.xml write (storage-only).
+ *
+ * @param {string} aEvent - Change event name (see file header for list).
+ * @param {*}      aData  - Event-specific payload (e.g. new enabled state).
+ */
 Script.prototype._changed = function (aEvent, aData) {
   let dontSave = ((aEvent == "val-del") || (aEvent == "val-set"));
   GM_util.getService().config._changed(this, aEvent, aData, dontSave);
@@ -532,6 +581,15 @@ Object.defineProperty(Script.prototype, "version", {
   "enumerable": true,
 });
 
+/**
+ * Sets the on-disk location of this script after installation.
+ * If the script has no downloadURL (e.g. created via "new script" dialog),
+ * the downloadURL is set to the local file:// URI so relative dependency
+ * paths can be resolved correctly.
+ *
+ * @param {string} aBaseName  - Directory name inside the scripts folder.
+ * @param {string} aFileName  - Filename of the .user.js file.
+ */
 Script.prototype.setFilename = function (aBaseName, aFileName) {
   this._basedir = aBaseName;
   this._filename = aFileName;
@@ -544,11 +602,24 @@ Script.prototype.setFilename = function (aBaseName, aFileName) {
   }
 };
 
+/**
+ * Syncs _modifiedTime and _installTime to the file's actual last-modified
+ * timestamp.  Called immediately after the script file is moved into place
+ * during installation.
+ */
 Script.prototype.fixTimestampsOnInstall = function () {
   this._modifiedTime = this.file.lastModifiedTime;
   this._installTime = this.file.lastModifiedTime;
 };
 
+/**
+ * Populates this Script from a <Script> XML element in config.xml.
+ * If the script's base directory or main file is missing from disk, returns
+ * early without fully initialising.  If the stored metadata attributes are
+ * absent (old config), the source file is re-parsed to extract them.
+ *
+ * @param {Element} aNode - The <Script> XML element to read from.
+ */
 Script.prototype._fromConfigNode = function (aNode) {
   this._basedir = aNode.getAttribute("basedir") || ".";
   this._filename = aNode.getAttribute("filename");
@@ -671,6 +742,12 @@ Script.prototype._fromConfigNode = function (aNode) {
   this.icon.fileURL = aNode.getAttribute("icon");
 };
 
+/**
+ * Serialises this Script to a <Script> XML element for config.xml.
+ *
+ * @param {Document} aDoc - The XML document used to create the element.
+ * @returns {Element} A fully populated <Script> element.
+ */
 Script.prototype.toConfigNode = function (aDoc) {
   var scriptNode = aDoc.createElement("Script");
 
@@ -779,14 +856,26 @@ Script.prototype.toConfigNode = function (aDoc) {
   return scriptNode;
 };
 
+/** @returns {string} Human-readable description of this Script. */
 Script.prototype.toString = function () {
   return "[Greasemonkey Script " + this.id + "; " + this.version + "]";
 };
 
+/**
+ * Stores the temp file reference for a downloaded-but-not-yet-installed script.
+ *
+ * @param {nsIFile} aFile - The downloaded temp file.
+ */
 Script.prototype.setDownloadedFile = function (aFile) {
   this._tempFile = aFile;
 };
 
+/**
+ * Builds the GM_info object that is injected into every script sandbox.
+ * Contains script metadata, the Greasemonkey version, and the raw meta block.
+ *
+ * @returns {object} The GM_info payload object.
+ */
 Script.prototype.info = function () {
   let matches = [];
   for (let i = 0, iLen = this.matches.length; i < iLen; i++) {
@@ -839,6 +928,12 @@ Script.prototype.info = function () {
   };
 };
 
+/**
+ * Checks whether the script file has been modified since it was last read.
+ * Updates _modifiedTime as a side effect when a change is detected.
+ *
+ * @returns {boolean} True if the file's mtime differs from the cached value.
+ */
 Script.prototype.isModified = function () {
   if (!this.fileExists(this.file)) {
     return false;
@@ -852,6 +947,19 @@ Script.prototype.isModified = function () {
   return false;
 };
 
+/**
+ * Determines whether a remote update check is permitted for this script.
+ *
+ * Conditions that prevent an update (unless aForced is true):
+ *   - No updateURL is set.
+ *   - Script is disabled AND the "requireDisabledScriptsUpdates" pref is off.
+ *   - Script has been locally modified (mtime > installTime).
+ *   - Download URL uses an unsafe scheme (about:, chrome:, file:, ftp:, http:
+ *     when requireSecureUpdates is enabled).
+ *
+ * @param {boolean} aForced - If true, bypass the disabled/modified checks.
+ * @returns {boolean} True if a remote update check may proceed.
+ */
 Script.prototype.isRemoteUpdateAllowed = function (aForced) {
   if (!this.updateURL) {
     return false;
@@ -896,6 +1004,19 @@ Script.prototype.isRemoteUpdateAllowed = function (aForced) {
   }
 };
 
+/**
+ * Applies an updated script's metadata to this installed Script object.
+ * Called when the user confirms an in-place update (e.g. via the editor).
+ *
+ * Handles @name/@namespace changes by checking for ID conflicts; if the new
+ * ID conflicts with another installed script, warns the user and aborts.
+ * User-defined cludes (userIncludes/userExcludes/userMatches) are preserved.
+ *
+ * @param {Script}       newScript - The newly parsed script with updated metadata.
+ * @param {string}       url       - Source URL (for IPC update notification).
+ * @param {number}       windowId  - Browser window ID (for IPC notification).
+ * @param {XULBrowser}   browser   - Browser element (for IPC notification).
+ */
 Script.prototype.updateFromNewScript = function (
     newScript, url, windowId, browser) {
   // Keep a _copy_ of the old script ID, so we can eventually pass it up
@@ -1069,6 +1190,11 @@ Script.prototype.updateFromNewScript = function (
   }
 };
 
+/**
+ * Shows a notification warning if the script has no @grant declarations.
+ * Scripts with no grants run in sandbox mode without any GM_* API access, which
+ * is often unintentional for older scripts that predate explicit grants.
+ */
 Script.prototype.showGrantWarning = function () {
   if (this._grants.length != 0) {
     return undefined;
@@ -1088,6 +1214,13 @@ Script.prototype.showGrantWarning = function () {
       "greasemonkey-grants-warning", notificationOptions);
 };
 
+/**
+ * Performs post-install configuration checks:
+ *   - If grants are empty, sniffs them from the script source (or defaults
+ *     to ["none"] if sniffing is disabled).
+ *   - Generates a UUID if one is not yet set.
+ * Called immediately after a new script is fully installed.
+ */
 Script.prototype.checkConfig = function () {
   // Ensures that grants have been sniffed, whether loading a legacy script
   // from config.xml or installing a new one.
@@ -1113,6 +1246,12 @@ Script.prototype.checkConfig = function () {
   }
 };
 
+/**
+ * Returns whether this script should auto-update based on the per-script
+ * checkRemoteUpdates setting and the global AddonManager.autoUpdateDefault.
+ *
+ * @returns {boolean} True if automatic update checks should run.
+ */
 Script.prototype.shouldAutoUpdate = function () {
   if (this.checkRemoteUpdates == AddonManager.AUTOUPDATE_ENABLE) {
     return true;
@@ -1123,6 +1262,22 @@ Script.prototype.shouldAutoUpdate = function () {
   return AddonManager.autoUpdateDefault;
 };
 
+/**
+ * Initiates an asynchronous remote update check for this script.
+ *
+ * Short-circuits early (calling aCallback synchronously) when:
+ *   - An update is already cached in this.availableUpdate.
+ *   - No updateURL is set.
+ *   - shouldAutoUpdate() returns false and aForced is false.
+ *   - isRemoteUpdateAllowed(aForced) returns false.
+ *
+ * Otherwise fetches the .meta.js (or falls back to .user.js) via XHR and
+ * delegates version comparison to checkRemoteVersion().
+ *
+ * @param {function} aCallback - Called with ("updateAvailable") or
+ *   ("noUpdateAvailable", infoObj) when the check completes.
+ * @param {boolean}  aForced   - If true, bypasses auto-update and enabled checks.
+ */
 Script.prototype.checkForRemoteUpdate = function (aCallback, aForced) {
   if (this.availableUpdate) {
     return aCallback("updateAvailable");
@@ -1274,6 +1429,17 @@ Script.prototype.checkForRemoteUpdate = function (aCallback, aForced) {
   }
 };
 
+/**
+ * XHR onload callback for checkForRemoteUpdate.
+ * Parses the downloaded metadata, compares versions, and invokes aCallback.
+ * If the .meta.js request failed (non-200), retries with the full .user.js
+ * (by setting _updateMetaStatus = "fail" and re-calling checkForRemoteUpdate).
+ *
+ * @param {XMLHttpRequest} aReq      - The completed XHR.
+ * @param {function}       aCallback - Forwarded from checkForRemoteUpdate.
+ * @param {boolean}        aForced   - Forwarded from checkForRemoteUpdate.
+ * @param {boolean}        aMeta     - True if this was a .meta.js request.
+ */
 Script.prototype.checkRemoteVersion = function (
     aReq, aCallback, aForced, aMeta) {
   let metaFail = GM_util.hitch(this, function () {
@@ -1334,6 +1500,12 @@ Script.prototype.checkRemoteVersion = function (
   aCallback("updateAvailable");
 };
 
+/**
+ * Returns the list of all on-disk files that belong to this script
+ * (base directory, main .user.js, all @require and @resource files).
+ *
+ * @returns {nsIFile[]} Array of nsIFile references.
+ */
 Script.prototype.allFiles = function () {
   let files = [];
   if (!this.baseDirFile.equals(GM_util.scriptDir())) {
@@ -1352,6 +1524,12 @@ Script.prototype.allFiles = function () {
   return files;
 };
 
+/**
+ * Safe wrapper around nsIFile.exists() that swallows exceptions.
+ *
+ * @param {nsIFile} aFile - The file to check.
+ * @returns {boolean} True if the file exists on disk.
+ */
 Script.prototype.fileExists = function (aFile) {
   try {
     return aFile.exists();
@@ -1360,10 +1538,21 @@ Script.prototype.fileExists = function (aFile) {
   }
 };
 
+/**
+ * Checks that every file returned by allFiles() exists on disk.
+ *
+ * @returns {boolean} True if all files exist.
+ */
 Script.prototype.allFilesExist = function () {
   return this.allFiles().every(this.fileExists);
 };
 
+/**
+ * Returns the leaf names of any files from allFiles() that are missing.
+ * Useful for producing a human-readable list of broken dependencies.
+ *
+ * @returns {string[]} Array of missing file leaf names (may be empty).
+ */
 Script.prototype.allFilesExistResult = function () {
   var _script = this;
 
@@ -1379,8 +1568,17 @@ Script.prototype.allFilesExistResult = function () {
   return noFilesName;
 };
 
-// Don't call this.
-// Call Config.uninstall(), which calls this.
+/**
+ * Removes this script's files from disk.
+ * Do NOT call this directly — call Config.uninstall() instead, which also
+ * updates config.xml and fires the "uninstall" change event.
+ *
+ * If the script lives in the scripts root (no subdirectory), only the .user.js
+ * file is deleted.  Otherwise the entire base directory is removed recursively.
+ *
+ * @param {boolean} [aForUpdate=false] - If true, the removal is part of an
+ *   update; certain cleanup steps may be skipped.
+ */
 Script.prototype.uninstall = function (aForUpdate) {
   if (typeof aForUpdate == "undefined") {
     aForUpdate = false;
