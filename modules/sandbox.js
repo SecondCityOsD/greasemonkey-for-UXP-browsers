@@ -170,6 +170,15 @@ function createSandbox(aFrameScope, aContentWin, aUrl, aScript, aRunAt) {
     Cu.evalInSandbox(unsafeWindowDefault, sandbox);
   }
 
+  _API1 = "GM_addElement";
+  _API2 = _API1.replace(
+      API_PREFIX_REGEXP, GM_CONSTANTS.addonAPIPrefix2 + "$2");
+  if (GM_util.inArray(aScript.grants, _API1)
+      || GM_util.inArray(aScript.grants, _API2, true)) {
+    sandbox[_API1] = GM_util.hitch(
+        null, GM_addElement, aContentWin, aScript.fileURL, aRunAt);
+  }
+
   _API1 = "GM_addStyle";
   _API2 = _API1.replace(
       API_PREFIX_REGEXP, GM_CONSTANTS.addonAPIPrefix2 + "$2");

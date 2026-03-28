@@ -27,8 +27,8 @@
  */
 
 const EXPORTED_SYMBOLS = [
-    "GM_addStyle", "GM_console", "GM_Resources", "GM_ScriptLogger",
-    "GM_window"];
+    "GM_addElement", "GM_addStyle", "GM_console", "GM_Resources",
+    "GM_ScriptLogger", "GM_window"];
 
 if (typeof Cc === "undefined") {
   var Cc = Components.classes;
@@ -117,6 +117,118 @@ function GM_addStyle(aWrappedContentWin, aFileURL, aRunAt, aCss) {
   }
 
   return null;
+}
+
+// \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ //
+
+/**
+ * Creates and injects a DOM element into the page, bypassing CSP restrictions.
+ *
+ * Two call forms:
+ *   GM_addElement(tagName, attributes)        — appends to default parent
+ *   GM_addElement(parentNode, tagName, attributes) — appends to given parent
+ *
+ * Default parent: <head> for script/style/link/meta, <body> for everything else.
+ * At document-start, uses a MutationObserver if the target element doesn't exist.
+ *
+ * @param {Window}  aWrappedContentWin - Content window (bound by sandbox.js).
+ * @param {string}  aFileURL           - Script file URL for error attribution.
+ * @param {string}  aRunAt             - @run-at phase (for MutationObserver fallback).
+ * @param {Node|string}    aParentOrTag - Parent node (3-arg form) or tag name (2-arg).
+ * @param {string|object}  [aTagOrAttrs] - Tag name (3-arg) or attributes object (2-arg).
+ * @param {object}  [aAttrs]           - Attributes object (3-arg form only).
+ * @returns {Element|null} The created element, or null if deferred via observer.
+ */
+function GM_addElement(
+    aWrappedContentWin, aFileURL, aRunAt,
+    aParentOrTag, aTagOrAttrs, aAttrs) {
+  var doc = aWrappedContentWin.document;
+  if (!doc) {
+    return null;
+  }
+
+  // Detect call form: 2-arg (tag, attrs) vs 3-arg (parent, tag, attrs).
+  var parentNode;
+  var tagName;
+  var attrs;
+  if (typeof aParentOrTag == "string") {
+    // 2-arg: GM_addElement("script", {textContent: "..."})
+    tagName = aParentOrTag;
+    attrs = aTagOrAttrs || {};
+    parentNode = null;  // Will be resolved to a default below.
+  } else {
+    // 3-arg: GM_addElement(document.body, "div", {id: "foo"})
+    parentNode = aParentOrTag;
+    tagName = String(aTagOrAttrs);
+    attrs = aAttrs || {};
+  }
+
+  function createElement(aDoc, aParent) {
+    let elem = aDoc.createElement(tagName);
+
+    // Apply attributes.
+    for (let key in attrs) {
+      if (!attrs.hasOwnProperty(key)) {
+        continue;
+      }
+      let val = attrs[key];
+      // Properties that must be set directly (not via setAttribute).
+      if (key == "textContent" || key == "innerHTML") {
+        elem[key] = val;
+      } else {
+        elem.setAttribute(key, val);
+      }
+    }
+
+    aParent.appendChild(elem);
+    return elem;
+  }
+
+  // Resolve default parent if not given.
+  if (!parentNode) {
+    let headTags = {"script": 1, "style": 1, "link": 1, "meta": 1};
+    let targetName = (tagName.toLowerCase() in headTags) ? "head" : "body";
+    parentNode = doc.getElementsByTagName(targetName)[0];
+
+    if (!parentNode) {
+      // At document-start, head/body may not exist yet.
+      // Fall back to documentElement if available.
+      parentNode = doc.documentElement;
+    }
+
+    if (!parentNode && aRunAt == "document-start") {
+      // Use MutationObserver to wait for the target element.
+      try {
+        let MutationObserver = aWrappedContentWin.MutationObserver;
+        var observer = new MutationObserver(function (aMutations) {
+          aMutations.forEach(function (aMutation) {
+            let addedNodes = aMutation.addedNodes;
+            for (let i = 0, iLen = addedNodes.length; i < iLen; i++) {
+              let node = addedNodes[i];
+              if (node.nodeType == 1) {
+                observer.disconnect();
+                createElement(doc, node);
+                break;
+              }
+            }
+          });
+        });
+        observer.observe(doc, {
+          "childList": true,
+          "subtree": true,
+        });
+      } catch (e) {
+        throw new aWrappedContentWin.Error(e.message, aFileURL, null);
+      }
+      return null;
+    }
+  }
+
+  if (!parentNode) {
+    return null;
+  }
+
+  return createElement(doc, parentNode);
 }
 
 // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ //

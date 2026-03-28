@@ -41,6 +41,7 @@ Cu.import("chrome://greasemonkey-modules/content/util.js");
 const GM_CONSTANTS = {
   /** All GM_* API names that can appear in a script's @grant list. */
   "addonAPI": [
+    "GM_addElement",
     "GM_addStyle",
     "GM_addValueChangeListener",
     "GM_cookie",
