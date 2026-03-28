@@ -94,6 +94,7 @@ function Script(aConfigNode) {
   this._enabled = true;
   this._excludes = [];
   this._filename = null;
+  this._connects = [];
   this._grants = [];
   this._homepageURL = null;
   this._icon = new ScriptIcon(this);
@@ -284,6 +285,17 @@ Object.defineProperty(Script.prototype, "globalExcludes", {
   "get": function Script_getGlobalExcludes() {
     return GM_util.getService().config._globalExcludes;
   },
+  "enumerable": true,
+});
+
+Object.defineProperty(Script.prototype, "connects", {
+  "get": function Script_getConnects() {
+    return this._connects.concat();
+  },
+  "set": function Script_setConnects(aConnects) {
+    this._connects = aConnects.concat();
+  },
+  "configurable": true,
   "enumerable": true,
 });
 
@@ -693,6 +705,9 @@ Script.prototype._fromConfigNode = function (aNode) {
       case "Exclude":
         this._excludes.push(childNode.textContent);
         break;
+      case "Connect":
+        this._connects.push(childNode.textContent);
+        break;
       case "Grant":
         this._grants.push(childNode.textContent);
         break;
@@ -772,6 +787,7 @@ Script.prototype.toConfigNode = function (aDoc) {
     node.setAttribute("lang", aLang);
   }
 
+  addArrayNodes("Connect", this._connects);
   addArrayNodes("Exclude", this._excludes);
   addArrayNodes("Grant", this._grants);
   addArrayNodes("Include", this._includes);
@@ -1048,6 +1064,7 @@ Script.prototype.updateFromNewScript = function (
   this._author = newScript._author;
   this._copyright = newScript._copyright;
   this._description = newScript._description;
+  this._connects = newScript._connects;
   this._excludes = newScript._excludes;
   this._grants = newScript._grants;
   this._includes = newScript._includes;

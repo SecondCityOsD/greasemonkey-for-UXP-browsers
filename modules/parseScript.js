@@ -4,7 +4,7 @@
  *
  * The parser reads the ==UserScript== metadata block (extracted by
  * extractMeta.js) and maps each @keyword to the appropriate Script property.
- * Unknown keywords (e.g. @connect, @supportURL, @antifeature) fall through
+ * Unknown keywords (e.g. @supportURL, @antifeature) fall through
  * the switch statement silently — they do not cause a parse failure.
  *
  * Supported metadata keywords:
@@ -152,6 +152,9 @@ function parse(aSource, aUri, aFailWhenMissing) {
         script["_excludes"].push(data.value);
         break;
 
+      case "connect":
+        script["_connects"].push(data.value);
+        break;
       case "grant":
         script["_grants"].push(data.value);
         break;

@@ -76,14 +76,93 @@ const AUTHORIZATION_USER_PASSWORD_REGEXP = new RegExp(
  * @param {string}  aFileURL           - Script file URL (for Error objects).
  * @param {string}  aOriginUrl         - Page URL; used to resolve relative
  *   URLs in aDetails.url.
+ * @param {Array}   [aConnects]        - @connect whitelist from the script's
+ *   metadata.  If empty/absent, only same-origin requests are allowed.
+ *   "*" allows all hosts; "self" explicitly allows same-origin.
  */
-function GM_xmlHttpRequester(aWrappedContentWin, aSandbox, aFileURL, aOriginUrl) {
+function GM_xmlHttpRequester(
+    aWrappedContentWin, aSandbox, aFileURL, aOriginUrl, aConnects) {
+  this.connects = aConnects || [];
   this.fileURL = aFileURL;
   this.originUrl = aOriginUrl;
   this.sandbox = aSandbox;
   this.sandboxPrincipal = Cu.getObjectPrincipal(aSandbox);
   this.wrappedContentWin = aWrappedContentWin;
 }
+
+/**
+ * Checks whether a request URL is allowed by the script's @connect whitelist.
+ *
+ * Rules (Violentmonkey-compatible):
+ *   - No @connect declared → same-origin only
+ *   - @connect *           → allow all
+ *   - @connect self        → same-origin
+ *   - @connect example.com → example.com and *.example.com
+ *   - @connect localhost   → localhost and 127.0.0.1
+ *
+ * @param {nsIURI} aRequestUri - Parsed URI of the request target.
+ * @returns {boolean} True if the request is allowed.
+ */
+GM_xmlHttpRequester.prototype._isConnectAllowed = function (aRequestUri) {
+  // data: and blob: URIs are always allowed (local resources).
+  if (aRequestUri.scheme == "data" || aRequestUri.scheme == "blob") {
+    return true;
+  }
+
+  let requestHost;
+  try {
+    requestHost = aRequestUri.host;
+  } catch (e) {
+    // URIs without a host (e.g. malformed) — block.
+    return false;
+  }
+
+  // Determine the page's origin hostname for same-origin checks.
+  let originHost = "";
+  try {
+    originHost = GM_util.getUriFromUrl(this.originUrl).host;
+  } catch (e) {
+    // Ignore — originHost stays empty, so same-origin checks will fail
+    // gracefully (only explicit @connect entries will match).
+  }
+
+  // No @connect declared → allow all (backwards compatible).
+  // Scripts that don't declare @connect should not be restricted,
+  // since most existing scripts predate @connect support.
+  if (this.connects.length == 0) {
+    return true;
+  }
+
+  for (let i = 0; i < this.connects.length; i++) {
+    let entry = this.connects[i];
+    // Wildcard — allow everything.
+    if (entry == "*") {
+      return true;
+    }
+    // Same-origin.
+    if (entry == "self") {
+      if (requestHost == originHost) {
+        return true;
+      }
+      continue;
+    }
+    // localhost also matches 127.0.0.1.
+    if (entry == "localhost") {
+      if (requestHost == "localhost" || requestHost == "127.0.0.1") {
+        return true;
+      }
+      continue;
+    }
+    // Exact match or subdomain match.
+    // "example.com" matches "example.com" and "sub.example.com".
+    if (requestHost == entry
+        || requestHost.endsWith("." + entry)) {
+      return true;
+    }
+  }
+
+  return false;
+};
 
 /**
  * Entry point called from the userscript (content security context).
@@ -120,6 +199,14 @@ GM_xmlHttpRequester.prototype.contentStartRequest = function (aDetails) {
             GM_CONSTANTS.localeGreasemonkeyProperties)
             .GetStringFromName("error.invalidUrl")
             .replace("%1", aDetails.url),
+        this.fileURL, null);
+  }
+
+  // Enforce @connect whitelist.
+  if (!this._isConnectAllowed(uri)) {
+    throw new this.wrappedContentWin.Error(
+        "GM_xmlhttpRequest: request to " + uri.host
+        + " is not allowed by @connect.",
         this.fileURL, null);
   }
 

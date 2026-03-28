@@ -329,7 +329,8 @@ function createSandbox(aFrameScope, aContentWin, aUrl, aScript, aRunAt) {
   if (GM_util.inArray(aScript.grants, _API1)
       || GM_util.inArray(aScript.grants, _API2, true)) {
     sandbox[_API1] = GM_util.hitch(
-        new GM_xmlHttpRequester(aContentWin, sandbox, aScript.fileURL, aUrl),
+        new GM_xmlHttpRequester(
+            aContentWin, sandbox, aScript.fileURL, aUrl, aScript.connects),
         "contentStartRequest");
   }
 
@@ -355,7 +356,8 @@ function createSandbox(aFrameScope, aContentWin, aUrl, aScript, aRunAt) {
     if (typeof sandbox["GM_xmlhttpRequest"] == "undefined") {
       sandbox["GM_xmlhttpRequest"] = Cu.cloneInto(
           GM_util.hitch(
-              new GM_xmlHttpRequester(aContentWin, sandbox, aScript.fileURL, aUrl),
+              new GM_xmlHttpRequester(
+                  aContentWin, sandbox, aScript.fileURL, aUrl, aScript.connects),
               "contentStartRequest"),
           sandbox, {
             "cloneFunctions": true,

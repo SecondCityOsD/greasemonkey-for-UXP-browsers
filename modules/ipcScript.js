@@ -58,6 +58,7 @@ Cu.import("chrome://greasemonkey-modules/content/util.js");
 function IPCScript(aScript, aAddonVersion) {
   this.addonVersion = aAddonVersion;
   this.author = aScript.author || "";
+  this.connects = aScript.connects;
   this.copyright = aScript.copyright || null;
   this.description = aScript.description;
   this.enabled = aScript.enabled;
