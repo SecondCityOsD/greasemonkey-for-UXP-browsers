@@ -6,7 +6,7 @@
   <Description about="urn:mozilla:install-manifest">
 
     <em:id>greasemonkeyforpm@janekptacijarabaci</em:id>
-    <em:version>2026.03.12.beta</em:version>
+    <em:version>2026.03.28.beta</em:version>
     <em:creator>SecondCityOsD</em:creator>
     <em:homepageURL>https://github.com/SecondCityOsD/greasemonkey-for-UXP-browsers</em:homepageURL>
     <em:updateURL>https://raw.githubusercontent.com/SecondCityOsD/greasemonkey-for-UXP-browsers/master/update.rdf</em:updateURL>
