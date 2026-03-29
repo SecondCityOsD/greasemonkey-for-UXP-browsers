@@ -18,7 +18,7 @@
  *   @icon                            — script icon URL
  *   @require                         — additional JS files to load before script
  *   @resource                        — named binary resources
- *   @run-at                          — document-start | document-end | document-idle
+ *   @run-at                          — document-start | document-body | document-end | document-idle
  *   @downloadURL, @updateURL,
  *   @homepageURL, @installURL        — various URL metadata
  *
@@ -348,9 +348,9 @@ function setDefaults(aScript) {
     aScript.updateURL = aScript.downloadURL;
   }
   // In case of a search and replace:
-  // document-end, document-idle, document-start
+  // document-body, document-end, document-idle, document-start
   if (!aScript._runAt || !aScript._runAt.match(
-      new RegExp("^document-(end|idle|start)$", ""))) {
+      new RegExp("^document-(body|end|idle|start)$", ""))) {
     aScript._runAt = "document-end";
   }
   if ((aScript._includes.length == 0) && (aScript._matches.length == 0)) {

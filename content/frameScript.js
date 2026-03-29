@@ -91,6 +91,35 @@ function contentObserver(aWin, aTopic) {
   } else {
     gEarlyStartWindows.delete(aWin);
   }
+
+  // @run-at document-body: fire when <body> first appears.
+  // If <body> already exists, run immediately; otherwise use MutationObserver.
+  let doc = aWin.document;
+  if (doc.body) {
+    runScripts("document-body", aWin);
+  } else {
+    try {
+      let bodyObserver = new aWin.MutationObserver(function (aMutations) {
+        for (let i = 0; i < aMutations.length; i++) {
+          let addedNodes = aMutations[i].addedNodes;
+          for (let j = 0; j < addedNodes.length; j++) {
+            if (addedNodes[j].nodeName
+                && addedNodes[j].nodeName.toLowerCase() == "body") {
+              bodyObserver.disconnect();
+              runScripts("document-body", aWin);
+              return undefined;
+            }
+          }
+        }
+      });
+      bodyObserver.observe(doc.documentElement || doc, {
+        "childList": true,
+        "subtree": true,
+      });
+    } catch (e) {
+      // Fallback: run at document-end time instead.
+    }
+  }
 };
 
 // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ //
