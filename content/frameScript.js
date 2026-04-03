@@ -69,12 +69,12 @@ function contentObserver(aWin, aTopic) {
 
     let scripts = IPCScript.scriptsForUrl(
         earlyUrl, "document-start", GM_util.windowId(aWin, "outer"));
-    // Only inject scripts that:
-    //   1. Have @grant APIs (not @grant none — those need page-context)
+    // Only inject scripts at this very early timing if they:
+    //   1. Don't need page-context injection (@inject-into page needs DOM)
     //   2. Have NO @require dependencies (libraries like jQuery need DOM)
     // Everything else is deferred to document-element-inserted.
     let earlyScripts = scripts.filter(function (s) {
-      return !GM_util.inArray(s.grants, "none")
+      return s.injectInto != "page"
           && (!s.requires || s.requires.length == 0);
     });
     if (earlyScripts.length > 0) {
@@ -104,16 +104,16 @@ function contentObserver(aWin, aTopic) {
     // No early injection happened — run all document-start scripts normally.
     runScripts("document-start", aWin);
   } else {
-    // Early injection already ran simple sandbox scripts (no @require).
-    // Now run everything that was deferred: @grant none scripts (need
-    // page-context) and scripts with @require (need DOM for libraries).
+    // Early injection already ran scripts without @require that don't
+    // need page-context.  Now run the deferred ones: @inject-into page
+    // scripts and scripts with @require dependencies (need DOM).
     gEarlyStartWindows.delete(aWin);
     let deferredUrl = urlForWin(aWin);
     if (deferredUrl) {
       let allStartScripts = IPCScript.scriptsForUrl(
           deferredUrl, "document-start", GM_util.windowId(aWin, "outer"));
       let deferredScripts = allStartScripts.filter(function (s) {
-        return GM_util.inArray(s.grants, "none")
+        return s.injectInto == "page"
             || (s.requires && s.requires.length > 0);
       });
       if (deferredScripts.length > 0) {
@@ -357,11 +357,11 @@ function injectScripts(aScripts, aRunAt, aContentWin) {
       continue;
     }
     try {
-      if (GM_util.inArray(script.grants, "none")
+      if (script.injectInto == "page"
           && aContentWin.document.documentElement) {
-        // @grant none with DOM ready: inject directly into page context
-        // (VM/TM compat).  At very early injection (before <html> exists),
-        // fall through to the sandbox path since <script> elements need DOM.
+        // @inject-into page: inject directly into page context via <script>
+        // element.  Only used when explicitly requested — page-context
+        // injection can interfere with page JS if not intended.
         injectScriptIntoPage(aContentWin, script);
       } else {
         let sandbox = createSandbox(gScope, aContentWin, url, script, aRunAt);

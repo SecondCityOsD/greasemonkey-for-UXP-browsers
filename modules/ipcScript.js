@@ -69,6 +69,7 @@ function IPCScript(aScript, aAddonVersion) {
       ? aScript.homepageURL
       : null);
   this.id = aScript.id;
+  this.injectInto = aScript.injectInto || "auto";
   this.includes = aScript.includes;
   this.lastUpdated = aScript.modifiedDate.getTime();
   this.localized = aScript.localized;

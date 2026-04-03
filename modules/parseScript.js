@@ -171,6 +171,9 @@ function parse(aSource, aUri, aFailWhenMissing) {
       case "grant":
         script["_grants"].push(data.value);
         break;
+      case "inject-into":
+        script["_injectInto"] = data.value;
+        break;
 
       case "icon":
         try {

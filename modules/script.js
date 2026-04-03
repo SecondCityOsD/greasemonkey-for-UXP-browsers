@@ -97,6 +97,7 @@ function Script(aConfigNode) {
   this._connects = [];
   this._grants = [];
   this._homepageURL = null;
+  this._injectInto = "auto";
   this._icon = new ScriptIcon(this);
   this._id = null;
   this._includes = [];
@@ -295,6 +296,17 @@ Object.defineProperty(Script.prototype, "connects", {
   },
   "set": function Script_setConnects(aConnects) {
     this._connects = aConnects.concat();
+  },
+  "configurable": true,
+  "enumerable": true,
+});
+
+Object.defineProperty(Script.prototype, "injectInto", {
+  "get": function Script_getInjectInto() {
+    return this._injectInto || "auto";
+  },
+  "set": function Script_setInjectInto(aVal) {
+    this._injectInto = aVal;
   },
   "configurable": true,
   "enumerable": true,
@@ -731,6 +743,9 @@ Script.prototype._fromConfigNode = function (aNode) {
       case "Grant":
         this._grants.push(childNode.textContent);
         break;
+      case "InjectInto":
+        this._injectInto = childNode.textContent;
+        break;
       case "Include":
         this._includes.push(childNode.textContent);
         break;
@@ -813,6 +828,9 @@ Script.prototype.toConfigNode = function (aDoc) {
   addArrayNodes("Connect", this._connects);
   addArrayNodes("Exclude", this._excludes);
   addArrayNodes("Grant", this._grants);
+  if (this._injectInto && this._injectInto != "auto") {
+    addNode("InjectInto", this._injectInto);
+  }
   addArrayNodes("Include", this._includes);
   for (let j = 0, jLen = this._excludeMatches.length; j < jLen; j++) {
     addNode("ExcludeMatch", this._excludeMatches[j].pattern);
@@ -1093,6 +1111,7 @@ Script.prototype.updateFromNewScript = function (
   this._connects = newScript._connects;
   this._excludes = newScript._excludes;
   this._grants = newScript._grants;
+  this._injectInto = newScript._injectInto;
   this._includes = newScript._includes;
   this._locales = newScript._locales;
   this._localized = newScript._localized;

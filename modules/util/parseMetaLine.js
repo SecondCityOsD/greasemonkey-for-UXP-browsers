@@ -178,6 +178,8 @@ var _GM_parseMetaLine = /*
         peg$c27 = peg$literalExpectation("icon", false),
         peg$c28 = "include",
         peg$c29 = peg$literalExpectation("include", false),
+        peg$c29a = "inject-into",
+        peg$c29b = peg$literalExpectation("inject-into", false),
         peg$c30 = "installURL",
         peg$c31 = peg$literalExpectation("installURL", false),
         peg$c32 = "match",
@@ -591,6 +593,14 @@ var _GM_parseMetaLine = /*
                     if (peg$silentFails === 0) { peg$fail(peg$c27); }
                   }
                   if (s1 === peg$FAILED) {
+                    if (input.substr(peg$currPos, 11) === peg$c29a) {
+                      s1 = peg$c29a;
+                      peg$currPos += 11;
+                    } else {
+                      s1 = peg$FAILED;
+                      if (peg$silentFails === 0) { peg$fail(peg$c29b); }
+                    }
+                    if (s1 === peg$FAILED) {
                     if (input.substr(peg$currPos, 7) === peg$c28) {
                       s1 = peg$c28;
                       peg$currPos += 7;
@@ -668,6 +678,7 @@ var _GM_parseMetaLine = /*
           }
           }
           }
+        }
         }
       }
       if (s1 !== peg$FAILED) {
