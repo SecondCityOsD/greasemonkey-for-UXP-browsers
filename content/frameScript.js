@@ -70,11 +70,15 @@ function contentObserver(aWin, aTopic) {
     let scripts = IPCScript.scriptsForUrl(
         earlyUrl, "document-start", GM_util.windowId(aWin, "outer"));
     // Only inject scripts at this very early timing if they:
-    //   1. Don't need page-context injection (@inject-into page needs DOM)
+    //   1. Use sandbox injection (not @grant none / @inject-into page which
+    //      need <script> elements and thus need DOM)
     //   2. Have NO @require dependencies (libraries like jQuery need DOM)
     // Everything else is deferred to document-element-inserted.
     let earlyScripts = scripts.filter(function (s) {
-      return s.injectInto != "page"
+      let needsPageContext = GM_util.inArray(s.grants, "none")
+          || s.injectInto == "page";
+      if (s.injectInto == "content") needsPageContext = false;
+      return !needsPageContext
           && (!s.requires || s.requires.length == 0);
     });
     if (earlyScripts.length > 0) {
@@ -104,16 +108,19 @@ function contentObserver(aWin, aTopic) {
     // No early injection happened — run all document-start scripts normally.
     runScripts("document-start", aWin);
   } else {
-    // Early injection already ran scripts without @require that don't
-    // need page-context.  Now run the deferred ones: @inject-into page
-    // scripts and scripts with @require dependencies (need DOM).
+    // Early injection already ran sandbox scripts without @require.
+    // Now run deferred ones: page-context scripts (@grant none or
+    // @inject-into page) and scripts with @require (need DOM).
     gEarlyStartWindows.delete(aWin);
     let deferredUrl = urlForWin(aWin);
     if (deferredUrl) {
       let allStartScripts = IPCScript.scriptsForUrl(
           deferredUrl, "document-start", GM_util.windowId(aWin, "outer"));
       let deferredScripts = allStartScripts.filter(function (s) {
-        return s.injectInto == "page"
+        let needsPageContext = GM_util.inArray(s.grants, "none")
+            || s.injectInto == "page";
+        if (s.injectInto == "content") needsPageContext = false;
+        return needsPageContext
             || (s.requires && s.requires.length > 0);
       });
       if (deferredScripts.length > 0) {
@@ -291,32 +298,28 @@ function injectScriptIntoPage(aContentWin, aScript) {
     }
   }
 
-  // 1) Inject GM_info and unsafeWindow declarations.
+  // Build GM_info JSON for injection into the script's scope.
   let gmInfoJson = "{}";
   try {
     gmInfoJson = JSON.stringify(aScript.info());
   } catch (e) {
     // Fall back to empty object if serialization fails.
   }
-  if (!injectCode(
-      "var GM_info = " + gmInfoJson + ";\n"
-      + "var unsafeWindow = window;",
-      "GM_info")) {
-    // CSP blocked <script> injection — fall back to sandbox.
-    let sandbox = createSandbox(gScope, aContentWin,
-        aContentWin.document.documentURI, aScript, "document-end");
-    runScriptInSandbox(sandbox, aScript);
-    return undefined;
-  }
 
-  // 2) Inject each @require as a separate <script> element.
-  //    This matches VM/TM behavior and ensures libraries like jQuery
-  //    execute in the correct document context.
+  // 1) Inject each @require as a separate <script> element.
+  //    Libraries like jQuery must run at global scope so their APIs
+  //    (e.g. $, jQuery) are available to the userscript.
   for (let i = 0; i < aScript.requires.length; i++) {
     try {
       let code = GM_util.fileXhr(
           aScript.requires[i].fileURL, "application/javascript");
-      injectCode(code, aScript.requires[i].fileURL);
+      if (!injectCode(code, aScript.requires[i].fileURL)) {
+        // CSP blocked — fall back to sandbox for this entire script.
+        let sandbox = createSandbox(gScope, aContentWin,
+            aContentWin.document.documentURI, aScript, "document-end");
+        runScriptInSandbox(sandbox, aScript);
+        return undefined;
+      }
     } catch (e) {
       GM_util.logError(
           "Error loading @require " + aScript.requires[i].fileURL
@@ -324,11 +327,22 @@ function injectScriptIntoPage(aContentWin, aScript) {
     }
   }
 
-  // 3) Inject the script itself.
+  // 2) Inject the script itself, wrapped in an IIFE (Immediately Invoked
+  //    Function Expression).  This matches Violentmonkey's behavior:
+  //    - Bare var/const/let declarations stay LOCAL (no global pollution)
+  //    - Explicit window.x = foo writes ARE visible to the page
+  //    - GM_info and unsafeWindow are available inside the function scope
+  //    This prevents scripts from accidentally interfering with page JS
+  //    while still allowing intentional page-context access.
   try {
     let scriptCode = GM_util.fileXhr(
         aScript.fileURL, "application/javascript");
-    injectCode(scriptCode, aScript.fileURL);
+    let wrappedCode = "(function() {\n"
+        + "var GM_info = " + gmInfoJson + ";\n"
+        + "var unsafeWindow = window;\n"
+        + scriptCode + "\n"
+        + "})();";
+    injectCode(wrappedCode, aScript.fileURL);
   } catch (e) {
     GM_util.logError(
         "Error loading script " + aScript.fileURL
@@ -357,11 +371,14 @@ function injectScripts(aScripts, aRunAt, aContentWin) {
       continue;
     }
     try {
-      if (script.injectInto == "page"
+      if ((GM_util.inArray(script.grants, "none")
+              || script.injectInto == "page")
+          && script.injectInto != "content"
           && aContentWin.document.documentElement) {
-        // @inject-into page: inject directly into page context via <script>
-        // element.  Only used when explicitly requested — page-context
-        // injection can interfere with page JS if not intended.
+        // Page-context injection via IIFE-wrapped <script> element.
+        // Used for @grant none (matching VM/TM behavior) and @inject-into page.
+        // The IIFE wrapper prevents global scope pollution while allowing
+        // intentional window.x writes.  @inject-into content forces sandbox.
         injectScriptIntoPage(aContentWin, script);
       } else {
         let sandbox = createSandbox(gScope, aContentWin, url, script, aRunAt);
