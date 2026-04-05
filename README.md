@@ -29,3 +29,7 @@ A: Report it to me either via the "Issues" tab on Github, On Pale Moon forum of 
 4. Are you also gonna abandon us like Janekptacijarabaci did?
 
 A: I'm not exactly sure if he abandoned the extension or something tragic has happened to him in real life. If I also stopped having any activities on any of the social media platforms I visit, you'd also have to assume the worst that might've happened to me as well. As long as I'm alive and breathing, there is still a chance for me to contribute into the extension.
+
+5. Why did you retire the date-based naming scheme?
+
+A: Back when I was developing it, I was using the date-based naming scheme, because I was developing it for my own use. Then, I decided it would be smarter to send the extension to some Pale Moon users, so that the debugging process would be faster, thus making the extension enter the beta phase. I was planning to name it "3.4.0" the entire time, but I had to make it usable first.
