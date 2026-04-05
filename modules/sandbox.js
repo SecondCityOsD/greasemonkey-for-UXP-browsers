@@ -313,7 +313,31 @@ function createSandbox(aFrameScope, aContentWin, aUrl, aScript, aRunAt) {
       API_PREFIX_REGEXP, GM_CONSTANTS.addonAPIPrefix2 + "$2");
   if (GM_util.inArray(aScript.grants, _API1)
       || GM_util.inArray(aScript.grants, _API2, true)) {
-    sandbox[_API1] = GM_util.hitch(null, GM_openInTab, aFrameScope, aUrl);
+    // Wrap GM_openInTab to clone the returned tab handle into the sandbox.
+    // Without this, Xray wrappers block access to .close()/.onclose.
+    let _openInTabFn = GM_util.hitch(null, GM_openInTab, aFrameScope, aUrl);
+    sandbox[_API1] = function (aTabUrl, aTabOptions) {
+      let chromeHandle = _openInTabFn(aTabUrl, aTabOptions);
+      // Create a sandbox-side tab handle that proxies to the chrome one.
+      let sandboxHandle = Cu.createObjectIn(sandbox);
+      sandboxHandle.closed = false;
+      sandboxHandle.onclose = null;
+      sandboxHandle.close = Cu.exportFunction(function () {
+        chromeHandle.close();
+      }, sandbox);
+      // Wire up the chrome handle's onclose to update the sandbox handle.
+      chromeHandle.onclose = function () {
+        sandboxHandle.closed = true;
+        if (typeof sandboxHandle.onclose == "function") {
+          try {
+            Cu.waiveXrays(sandboxHandle).onclose();
+          } catch (e) {
+            // Ignore callback errors.
+          }
+        }
+      };
+      return sandboxHandle;
+    };
   }
 
   _API1 = "GM_registerMenuCommand";
