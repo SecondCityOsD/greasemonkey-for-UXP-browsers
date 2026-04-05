@@ -1394,8 +1394,13 @@ Script.prototype.checkForRemoteUpdate = function (aCallback, aForced) {
 
   let usedMeta = false;
   if (this._updateMetaStatus != UPDATE_META_STATUS_FAIL) {
-    uri.path = uri.path.replace(
-        GM_CONSTANTS.fileScriptExtension, GM_CONSTANTS.fileMetaExtension);
+    if (uri.path.indexOf(GM_CONSTANTS.fileScriptExtension) != -1) {
+      // Standard URL ending in .user.js — replace with .meta.js.
+      uri.path = uri.path.replace(
+          GM_CONSTANTS.fileScriptExtension, GM_CONSTANTS.fileMetaExtension);
+    }
+    // For non-standard URLs (e.g. GreasyFork's new format), the URL is
+    // used as-is with an Accept header requesting metadata only.
     usedMeta = true;
   }
   var url = uri.spec;
@@ -1418,6 +1423,10 @@ Script.prototype.checkForRemoteUpdate = function (aCallback, aForced) {
   }
   try {
     req.open("GET", url, true);
+    // Request metadata-only from smart servers (like OpenUserJS).
+    // This is how Violentmonkey handles update checks efficiently.
+    req.setRequestHeader("Accept",
+        "text/x-userscript-meta, application/javascript, text/plain, */*");
   } catch (e) {
     return aCallback("noUpdateAvailable", {
       "name": this.localized.name,
