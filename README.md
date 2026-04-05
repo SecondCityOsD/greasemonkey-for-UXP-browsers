@@ -10,7 +10,7 @@ The issues that were fixed in this fork so far:
 - adding 8+ new APIs, further increasing the extension compatibility with modern scripts on Greasyfork and related websites
 - [GM_info sandbox security vulnerability](https://github.com/janekptacijarabaci/greasemonkey/issues/20)
 
-As of 5th April 2026, this is the beta phase of the extension, the extension may not be stable (although it's developed in mind to be more stable than the extension that was forked from). make sure to report any bugs you've seen in the extension in the issues section.
+While the extension just got out of the beta phase, I'm still working on making it more stable. Make sure to report any bugs, whenever you encounter them.
 
 ## FAQ:
 
