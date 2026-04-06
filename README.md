@@ -19,7 +19,7 @@ A: Because, unlike the old fork that was called "Greasemonkey for Pale Moon" tha
 
 2. How is it based on both Violentmonkey and the old fork of Greasemonkey?
 
-A: I'll be doing my best on making sure it maintains the Greasemonkey UI, while it gets to be as compatible as Violentmonkey on Chrome/Firefox. There might be some UI changes, but I'll see how I'll incorporate them in the extension as how they'd be incorporated on Greasemonkey.
+A: I'll be doing my best on making sure it maintains the Greasemonkey UI, while it gets to be as compatible as Violentmonkey on Chrome/Firefox. There might be some UI changes, but I'll see how I'll incorporate them in the extension as how they'd be incorporated on Greasemonkey on XUL-based browsers.
 
 3. I found an issue with your extension, how do I report it to you?
 
@@ -32,3 +32,7 @@ A: I'm not exactly sure if he abandoned the extension or something tragic has ha
 5. Why did you retire the date-based naming scheme?
 
 A: Back when I was developing it, I was using the date-based naming scheme, because I was developing it for my own use, when I was the sole tester. Then, I decided it would be smarter to send the extension to some Pale Moon users, so that the debugging process would be faster, thus making the extension enter the beta phase. I was planning to follow the semantic versioning the entire time, but I had to make it usable first.
+
+6. Why is the first stable version of your extension is "3.4.0"?
+
+A:...I don't think I have a proper explanation to that. I've always thought it would be really discouraging to version it as "0.1" or anything similar to it. I originally wanted to name it "4.0", but according to the [semantic versioning principle](https://semver.org/), my changes did not introduce any incompatible API changes. The old fork of Greasemonkey decided to follow its own weird semantic versioning of "3.31.4", which I didn't like at all, I don't want my extension to follow its versioning. I decided to just name it "3.4.0", something random, but not too random, that came into my mind. I just care about developing the extension to be completely stable and compatible, instead of sitting in front of my computer, thinking "What version number should my extension adapt, to sound professional".
