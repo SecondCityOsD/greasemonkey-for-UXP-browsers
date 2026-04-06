@@ -1367,7 +1367,9 @@ Script.prototype.checkForRemoteUpdate = function (aCallback, aForced) {
     return aCallback("updateAvailable");
   }
 
-  if (!this.updateURL || (this.updateURL == "null")) {
+  if (!this.updateURL || (this.updateURL == "null")
+      || this.updateURL.trim().toLowerCase() === "none"
+      || /\/none$/.test(this.updateURL)) {
     return aCallback("noUpdateAvailable", {
       "name": this.localized.name,
       "fileURL": this.fileURL,

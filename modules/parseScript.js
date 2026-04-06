@@ -195,6 +195,12 @@ function parse(aSource, aUri, aFailWhenMissing) {
       case "downloadURL":
       case "homepageURL":
       case "updateURL":
+        // GreasyFork sets @downloadURL/@updateURL to "none" to disable
+        // auto-updates for old script versions. Treat it as unset rather
+        // than resolving "none" as a relative URL against the base URI.
+        if (data.value.trim().toLowerCase() === "none") {
+          break;
+        }
         try {
           let uri = GM_util.getUriFromUrl(data.value, aUri);
           script[data.keyword] = uri.spec;
