@@ -33,6 +33,7 @@
   <command id="cmd_userscript_execute_later" />
   <command id="cmd_userscript_execute_last" />
   <command id="cmd_userscript_showItemPreferences" />
+  <command id="cmd_userscript_manualFindItemUpdates" />
   <command id="cmd_userscript_forcedFindItemUpdates" />
 </commandset>
 
@@ -54,7 +55,7 @@
   <menuseparator class="greasemonkey" />
 
   <!-- Default find updates item. -->
-  <menuitem command="cmd_findItemUpdates" class="greasemonkey"
+  <menuitem command="cmd_userscript_manualFindItemUpdates" class="greasemonkey"
     label="&cmd.findUpdates.label;" accesskey="&cmd.findUpdates.accesskey;" />
   <!-- Custom forced find updates item. -->
   <menuitem command="cmd_userscript_forcedFindItemUpdates" class="greasemonkey"

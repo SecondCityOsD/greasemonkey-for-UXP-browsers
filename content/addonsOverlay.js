@@ -238,6 +238,17 @@ function addonExecutesNonLast(aAddon) {
       != aAddon.executionIndex) && addonExecutesRichlistitem(aAddon);
 }
 
+function addonUpdateCanBeAllowed(aAddon) {
+  if (!aAddon) {
+    return false;
+  }
+  if (aAddon.type != GM_CONSTANTS.scriptAddonType) {
+    return false;
+  }
+
+  return aAddon._script.isRemoteUpdateAllowed(false);
+}
+
 function addonUpdateCanBeForced(aAddon) {
   if (!aAddon) {
     return false;
@@ -308,6 +319,14 @@ function init() {
       }
     };
 
+  gViewController.commands.cmd_userscript_manualFindItemUpdates = {
+      "isEnabled": addonUpdateCanBeAllowed,
+      "doCommand": function (aAddon) {
+        aAddon.manualUpdate = true;
+        gViewController.commands.cmd_findItemUpdates.doCommand(aAddon);
+        aAddon.manualUpdate = false;
+      }
+  };
   gViewController.commands.cmd_userscript_forcedFindItemUpdates = {
       "isEnabled": addonUpdateCanBeForced,
       "doCommand": function (aAddon) {
