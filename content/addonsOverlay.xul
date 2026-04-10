@@ -54,7 +54,7 @@
 
   <menuseparator class="greasemonkey" />
 
-  <!-- Default find updates item. -->
+  <!-- NOT default "cmd_findItemUpdates", use ourselves find updates item. -->
   <menuitem command="cmd_userscript_manualFindItemUpdates" class="greasemonkey"
     label="&cmd.findUpdates.label;" accesskey="&cmd.findUpdates.accesskey;" />
   <!-- Custom forced find updates item. -->
