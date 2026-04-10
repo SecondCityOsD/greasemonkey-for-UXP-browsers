@@ -340,7 +340,7 @@ ScriptAddon.prototype.isCompatibleWith = function () {
  */
 ScriptAddon.prototype.findUpdates = function (aUpdateListener, aReason) {
   let callback = GM_util.hitch(this, this._handleRemoteUpdate, aUpdateListener);
-  this._script.checkForRemoteUpdate(callback, this.forceUpdate);
+  this._script.checkForRemoteUpdate(callback, this.forceUpdate, this.manualUpdate);
 };
 
 /**
