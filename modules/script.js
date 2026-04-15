@@ -1361,8 +1361,9 @@ Script.prototype.shouldAutoUpdate = function () {
  * @param {function} aCallback - Called with ("updateAvailable") or
  *   ("noUpdateAvailable", infoObj) when the check completes.
  * @param {boolean}  aForced   - If true, bypasses auto-update and enabled checks.
+ * @param {boolean}  aManual   - If true, bypasses auto-update check only.
  */
-Script.prototype.checkForRemoteUpdate = function (aCallback, aForced) {
+Script.prototype.checkForRemoteUpdate = function (aCallback, aForced, aManual) {
   if (this.availableUpdate) {
     return aCallback("updateAvailable");
   }
@@ -1381,7 +1382,7 @@ Script.prototype.checkForRemoteUpdate = function (aCallback, aForced) {
   }
 
   let _shouldAutoUpdate = this.shouldAutoUpdate();
-  if (!aForced && !_shouldAutoUpdate) {
+  if (!aManual && !aForced && !_shouldAutoUpdate) {
     return aCallback("noUpdateAvailable", {
       "name": this.localized.name,
       "fileURL": this.fileURL,
@@ -1490,7 +1491,7 @@ Script.prototype.checkForRemoteUpdate = function (aCallback, aForced) {
   // Let the server know we want a user script metadata block.
   req.setRequestHeader("Accept", "text/x-userscript-meta");
   req.onload = GM_util.hitch(
-      this, "checkRemoteVersion", req, aCallback, aForced, usedMeta);
+      this, "checkRemoteVersion", req, aCallback, aForced, aManual, usedMeta);
   req.onerror = GM_util.hitch(null, aCallback, "noUpdateAvailable", {
     "name": this.localized.name,
     "fileURL": this.fileURL,
@@ -1536,12 +1537,12 @@ Script.prototype.checkForRemoteUpdate = function (aCallback, aForced) {
  * @param {boolean}        aMeta     - True if this was a .meta.js request.
  */
 Script.prototype.checkRemoteVersion = function (
-    aReq, aCallback, aForced, aMeta) {
+    aReq, aCallback, aForced, aManual, aMeta) {
   let metaFail = GM_util.hitch(this, function () {
     this._updateMetaStatus = UPDATE_META_STATUS_FAIL;
     this._changed("modified", null);
 
-    return this.checkForRemoteUpdate(aCallback, aForced);
+    return this.checkForRemoteUpdate(aCallback, aForced, aManual);
   });
 
   if ((aReq.status != 200) && (aReq.status != 0)) {
