@@ -18,8 +18,8 @@ echo "Creating working directory ..."
 rm -rf build
 mkdir build
 cp -r \
-  chrome.manifest components content defaults install.rdf locale skin \
-      modules \
+  chrome.manifest components content defaults install.rdf LICENSE locale \
+      modules skin update.rdf \
   build/
 cd build
 
