@@ -78,6 +78,10 @@
       onclick="GM_openUserscriptsOrg();" />
     <label value="&menu.new;" class="text-link"
       onclick="GM_util.newUserScript(window);" />
+    <label value="&backup.exportAll;" class="text-link"
+      onclick="GM_backupExport();" />
+    <label value="&backup.import;" class="text-link"
+      onclick="GM_backupImport();" />
     <spacer flex="1"/>
     <button label="&sort.status;" tooltiptext="&sort.byStatus;"
       class="sorter" sortBy="uiState,name" checkState="2" />

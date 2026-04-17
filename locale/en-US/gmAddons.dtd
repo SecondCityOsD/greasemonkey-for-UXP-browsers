@@ -29,3 +29,5 @@
 <!ENTITY sort.namespace "Namespace">
 <!ENTITY sort.status "Status">
 <!ENTITY toggleAutoUpdate "Allow Automatic Updates">
+<!ENTITY backup.exportAll "Export All…">
+<!ENTITY backup.import "Import…">

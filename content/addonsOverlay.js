@@ -631,3 +631,98 @@ function GM_openUserscriptsOrg() {
       GM_CONSTANTS.dataUserScriptHosting);
   */
 }
+
+// Lazy scope for the backup module so we don't pay the import cost until
+// the user actually clicks Export or Import.
+var GM_backup_scope = null;
+function GM_backup_get() {
+  if (!GM_backup_scope) {
+    GM_backup_scope = {};
+    Components.utils.import(
+        "chrome://greasemonkey-modules/content/backup.js", GM_backup_scope);
+  }
+  return GM_backup_scope;
+}
+
+function GM_backup_defaultFilename() {
+  // greasemonkey-YYYY-MM-DD.zip
+  let d = new Date();
+  let pad = function (n) { return (n < 10 ? "0" : "") + n; };
+  return "greasemonkey-"
+      + d.getFullYear() + "-"
+      + pad(d.getMonth() + 1) + "-"
+      + pad(d.getDate()) + ".zip";
+}
+
+function GM_backup_stringBundle() {
+  return Components.classes[
+      "@mozilla.org/intl/stringbundle;1"]
+      .getService(Components.interfaces.nsIStringBundleService)
+      .createBundle(
+          "chrome://greasemonkey/locale/gmAddons.properties");
+}
+
+function GM_backupExport() {
+  let fp = Components.classes["@mozilla.org/filepicker;1"]
+      .createInstance(Components.interfaces.nsIFilePicker);
+  fp.init(window,
+      GM_backup_stringBundle().GetStringFromName("backup.exportTitle"),
+      Components.interfaces.nsIFilePicker.modeSave);
+  fp.defaultString = GM_backup_defaultFilename();
+  fp.appendFilter("ZIP archive", "*.zip");
+
+  // nsIFilePicker's show() is synchronous on Pale Moon/Basilisk.
+  let result = fp.show();
+  if (result != Components.interfaces.nsIFilePicker.returnOK
+      && result != Components.interfaces.nsIFilePicker.returnReplace) {
+    return;
+  }
+
+  let backup = GM_backup_get();
+  backup.GM_BackupExport(fp.file, /* includeValues */ true,
+      function (aSuccess, aCount, aErr) {
+    let bundle = GM_backup_stringBundle();
+    if (aSuccess) {
+      let msg = bundle.GetStringFromName("backup.exported")
+          .replace("%1", aCount)
+          .replace("%2", fp.file.path);
+      alert(msg);
+    } else {
+      let msg = bundle.GetStringFromName("backup.failed")
+          .replace("%1", aErr || "");
+      alert(msg);
+    }
+  });
+}
+
+function GM_backupImport() {
+  let fp = Components.classes["@mozilla.org/filepicker;1"]
+      .createInstance(Components.interfaces.nsIFilePicker);
+  fp.init(window,
+      GM_backup_stringBundle().GetStringFromName("backup.importTitle"),
+      Components.interfaces.nsIFilePicker.modeOpen);
+  fp.appendFilter("ZIP archive", "*.zip");
+
+  let result = fp.show();
+  if (result != Components.interfaces.nsIFilePicker.returnOK) {
+    return;
+  }
+
+  let backup = GM_backup_get();
+  backup.GM_BackupImport(fp.file, function (aSuccess, aResult, aErr) {
+    let bundle = GM_backup_stringBundle();
+    if (!aSuccess) {
+      let msg = bundle.GetStringFromName("backup.failed")
+          .replace("%1", aErr || "");
+      alert(msg);
+      return;
+    }
+    let msg = bundle.GetStringFromName("backup.imported")
+        .replace("%1", aResult.imported)
+        .replace("%2", aResult.skipped);
+    if (aResult.errors && aResult.errors.length) {
+      msg += "\n\n" + aResult.errors.join("\n");
+    }
+    alert(msg);
+  });
+}
