@@ -41,12 +41,18 @@ if [ "bz" = "$1" ]; then
   rm -r `find locale -type d -not -name locale -a -not -name en-US`
 fi
 
-echo "Gathering all locales into chrome.manifest ..."
+echo "Verifying chrome.manifest covers every locale directory ..."
+# Locale entries live in chrome.manifest under source control (see PR #11).
+# This loop is now a sanity check rather than the source of truth: it warns
+# loudly if a translator added a locale/<code>/ directory but forgot to
+# register it in chrome.manifest, instead of silently fixing it at build
+# time and letting the gap survive into git.
 for entry in locale/*; do
   entry=`basename $entry`
-  entryf=`printf "%-5s" $entry`
-  if [ $entry != en-US ]; then
-    echo "locale     greasemonkey $entryf locale/$entry/" >> chrome.manifest
+  if [ $entry = en-US ]; then continue; fi
+  if ! grep -qE "^locale +greasemonkey +$entry( |$)" chrome.manifest; then
+    echo "  WARNING: locale/$entry has no entry in chrome.manifest"
+    echo "           Add: locale     greasemonkey $entry locale/$entry/"
   fi
 done
 
