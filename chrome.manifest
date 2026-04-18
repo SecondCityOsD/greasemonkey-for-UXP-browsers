@@ -22,3 +22,36 @@ overlay    chrome://greasemonkey/content/newScript.xul chrome://greasemonkey/con
 overlay    chrome://greasemonkey/content/options.xul chrome://greasemonkey/content/closeWindow.xul
 
 locale     greasemonkey en-US locale/en-US/
+locale     greasemonkey ar    locale/ar/
+locale     greasemonkey bg    locale/bg/
+locale     greasemonkey cs    locale/cs/
+locale     greasemonkey da    locale/da/
+locale     greasemonkey de    locale/de/
+locale     greasemonkey el    locale/el/
+locale     greasemonkey en-GB locale/en-GB/
+locale     greasemonkey es-CL locale/es-CL/
+locale     greasemonkey es-ES locale/es-ES/
+locale     greasemonkey fa    locale/fa/
+locale     greasemonkey fi    locale/fi/
+locale     greasemonkey fr    locale/fr/
+locale     greasemonkey gl    locale/gl/
+locale     greasemonkey he    locale/he/
+locale     greasemonkey hu    locale/hu/
+locale     greasemonkey id    locale/id/
+locale     greasemonkey it    locale/it/
+locale     greasemonkey ja    locale/ja/
+locale     greasemonkey lt    locale/lt/
+locale     greasemonkey nl    locale/nl/
+locale     greasemonkey pl    locale/pl/
+locale     greasemonkey pt-BR locale/pt-BR/
+locale     greasemonkey pt-PT locale/pt-PT/
+locale     greasemonkey ro    locale/ro/
+locale     greasemonkey ru    locale/ru/
+locale     greasemonkey sk    locale/sk/
+locale     greasemonkey sl    locale/sl/
+locale     greasemonkey sr    locale/sr/
+locale     greasemonkey sv-SE locale/sv-SE/
+locale     greasemonkey tr    locale/tr/
+locale     greasemonkey uk    locale/uk/
+locale     greasemonkey zh-CN locale/zh-CN/
+locale     greasemonkey zh-TW locale/zh-TW/
