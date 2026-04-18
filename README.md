@@ -7,10 +7,7 @@ This fork was created to continue on the efforts of previous contributors and on
 > (`{544fad5a-9b62-418f-a9ff-616e388cf6c4}`), replacing the legacy
 > `greasemonkeyforpm@janekptacijarabaci` ID inherited from Janek's fork.
 > Your browser will **not** auto-update across this change; you need to
-> uninstall the old version and install 3.6.0 manually.  Before
-> uninstalling, use the new **Export All…** link in the User Scripts view
-> to save your scripts, settings, and GM values — then **Import…** them
-> on 3.6.0.
+> uninstall the old version and install 3.6.0 manually.
 
 A lot of changes were made to fill the gap of 8 years of no updates. The key changes include:
 
