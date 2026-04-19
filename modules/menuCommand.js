@@ -232,6 +232,17 @@ function MenuCommandSandbox(
       aCommandName, aCommandFunc, aAccesskey, aUnused, aAccesskey2) {
     aCommandName = String(aCommandName);
 
+    // Tampermonkey / Violentmonkey compatibility: the third argument may
+    // be an options object of the form { accessKey, id, autoClose, title }
+    // instead of a raw access-key string.  We only act on the access-key
+    // portion here; the other properties are accepted but currently have
+    // no visible effect.  Without this normalisation a script that passes
+    // {} as the third argument would hit the single-character validator
+    // below and throw "Invalid accesskey".
+    if (aAccesskey && typeof aAccesskey === "object") {
+      aAccesskey = aAccesskey.accessKey || null;
+    }
+
     // Legacy support:
     // If all five parameters were specified
     // (from when two were for accelerators) use the last one as the access key.
