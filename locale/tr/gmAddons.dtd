@@ -28,3 +28,5 @@
 <!ENTITY sort.name "Isim">
 <!ENTITY sort.namespace "Namespace">
 <!ENTITY sort.status "Durum">
+<!ENTITY backup.exportAll "Export All…">
+<!ENTITY backup.import "Import…">

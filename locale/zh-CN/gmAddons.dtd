@@ -28,3 +28,5 @@
 <!ENTITY sort.name "名称">
 <!ENTITY sort.namespace "命名空间">
 <!ENTITY sort.status "状态">
+<!ENTITY backup.exportAll "Export All…">
+<!ENTITY backup.import "Import…">
