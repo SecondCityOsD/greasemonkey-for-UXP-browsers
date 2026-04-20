@@ -1,5 +1,47 @@
 ## Changelog
 
+#### 3.6.1 (2026-04-19)
+
+Bugfix-only release for two regressions reported in #13 shortly after
+3.6.0 shipped.  Both affect Pale Moon and Basilisk under the same
+conditions the reports describe on New Moon.
+
+* **`GM_registerMenuCommand` works again on strict-Xray builds.** The
+  3.6.0 fix for the `MenuCommandSandbox.toSource()` crash also moved
+  the menu-command event listeners out of sandbox scope into chrome
+  scope, which hit `XrayWrapper denied access to property N (reason:
+  value is callable)` at click time and silently dropped the callback.
+  Reverted to the original architecture — the listener now runs in
+  sandbox compartment and retrieves the callback by closure instead of
+  through an Xray — but we still inject the function by `toString()`
+  via string concat rather than via the buggy
+  `Function.prototype.toSource()`, so the original crash stays fixed.
+  Thanks to @SeaHOH for independently proposing the same revert.
+* **Add-ons Manager works on non-English locales.** The new
+  `&backup.exportAll;` / `&backup.import;` DTD entities were only added
+  to `locale/en-US/gmAddons.dtd` in 3.6.0, so any user running a
+  localised browser saw `XML Parsing Error: undefined entity` at
+  `addonsOverlay.xul:73` and lost the entire Greasemonkey integration
+  with the Add-ons Manager (missing sidebar icon, no sort bar, no
+  Edit / Options / Export / Import buttons, no right-click menu).  The
+  entities are now present in all 33 non-en-US DTDs with the English
+  text as a placeholder that translators can localise later.  Reported
+  by @nicolaasjan in #13.
+* **Backup / export / import feature works on non-English locales
+  too.** Six `.properties` strings used by the backup flow and the
+  edited-script confirm prompt (`confirmEnableAutoUpdate`,
+  `backup.exportTitle` / `importTitle` / `exported` / `imported` /
+  `failed`) were also only present in `en-US`, which caused
+  `GetStringFromName` to throw an uncaught exception the moment a
+  non-en-US user clicked Export All / Import or re-enabled the
+  Automatic Updates radio.  All six keys now live in every locale
+  with English fallback values, via [PR #14](https://github.com/SecondCityOsD/greasemonkey-for-UXP-browsers/pull/14)
+  from [@SeaHOH](https://github.com/SeaHOH).  That PR also localises
+  the two backup DTD entities into Simplified Chinese.
+* `GM_registerMenuCommand` also gains back the Tampermonkey /
+  Violentmonkey `(name, fn, { accessKey })` options-object form that
+  3.6.0 briefly supported via its inline-string implementation.
+
 #### 3.6.0 (2026-04-18)
 
 **Heads-up for existing users:** 3.6.0 uses a new extension ID, so your

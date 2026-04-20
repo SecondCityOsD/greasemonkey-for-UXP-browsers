@@ -6,7 +6,7 @@
   <Description about="urn:mozilla:install-manifest">
 
     <em:id>{544fad5a-9b62-418f-a9ff-616e388cf6c4}</em:id>
-    <em:version>3.6.0</em:version>
+    <em:version>3.6.1</em:version>
     <em:creator>SecondCityOsD</em:creator>
     <em:homepageURL>https://github.com/SecondCityOsD/greasemonkey-for-UXP-browsers</em:homepageURL>
     <em:updateURL>https://raw.githubusercontent.com/SecondCityOsD/greasemonkey-for-UXP-browsers/master/update.rdf</em:updateURL>
