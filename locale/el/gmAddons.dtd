@@ -28,3 +28,5 @@
 <!ENTITY sort.name "Όνομα">
 <!ENTITY sort.namespace "Namespace">
 <!ENTITY sort.status "Κατάσταση">
+<!ENTITY backup.exportAll "Export All…">
+<!ENTITY backup.import "Import…">

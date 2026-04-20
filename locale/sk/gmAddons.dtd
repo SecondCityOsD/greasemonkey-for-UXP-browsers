@@ -28,3 +28,5 @@
 <!ENTITY sort.name "Meno">
 <!ENTITY sort.namespace "Namespace">
 <!ENTITY sort.status "Stav">
+<!ENTITY backup.exportAll "Export All…">
+<!ENTITY backup.import "Import…">

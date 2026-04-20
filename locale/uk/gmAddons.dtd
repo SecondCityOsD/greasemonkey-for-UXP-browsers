@@ -28,3 +28,5 @@
 <!ENTITY sort.name "Назва">
 <!ENTITY sort.namespace "Namespace">
 <!ENTITY sort.status "Стан">
+<!ENTITY backup.exportAll "Export All…">
+<!ENTITY backup.import "Import…">

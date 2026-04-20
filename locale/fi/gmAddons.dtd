@@ -28,3 +28,5 @@
 <!ENTITY sort.name "Nimi">
 <!ENTITY sort.namespace "Namespace">
 <!ENTITY sort.status "Tila">
+<!ENTITY backup.exportAll "Export All…">
+<!ENTITY backup.import "Import…">

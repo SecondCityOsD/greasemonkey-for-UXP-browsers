@@ -28,3 +28,5 @@
 <!ENTITY sort.name "نام">
 <!ENTITY sort.namespace "Namespace">
 <!ENTITY sort.status "وضعیت">
+<!ENTITY backup.exportAll "Export All…">
+<!ENTITY backup.import "Import…">
