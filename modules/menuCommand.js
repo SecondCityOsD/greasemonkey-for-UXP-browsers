@@ -157,6 +157,15 @@ function MenuCommandRun(aContent, aMessage) {
  * @param {string}   aMenuCommandInvalidAccesskeyErrorStr
  * @param {string}   aMenuCommandEventNameSuffix - Security suffix for event names.
  */
+// IMPORTANT: Held as a raw template-literal string, NOT a function.
+// Concatenating a Function with "" in the injection site would invoke
+// Function.prototype.toString(), which on older Pale Moon / New Moon
+// SpiderMonkey builds still runs through the same buggy decompiler as
+// .toSource() and can produce malformed source.  Keeping the source as
+// a string from birth avoids every variant of that bug — the sandbox
+// eval sees the exact text we wrote, byte for byte.
+// See issue #13 and the v3.6.1 regression that made the menu disappear.
+var MenuCommandSandbox = `
 function MenuCommandSandbox(
     aContent,
     aScriptUuid, aScriptName, aScriptFileURL,
@@ -217,17 +226,6 @@ function MenuCommandSandbox(
         }, true);
   }
   // 4) Export the "register a command" API function to the sandbox scope.
-  /**
-   * GM_registerMenuCommand — registers a new menu command for this script.
-   *
-   * @param {string}   aCommandName - Display name shown in the menu.
-   * @param {function} aCommandFunc - Callback invoked when the user clicks
-   *                                  the menu item.
-   * @param {string}   [aAccesskey] - Single character keyboard shortcut.
-   * @param {*}        [aUnused]    - Legacy parameter (ignored).
-   * @param {string}   [aAccesskey2]- Legacy 5th-argument access key override.
-   * @throws {Error} If aAccesskey is not a single-character string.
-   */
   this.GM_registerMenuCommand = function (
       aCommandName, aCommandFunc, aAccesskey, aUnused, aAccesskey2) {
     aCommandName = String(aCommandName);
@@ -270,13 +268,8 @@ function MenuCommandSandbox(
     return command.cookie;
   };
 
-  /**
-   * Removes a previously registered menu command.
-   *
-   * @param {number} aCookie - The ID returned by GM_registerMenuCommand.
-   */
   this.GM_unregisterMenuCommand = function (aCookie) {
     delete commands[aCookie];
     delete commandFuncs[aCookie];
   };
-};
+}`;
