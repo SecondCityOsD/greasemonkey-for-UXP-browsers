@@ -9,7 +9,7 @@
 
         <RDF:li>
           <RDF:Description>
-            <em:version>3.6.0</em:version>
+            <em:version>3.6.1</em:version>
 
             <!-- Pale Moon -->
             <em:targetApplication>
@@ -17,7 +17,7 @@
                 <em:id>{8de7fcbb-c55c-4fbe-bfc5-fc555c87dbc4}</em:id>
                 <em:minVersion>27.1.0</em:minVersion>
                 <em:maxVersion>34.*</em:maxVersion>
-                <em:updateLink>https://github.com/SecondCityOsD/greasemonkey-for-UXP-browsers/releases/download/3.6.0/greasemonkey-3.6.0.xpi</em:updateLink>
+                <em:updateLink>https://github.com/SecondCityOsD/greasemonkey-for-UXP-browsers/releases/download/3.6.1/greasemonkey-3.6.1.xpi</em:updateLink>
               </RDF:Description>
             </em:targetApplication>
 
@@ -28,7 +28,7 @@
                 <em:minVersion>39.0.0</em:minVersion>
                 <em:maxVersion>56.*</em:maxVersion>
                 <em:basilisk>true</em:basilisk>
-                <em:updateLink>https://github.com/SecondCityOsD/greasemonkey-for-UXP-browsers/releases/download/3.6.0/greasemonkey-3.6.0.xpi</em:updateLink>
+                <em:updateLink>https://github.com/SecondCityOsD/greasemonkey-for-UXP-browsers/releases/download/3.6.1/greasemonkey-3.6.1.xpi</em:updateLink>
               </RDF:Description>
             </em:targetApplication>
           </RDF:Description>
