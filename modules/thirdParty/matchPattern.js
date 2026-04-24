@@ -117,7 +117,14 @@ if (GM_prefRoot.getValue("api.@match.better")) {
   // MatchPattern.jsm
   gPartsRegexp = new RegExp(`^([a-z]+|\\*)://(\\*|\\*\\.[^*/]+|[^*/]+|)(/.*)$`, "");
 } else {
-  gPartsRegexp = new RegExp("^([a-z*]+)://([^/]+)(?:(/.*))$", "");
+  // Host group is `[^/]*` (zero-or-more) so that `file:///*` parses —
+  // that is the canonical Chrome / Tampermonkey / Violentmonkey form
+  // for "any file: URL" and has no host segment between the `://` and
+  // the path.  HOST_REGEXP above already accepts "" via its `|^$`
+  // alternation, and doMatch() below already takes the empty-host
+  // branch when `host === ""`, so the parse regex was the only thing
+  // blocking local-file patterns from working.
+  gPartsRegexp = new RegExp("^([a-z*]+)://([^/]*)(/.*)$", "");
 }
 
 // For the format of "pattern".

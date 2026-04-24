@@ -61,6 +61,17 @@ conditions the reports describe on New Moon.
   defaults pref now reference the new UUID, via
   [PR #15](https://github.com/SecondCityOsD/greasemonkey-for-UXP-browsers/pull/15)
   from [@SeaHOH](https://github.com/SeaHOH).
+* **`@match file:///*` now parses correctly.** The default parts regex
+  in `modules/thirdParty/matchPattern.js` required at least one
+  non-slash character in the host position (`[^/]+`), which rejected
+  the canonical Chrome / Tampermonkey / Violentmonkey form for "any
+  local file" because that form has an empty host between `file://`
+  and `/*`.  Scripts that legitimately want to run on local files
+  (e.g. [Newspaper syndication feed reader](https://greasyfork.org/en/scripts/465932-newspaper-syndication-feed-reader))
+  were rejected at install time with `error.matchPattern.parse`.  The
+  regex is now `[^/]*` (zero-or-more); `HOST_REGEXP` already admitted
+  `""` and `doMatch()` already had a dedicated empty-host branch for
+  file: URIs, so no other changes were needed.
 
 #### 3.6.0 (2026-04-18)
 
