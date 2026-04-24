@@ -3,7 +3,7 @@ This is a fork of Greasemonkey for uxp-based browsers, based on the [upstream ve
 
 This fork was created to continue on the efforts of previous contributors and on Janek's development of the extension.
 
-> **Upgrading from 3.5.0 or earlier?**  3.6.0 uses a new extension ID
+> **Upgrading from 3.5.0 or earlier/old fork?**  3.6.0 uses a new extension ID
 > (`{544fad5a-9b62-418f-a9ff-616e388cf6c4}`), replacing the legacy
 > `greasemonkeyforpm@janekptacijarabaci` ID inherited from Janek's fork.
 > Your browser will **not** auto-update across this change; you need to

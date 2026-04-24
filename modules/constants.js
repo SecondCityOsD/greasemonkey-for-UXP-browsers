@@ -84,7 +84,7 @@ const GM_CONSTANTS = {
   "addonAPIPrefix1": "GM_",
   /** Namespace prefix for the modern GM4 Promise API (e.g. "GM.getValue"). */
   "addonAPIPrefix2": "GM.",
-  "addonGUID": "greasemonkeyforpm@janekptacijarabaci",
+  "addonGUID": "{544fad5a-9b62-418f-a9ff-616e388cf6c4}",
   "addonInstallPolicyClassDescription": "Greasemonkey Script Install Policy",
   "addonInstallPolicyClassID": Components.ID(
       "c03c575c-e87e-4a0f-b88d-8be090116a0c"),
