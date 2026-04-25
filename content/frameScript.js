@@ -275,10 +275,11 @@ function injectDelayedScript(aMessage) {
  *
  * @param {Window}    aContentWin - The content window to inject into.
  * @param {IPCScript} aScript     - The script to inject.
+ * @param {string}    aRunAt      - The run-at phase ("document-*").
  */
-function injectScriptIntoPage(aContentWin, aScript) {
+function injectScriptIntoPage(aContentWin, aScript, aRunAt) {
   let doc = aContentWin.document;
-  let parent = doc.documentElement || doc;
+  let parent = doc.documentElement;
 
   /**
    * Helper: injects a single piece of code as a <script> element.
@@ -307,28 +308,58 @@ function injectScriptIntoPage(aContentWin, aScript) {
     // Fall back to empty object if serialization fails.
   }
 
-  // 1) Inject each @require as a separate <script> element.
+  // 1) Inject a test element to the document. It will fail if javascript
+  //    is disabled (e.g. uBlock).
+  injectCode(`(()=>{
+      let el = document.createElement("div");
+      el.setAttribute("id", "${GM_CONSTANTS.injectIntoPageTestID}");
+      document.documentElement.append(el);
+    })();`
+  );
+  let testElement = doc.querySelector("#" + GM_CONSTANTS.injectIntoPageTestID);
+  let scriptBlocked = !testElement && aScript.fileURL;
+  if (testElement) {
+    testElement.remove();
+  }
+
+  // 2) Inject each @require as a separate <script> element.
   //    Libraries like jQuery must run at global scope so their APIs
   //    (e.g. $, jQuery) are available to the userscript.
-  for (let i = 0; i < aScript.requires.length; i++) {
+  for (let i = 0; !scriptBlocked && i < aScript.requires.length; i++) {
+    let code;
     try {
-      let code = GM_util.fileXhr(
+      code = GM_util.fileXhr(
           aScript.requires[i].fileURL, "application/javascript");
-      if (!injectCode(code, aScript.requires[i].fileURL)) {
-        // CSP blocked — fall back to sandbox for this entire script.
-        let sandbox = createSandbox(gScope, aContentWin,
-            aContentWin.document.documentURI, aScript, "document-end");
-        runScriptInSandbox(sandbox, aScript);
-        return undefined;
-      }
     } catch (e) {
       GM_util.logError(
           "Error loading @require " + aScript.requires[i].fileURL
           + ":\n" + e, false, e.fileName, e.lineNumber);
+      continue
+    }
+    if (!injectCode(code, aScript.requires[i].fileURL)) {
+      scriptBlocked = aScript.requires[i].fileURL;
+      break
     }
   }
 
-  // 2) Inject the script itself, wrapped in an IIFE (Immediately Invoked
+  // 3) In case script has been blocked (e.g. CSP, uBlock ...) and
+  //    injectInto != "page", fall back to sandbox for this entire script.
+  if (scriptBlocked) {
+    let warnning = aScript.injectInto !== "page";
+    GM_util.logError(
+        `Error loading user script "${aScript.name}" into page context, ${
+        warnning ? "fall back to sandbox" : "the script has been blocked"}.`
+        + `\nPage URL: ${aContentWin.document.documentURI}`,
+        warnning, scriptBlocked, null);
+    if (warnning) {
+      let sandbox = createSandbox(gScope, aContentWin,
+          aContentWin.document.documentURI, aScript, aRunAt);
+      runScriptInSandbox(sandbox, aScript);
+    }
+    return;
+  }
+
+  // 4) Inject the script itself, wrapped in an IIFE (Immediately Invoked
   //    Function Expression).  This matches Violentmonkey's behavior:
   //    - Bare var/const/let declarations stay LOCAL (no global pollution)
   //    - Explicit window.x = foo writes ARE visible to the page
@@ -381,7 +412,7 @@ function injectScripts(aScripts, aRunAt, aContentWin) {
         // Used for @grant none (matching VM/TM behavior) and @inject-into page.
         // The IIFE wrapper prevents global scope pollution while allowing
         // intentional window.x writes.  @inject-into content forces sandbox.
-        injectScriptIntoPage(aContentWin, script);
+        injectScriptIntoPage(aContentWin, script, aRunAt);
       } else {
         let sandbox = createSandbox(gScope, aContentWin, url, script, aRunAt);
         runScriptInSandbox(sandbox, script);

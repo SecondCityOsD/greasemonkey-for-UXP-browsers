@@ -130,6 +130,7 @@ const GM_CONSTANTS = {
   "info": {
     "scriptHandler": "Greasemonkey",
   },
+  injectIntoPageTestID: `_${GM_util.uuid().substring(0, 8)}_`,
   /**
    * Tests whether an HTTP status code should be considered a hard failure
    * for script installation (i.e. the install should be abandoned).
