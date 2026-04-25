@@ -2,7 +2,7 @@ pref("extensions.{544fad5a-9b62-418f-a9ff-616e388cf6c4}.description", "chrome://
 pref("extensions.greasemonkey.api.@match.better", false);
 pref("extensions.greasemonkey.api.@match.hash", true);
 pref("extensions.greasemonkey.api.GM_cookie", false);
-pref("extensions.greasemonkey.api.object.polyfill", false);
+pref("extensions.greasemonkey.api.object.polyfill", true);
 pref("extensions.greasemonkey.api.unsafeWindow.grant", false);
 pref("extensions.greasemonkey.cors_csp_override.excludes", false);
 pref("extensions.greasemonkey.cors_csp_override.excludes.value", "[\"\"]");
