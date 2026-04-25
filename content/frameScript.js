@@ -15,6 +15,7 @@ Cu.import("chrome://greasemonkey-modules/content/constants.js");
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 
 Cu.import("chrome://greasemonkey-modules/content/documentObserver.js");
+Cu.import("chrome://greasemonkey-modules/content/extractMeta.js");
 Cu.import("chrome://greasemonkey-modules/content/GM_openInTab.js");
 Cu.import("chrome://greasemonkey-modules/content/GM_setClipboard.js");
 Cu.import("chrome://greasemonkey-modules/content/ipcScript.js");
@@ -300,14 +301,6 @@ function injectScriptIntoPage(aContentWin, aScript, aRunAt) {
     }
   }
 
-  // Build GM_info JSON for injection into the script's scope.
-  let gmInfoJson = "{}";
-  try {
-    gmInfoJson = JSON.stringify(aScript.info());
-  } catch (e) {
-    // Fall back to empty object if serialization fails.
-  }
-
   // 1) Inject a test element to the document. It will fail if javascript
   //    is disabled (e.g. uBlock).
   injectCode(`(()=>{
@@ -359,28 +352,46 @@ function injectScriptIntoPage(aContentWin, aScript, aRunAt) {
     return;
   }
 
-  // 4) Inject the script itself, wrapped in an IIFE (Immediately Invoked
+  // 4) Prepare script source code and GM_info JSON.
+  let scriptCode;
+  try {
+    scriptCode = GM_util.fileXhr(aScript.fileURL, "application/javascript");
+  } catch (e) {
+    GM_util.logError(
+        "Error loading script " + aScript.fileURL
+        + ":\n" + e, true, e.fileName, e.lineNumber);
+    return;
+  }
+
+  let gmInfoJson = "{}";
+  try {
+    let gmInfo = aScript.info();
+    gmInfo.isIncognito = GM_util.windowIsPrivate(aContentWin);
+    gmInfo.isPrivate = gmInfo.isIncognito;
+    gmInfo.scriptSource = scriptCode;
+    gmInfo.scriptMetaStr = extractMeta(scriptCode);
+    gmInfoJson = JSON.stringify(gmInfo);
+  } catch (e) {
+    GM_util.logError(
+        "Error loading GM_info:\n" + e, false, e.fileName, e.lineNumber);
+    // Fall back to empty object if serialization fails.
+  }
+
+
+  // 5) Inject the script itself, wrapped in an IIFE (Immediately Invoked
   //    Function Expression).  This matches Violentmonkey's behavior:
   //    - Bare var/const/let declarations stay LOCAL (no global pollution)
   //    - Explicit window.x = foo writes ARE visible to the page
   //    - GM_info and unsafeWindow are available inside the function scope
   //    This prevents scripts from accidentally interfering with page JS
   //    while still allowing intentional page-context access.
-  try {
-    let scriptCode = GM_util.fileXhr(
-        aScript.fileURL, "application/javascript");
-    let asyncPrefix = aScript.topLevelAwait ? "async " : "";
-    let wrappedCode = "(" + asyncPrefix + "function() {\n"
-        + "var GM_info = " + gmInfoJson + ";\n"
-        + "var unsafeWindow = window;\n"
-        + scriptCode + "\n"
-        + "})();";
-    injectCode(wrappedCode, aScript.fileURL);
-  } catch (e) {
-    GM_util.logError(
-        "Error loading script " + aScript.fileURL
-        + ":\n" + e, false, e.fileName, e.lineNumber);
-  }
+  let wrappedCode = `
+      (${aScript.topLevelAwait ? "async " : ""}function() {
+        var GM_info = ${gmInfoJson};
+        const unsafeWindow = window;
+        ${scriptCode}
+      })();`;
+  injectCode(wrappedCode, aScript.fileURL);
 }
 
 function injectScripts(aScripts, aRunAt, aContentWin) {
