@@ -828,11 +828,17 @@ RemoteScript.prototype.showSource = function (aBrowser) {
     "accessKey": GM_CONSTANTS.localeStringBundle.createBundle(
         GM_CONSTANTS.localeGmBrowserProperties)
         .GetStringFromName("greeting.btnAccess"),
+    // Clicking "Install" on the source-preview notification bar installs
+    // the script directly instead of reopening the install dialog with a
+    // fresh 5-second countdown.  The user has already seen the install
+    // dialog (which is what brought them here via "Show Script Source")
+    // AND just read the source — making them sit through the security
+    // delay a second time adds friction without adding security.
     "callback": GM_util.hitch(this, function () {
-      GM_util.showInstallDialog(this, tabBrowser);
       // Skip the cleanup handler, as the downloaded files
       // are used in the installation process.
       tab.removeEventListener("TabClose", cleanup, false);
+      this.install();
       // Timeout puts this after the notification closes itself
       // for the button click, avoiding an error inside that (Pale Moon) code.
       GM_util.timeout(function () {
