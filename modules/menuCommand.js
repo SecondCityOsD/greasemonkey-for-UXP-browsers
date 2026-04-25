@@ -226,6 +226,21 @@ function MenuCommandSandbox(
         }, true);
   }
   // 4) Export the "register a command" API function to the sandbox scope.
+  /**
+   * GM_registerMenuCommand — registers a new menu command for this script.
+   *
+   * @param {string}   aCommandName - Display name shown in the menu.
+   * @param {function} aCommandFunc - Callback invoked when the user clicks
+   *                                  the menu item.
+   * @param {string|object} [aAccesskey] - Single-character keyboard shortcut,
+   *                                       OR a Tampermonkey/Violentmonkey
+   *                                       options object of the form
+   *                                       { accessKey, id, autoClose, title }
+   *                                       (only accessKey is currently honoured).
+   * @param {*}        [aUnused]    - Legacy parameter (ignored).
+   * @param {string}   [aAccesskey2]- Legacy 5th-argument access key override.
+   * @throws {Error} If aAccesskey resolves to a non-single-character string.
+   */
   this.GM_registerMenuCommand = function (
       aCommandName, aCommandFunc, aAccesskey, aUnused, aAccesskey2) {
     aCommandName = String(aCommandName);
@@ -268,6 +283,11 @@ function MenuCommandSandbox(
     return command.cookie;
   };
 
+  /**
+   * GM_unregisterMenuCommand — removes a previously registered menu command.
+   *
+   * @param {number} aCookie - The ID returned by GM_registerMenuCommand.
+   */
   this.GM_unregisterMenuCommand = function (aCookie) {
     delete commands[aCookie];
     delete commandFuncs[aCookie];
