@@ -1,5 +1,52 @@
 ## Changelog
 
+#### 3.6.2 (2026-04-20)
+
+Quality-of-life release that fixes a long-standing default that broke
+modern userscripts and merges the uBlock-compat work from PR #16.  No
+breaking changes; in-place upgrade from 3.6.1.
+
+* **`GM is not defined` no longer throws on modern userscripts.** The
+  GM4 namespace polyfill (`evalAPI2Polyfill` in `modules/sandbox.js`)
+  is the only path that declares the `GM` identifier in the script
+  sandbox, and it ran only when
+  `extensions.greasemonkey.api.object.polyfill` was true — but the
+  default was false.  Every script written in the last several years
+  for Tampermonkey / Violentmonkey / Greasemonkey 4 — anything that
+  uses `GM.getValue`, `GM.setValue`, `GM.notification`,
+  `GM.xmlHttpRequest`, etc. — failed on first reference with a
+  `ReferenceError`.  Optional chaining (`GM?.info`) does NOT suppress
+  this — it only short-circuits on null/undefined LHS, not undeclared
+  identifiers.  The default now flips to true; the polyfill is mature
+  and has been there for years.  Reproduced via AdsBypasser
+  (https://adsbypasser.github.io/), which threw at line 471 before
+  this change.
+* **uBlock Origin "block inline scripts" no longer silently breaks
+  userscripts** (PR #16 from [@SeaHOH](https://github.com/SeaHOH)).
+  When uBlock or strict CSP blocks our `<script>` element from
+  executing, GM now detects it via a one-shot probe (inject a tiny
+  div-creating script and check whether the div appears) and falls
+  back to running the script in a sandbox so it executes anyway.
+  Previously such scripts failed silently with no diagnostic.  Also
+  adds `isIncognito` / `isPrivate` to `GM_info` to match Violentmonkey,
+  and reorganises `injectScriptIntoPage` into clearly numbered phases.
+* **"Show Script Source" → "Install" is one click instead of two.**
+  Reading the source previously required a second 5-second countdown
+  in a re-opened install dialog after clicking the notification bar's
+  Install button.  Now the notification bar's Install button installs
+  directly — the user has already gone through the security delay
+  once and read the source explicitly, so the second prompt added
+  friction without adding security.
+* **Restored the per-method JSDoc inside `MenuCommandSandbox`.**  When
+  3.6.1 converted that function to a template-literal string, two
+  inner JSDoc blocks (for the GM_registerMenuCommand and
+  GM_unregisterMenuCommand methods) were dropped along with the
+  conversion.  They survive evaluation as ordinary JS comments inside
+  the eval'd source and the inline docs were genuinely useful, so
+  they're back — with a small enhancement on the `aAccesskey`
+  parameter to document the Tampermonkey / Violentmonkey
+  options-object form it accepts.
+
 #### 3.6.1 (2026-04-19)
 
 Bugfix-only release for two regressions reported in #13 shortly after
