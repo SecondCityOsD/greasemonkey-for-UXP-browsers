@@ -36,19 +36,25 @@ window.addEventListener("load", function window_load() {
       GM_prefRoot.getValue("newScript.namespace", "");
 
   // Default the includes with the current page's url.
+  //
+  // Pre-cleanup, this round-tripped through messageManager:
+  //   chrome → content frame ("greasemonkey:newscript-load-start")
+  //   content frame → chrome ("greasemonkey:newscript-load-end" with .href)
+  // just to read content.location.href from the active tab.  UXP runs
+  // chrome and content in the same process, so the active tab's content
+  // window is reachable from chrome scope directly via
+  // gBrowser.selectedBrowser.contentWindow.  No IPC needed.
   let content = window.opener.gBrowser;
   if (content) {
-    var messageHandler = null;
-    messageHandler = function (aMessage) {
-      window.opener.messageManager.removeMessageListener(
-          "greasemonkey:newscript-load-end", messageHandler);
-      document.getElementById("include").value = aMessage.data.href;
-    };
-    window.opener.messageManager
-        .addMessageListener("greasemonkey:newscript-load-end", messageHandler);
-
-    content.selectedBrowser.messageManager
-        .sendAsyncMessage("greasemonkey:newscript-load-start", {});
+    try {
+      let win = content.selectedBrowser.contentWindow;
+      if (win && win.location && win.location.href) {
+        document.getElementById("include").value = win.location.href;
+      }
+    } catch (e) {
+      // Privileged or cross-origin pages may throw on contentWindow
+      // access; leave the include field empty in that case.
+    }
   }
 
   gClipText = getClipText();

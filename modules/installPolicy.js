@@ -14,13 +14,23 @@
  *   2. Non-file://, non-document, and non-.user.js requests are accepted
  *      (passed through) immediately.
  *   3. Temporary files (e.g. from "View Script Source") are also accepted.
- *   4. Otherwise an async "greasemonkey:script-install" IPC message is sent
- *      to the parent process and REJECT is returned to cancel the navigation.
+ *   4. Otherwise GM_util.getService().showInstallDialog is invoked
+ *      (via the service's scriptInstall() method) and REJECT is returned
+ *      to cancel the navigation.
  *
  * The InstallPolicy factory is registered with the XPCOM component manager
  * and the "content-policy" category once at module load time.  A guard flag
  * (gHaveDoneInit) prevents double-registration when the module is imported
  * in multiple processes.
+ *
+ * Historical note:
+ *   Pre-cleanup, both the temp-file probe and the install request were
+ *   sent through Services.cpmm IPC messages ("greasemonkey:url-is-temp-file"
+ *   and "greasemonkey:script-install").  UXP is single-process, so the
+ *   messages were a self-loop with no benefit.  They were replaced with
+ *   direct service-method invocations here.  The matching ppmm listeners
+ *   in components/greasemonkey.js are unreachable after this change and
+ *   are removed in Phase 4e.
  */
 
 // This module is responsible for detecting user scripts
@@ -135,19 +145,22 @@ var InstallPolicy = {
     if (!FILE_SCRIPT_EXTENSION_REGEXP.test(aContentURI.spec)) {
       return ACCEPT;
     }
-    // Ignore temporary files, e.g. "Show script source".
-    let tmpResult = Services.cpmm.sendSyncMessage(
-        "greasemonkey:url-is-temp-file", {
-          "url": aContentURI.spec,
-        });
-    if (tmpResult.length && tmpResult[0]) {
+    // Ignore temporary files, e.g. "Show script source".  Direct call
+    // into the GreasemonkeyService (UXP single-process — no IPC).  The
+    // synthetic { data: { url } } argument shape preserves the method
+    // signature shared with the legacy cpmm message handler so it can
+    // still be re-registered for unit tests if needed.
+    let service = GM_util.getService();
+    let isTemp = service.urlIsTempFile({
+      "data": { "url": aContentURI.spec },
+    });
+    if (isTemp) {
       return ACCEPT;
     }
 
-    Services.cpmm.sendAsyncMessage(
-        "greasemonkey:script-install", {
-          "url": aContentURI.spec,
-        });
+    service.scriptInstall({
+      "data": { "url": aContentURI.spec },
+    });
 
     return REJECT;
   },

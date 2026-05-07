@@ -85,5 +85,11 @@ function GM_saveOptions() {
   GM_prefRoot.setValue("newScript.template",
       document.getElementById("new-script-template").value);
   // Changes to global excludes should be active after tab reload.
-  Services.cpmm.sendAsyncMessage("greasemonkey:broadcast-script-updates");
+  // Pre-cleanup, this was a Services.cpmm.sendAsyncMessage(
+  // "greasemonkey:broadcast-script-updates") which round-tripped to
+  // the parent process so the GreasemonkeyService could re-broadcast
+  // its script descriptors to all content frames.  UXP is single-
+  // process, so the round trip is unnecessary; calling the method
+  // directly fans out the same updates without IPC.
+  GM_util.getService().broadcastScriptUpdates();
 }
