@@ -15,10 +15,15 @@
  * All other topics support per-topic muting via:
  *   "notification.muted.<topic>" preference (boolean).
  *
- * Pale Moon 27.5.x compat note:
- *   PopupNotifications.show() gained "learnMoreURL" support in 27.6+
- *   (Moonchild PR #1355).  On older builds the Learn More button is added
- *   as a secondary action instead.
+ * Historical note:
+ *   Pre-cleanup, this module fabricated a "Learn More" secondary action
+ *   manually for Pale Moon ≤27.5, where PopupNotifications.show() did
+ *   not yet understand the "learnMoreURL" option natively (added in
+ *   Pale Moon 27.6, see Moonchild PR #1355 — September 2017).  The
+ *   minimum supported target is now Pale Moon 28+ / Basilisk current,
+ *   both of which honour learnMoreURL natively, so the fallback was
+ *   removed.  Basilisk is unaffected either way: it inherits PopupNoti-
+ *   fications from Firefox 52 ESR which has had learnMoreURL since Fx41.
  */
 
 const EXPORTED_SYMBOLS = ["GM_notification"];
@@ -64,10 +69,10 @@ function mute(aTopic) {
 /**
  * Displays a Greasemonkey internal notification popup using PopupNotifications.
  *
- * The popup always has an "OK" button and a "Never show again" secondary action.
- * A "Learn More" secondary action is added when aOptions.learnMoreURL is set,
- * but only on Pale Moon 27.5 and earlier (where PopupNotifications does not
- * support a native learnMoreURL option).
+ * The popup always has an "OK" button and a "Never show again" secondary
+ * action.  When aOptions.learnMoreURL is set, the platform's
+ * PopupNotifications.show() renders a native "Learn More" link inline
+ * (supported on Pale Moon 27.6+ and on Basilisk).
  *
  * Returns without showing anything if the notification topic has been muted.
  *
@@ -75,7 +80,7 @@ function mute(aTopic) {
  * @param {string}      aTopic   - Notification topic; determines muting logic
  *                                 and the popup anchor id.
  * @param {object|null} aOptions - Optional extra options:
- *   learnMoreURL {string} — URL to open in a new tab from the secondary action.
+ *   learnMoreURL {string} — URL surfaced by the platform popup.
  */
 function GM_notification(aMessage, aTopic, aOptions) {
   let type = null;
@@ -101,14 +106,6 @@ function GM_notification(aMessage, aTopic, aOptions) {
       break;
   }
 
-  let supportLearnMoreURL = true;
-  // Pale Moon 27.5.x-
-  // https://github.com/MoonchildProductions/Pale-Moon/pull/1355
-  if (((Services.appinfo.ID == GM_CONSTANTS.browserIDPalemoon)
-      && (GM_util.compareVersion("27.6.0a1", "20170919000000") < 0))) {
-    supportLearnMoreURL = false;
-  }
-
   let chromeWin = GM_util.getBrowserWindow();
   let mainAction = {
     "accessKey": GM_CONSTANTS.localeStringBundle.createBundle(
@@ -120,32 +117,6 @@ function GM_notification(aMessage, aTopic, aOptions) {
         .GetStringFromName("notification.ok.label"),
   };
   let secondaryActions = [];
-  if (aOptions && aOptions.learnMoreURL && !supportLearnMoreURL) {
-    secondaryActions.push({
-      "accessKey": GM_CONSTANTS.localeStringBundle.createBundle(
-          GM_CONSTANTS.localeGreasemonkeyProperties)
-          .GetStringFromName("notification.learnMore.accesskey"),
-      "callback": function () {
-        chromeWin.gBrowser.selectedTab = chromeWin.gBrowser.addTab(
-            aOptions.learnMoreURL, {
-              "ownerTab": chromeWin.gBrowser.selectedTab,
-            });
-        /*
-        switch (type) {
-          case "grants":
-            muteGrants();
-            break;
-          default:
-            mute(aTopic);
-            break;
-        }
-        */
-      },
-      "label": GM_CONSTANTS.localeStringBundle.createBundle(
-          GM_CONSTANTS.localeGreasemonkeyProperties)
-          .GetStringFromName("notification.learnMore.label"),
-    });      
-  }
   secondaryActions.push({
     "accessKey": GM_CONSTANTS.localeStringBundle.createBundle(
         GM_CONSTANTS.localeGreasemonkeyProperties)

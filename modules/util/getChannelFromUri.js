@@ -1,7 +1,12 @@
 /**
  * @file getChannelFromUri.js
- * @overview Creates an nsIChannel for a given nsIURI, using the appropriate
- * API variant (newChannelFromURI2 or legacy newChannelFromURI).
+ * @overview Creates an nsIChannel for a given nsIURI via newChannelFromURI2
+ * with a system principal.
+ *
+ * Historical note: pre-cleanup, this module fell back to the legacy
+ * newChannelFromURI() (single-arg, pre-Fx48) when the modern -2 variant
+ * was missing.  UXP browsers (Pale Moon 28+, Basilisk current) all ship
+ * newChannelFromURI2, so the fallback was unreachable and was removed.
  */
 
 const EXPORTED_SYMBOLS = ["getChannelFromUri"];
@@ -22,16 +27,12 @@ Cu.import("resource://gre/modules/Services.jsm");
 
 
 /**
- * Creates an nsIChannel for the given URI using the best available API.
+ * Creates an nsIChannel for the given URI with a system-principal load info.
  * @param {nsIURI} aUri - The URI for which to create the channel.
  * @returns {nsIChannel} The newly created channel.
  */
 function getChannelFromUri(aUri) {
-  if (GM_CONSTANTS.ioService.newChannelFromURI2) {
-    return GM_CONSTANTS.ioService.newChannelFromURI2(
-        aUri, null, Services.scriptSecurityManager.getSystemPrincipal(),
-        null, Ci.nsILoadInfo.SEC_NORMAL, Ci.nsIContentPolicy.TYPE_OTHER);
-  } else {
-    return GM_CONSTANTS.ioService.newChannelFromURI(aUri);
-  }
+  return GM_CONSTANTS.ioService.newChannelFromURI2(
+      aUri, null, Services.scriptSecurityManager.getSystemPrincipal(),
+      null, Ci.nsILoadInfo.SEC_NORMAL, Ci.nsIContentPolicy.TYPE_OTHER);
 }

@@ -22,18 +22,22 @@ Cu.import("chrome://greasemonkey-modules/content/util.js");
 
 
 var preferredLocale = (function () {
+  // Historical note: pre-cleanup, this had a Firefox 54+ fallback to
+  // mozIOSPreferences for cases where Services.locale.getLocale-
+  // ComponentForUserAgent had been removed
+  // (http://bugzil.la/1337551, http://bugzil.la/1344901).  UXP browsers
+  // (Pale Moon 28+, Basilisk current) keep getLocaleComponentForUserAgent,
+  // so the fallback was unreachable and was removed.  The remaining
+  // try/catch is a defensive safety net only — if the call somehow
+  // throws on a future UXP build we fall back to the useragent.locale
+  // pref rather than failing the whole module load.
   let matchOS = Services.prefs.getBoolPref("intl.locale.matchOS");
 
   if (matchOS) {
     try {
       return Services.locale.getLocaleComponentForUserAgent();
     } catch (e) {
-      // Firefox 54+
-      // http://bugzil.la/1337551
-      // http://bugzil.la/1344901
-      return Cc["@mozilla.org/intl/ospreferences;1"]
-          .getService(Ci.mozIOSPreferences)
-          .systemLocale;
+      // Defensive only; not expected on UXP.  Fall through.
     }
   }
 

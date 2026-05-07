@@ -17,9 +17,12 @@ GMXPI="greasemonkey-$GMVER.xpi"
 echo "Creating working directory ..."
 rm -rf build
 mkdir build
+# update.rdf is a server-side auto-update advertising manifest, not a
+# package member.  install.rdf carries the <em:updateURL> the browser
+# uses to reach it, so update.rdf does not need to ship inside the XPI.
 cp -r \
   chrome.manifest components content defaults install.rdf LICENSE locale \
-      modules skin update.rdf \
+      modules skin \
   build/
 cd build
 

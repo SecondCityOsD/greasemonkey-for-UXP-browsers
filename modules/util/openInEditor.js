@@ -18,26 +18,19 @@ if (typeof Cu === "undefined") {
 
 Cu.import("chrome://greasemonkey-modules/content/constants.js");
 
+// Pale Moon and Basilisk both ship Scratchpad at this resource path
+// (downstream of the Firefox-44 reorganisation that landed it under
+// resource://devtools/client/...).  Pre-cleanup, this module wrapped
+// the import in three additional try/catch fallbacks for older
+// Firefox versions; on UXP those fallback paths don't exist, so the
+// nesting was unreachable and was removed.  The single try/catch
+// remains because Scratchpad is in DevTools, and a user with
+// DevTools disabled would otherwise fail the module load.
 try {
-  Cu.import("resource://gre/modules/devtools/scratchpad-manager.jsm");
+  Cu.import("resource://devtools/client/scratchpad/scratchpad-manager.jsm");
 } catch (e) {
-  try {
-    Cu.import("resource://devtools/client/scratchpad/scratchpad-manager.jsm");
-  } catch (e) {
-    try {
-      // Moved in Firefox 44
-      // http://hg.mozilla.org/mozilla-central/rev/397c69fa1677
-      Cu.import("resource:///modules/devtools/client/scratchpad/scratchpad-manager.jsm");
-    } catch (e) {
-      try {
-        // Moved in Firefox 44
-        // http://hg.mozilla.org/mozilla-central/rev/3b90d45a2bbc
-        Cu.import("resource:///modules/devtools/scratchpad-manager.jsm");
-      } catch (e) {
-        // Ignore.
-      }
-    }
-  }
+  // ScratchpadManager will be undefined; openInEditor() falls through
+  // to the configured external editor in that case.
 }
 
 Cu.import("chrome://greasemonkey-modules/content/prefManager.js");
