@@ -7,16 +7,10 @@
  * (or removes) selected security headers so that userscripts can make
  * cross-origin XHR requests and eval content that would otherwise be blocked.
  *
- * Two integration modes are supported transparently:
- *
- *   1. XPCOM nsIObserver (UXP / Pale Moon) — registers an observer on the
- *      "http-on-examine-response", "http-on-examine-cached-response", and
- *      "http-on-examine-merged-response" topics.  The channel's response
- *      headers are mutated directly via nsIHttpChannel.setResponseHeader().
- *
- *   2. WebExtension webRequest.onHeadersReceived (fallback) — if the XPCOM
- *      observer registration fails, the module falls back to
- *      chrome.webRequest.onHeadersReceived with "blocking" mode.
+ * Integration: XPCOM nsIObserver registered on the
+ * "http-on-examine-response", "http-on-examine-cached-response", and
+ * "http-on-examine-merged-response" topics.  The channel's response headers
+ * are mutated in place via nsIHttpChannel.setResponseHeader().
  *
  * Headers handled:
  *   CORS: access-control-allow-headers, access-control-allow-methods,
@@ -32,6 +26,15 @@
  *
  * Override rules are fully configurable via preferences; see _corsOverride()
  * and _cspOverride() for the per-header rule lookup logic.
+ *
+ * Historical note:
+ *   Pre-cleanup, this module also supported a WebExtension
+ *   webRequest.onHeadersReceived fallback for builds where the XPCOM
+ *   observer registration failed.  UXP browsers (Pale Moon 28+,
+ *   Basilisk current) do not expose chrome.webRequest at all, so the
+ *   fallback was unreachable and was removed along with the WebExt-
+ *   specific branches inside corsCspOverride() and the no-longer-needed
+ *   helpers (gCorsCspListener, gCorsCspMessages, _corsCspRulesEmpty).
  */
 
 "use strict";
@@ -78,17 +81,6 @@ var gCorsCspObservers = [
     "value": "http-on-examine-merged-response",
   },
 ];
-
-var gCorsCspListener = {
-  "value": "onHeadersReceived",
-};
-
-var gCorsCspMessages = {
-  "notDefined": {
-    "content": "not defined",
-    "value": "[" + "not defined" + "]",
-  },
-};
 
 var gCorsCspType = "cors_csp";
 var gCorsType = "cors";
@@ -261,53 +253,27 @@ function _corsCspRulesOverride(aRules, aHeader) {
 }
 
 /**
- * Array filter predicate: keeps header objects whose value is non-empty.
+ * Main CORS/CSP override entry point.  Called as an XPCOM nsIObserver
+ * "observe" callback for the http-on-examine-response /
+ * http-on-examine-cached-response / http-on-examine-merged-response
+ * topics.  Only acts on HTTP 200 responses that pass _corsCspTestUrl().
+ * Channel response headers are mutated in place via setResponseHeader().
  *
- * @param {object} aObj - Header descriptor with a .value string.
- * @returns {boolean} True if the header value is non-empty.
- */
-function _corsCspRulesEmpty(aObj) {
-  return aObj.value !== "";
-}
-
-/**
- * Main CORS/CSP override entry point.  Called either as an XPCOM nsIObserver
- * "observe" callback or as a WebExtension onHeadersReceived listener.
- *
- * Determines which integration mode is active by checking whether aSubject has
- * a responseHeaders property (WebExtension) or is an nsIChannel (XPCOM).
- * Only acts on HTTP 200 responses that pass _corsCspTestUrl().
- *
- * In XPCOM mode returns null (channel headers are mutated in place).
- * In WebExtension mode returns a modified responseHeaders array.
- *
- * @param {nsISupports|object} aSubject - XPCOM subject (nsIHttpChannel) or
- *   WebExtension request details object (has .responseHeaders, .url, etc.).
- * @param {string} aTopic - XPCOM observer topic, or ignored in WE mode.
- * @param {string} aData  - XPCOM extra data (unused).
- * @returns {null|object} null in XPCOM mode; modified details in WE mode.
+ * @param {nsISupports} aSubject - The HTTP channel for the response.
+ * @param {string}      aTopic   - The observer topic name.
+ * @param {string}      aData    - Extra observer data (unused).
+ * @returns {null}
  */
 function corsCspOverride(aSubject, aTopic, aData) {
-  var aDetailsIn = aSubject;
-  var aDetailsOut = {};
-
-  var addonType = 0;
-  if ((aDetailsIn != null)
-      && (typeof aDetailsIn == "object")
-      && aDetailsIn.hasOwnProperty("responseHeaders")) {
-    addonType = 1;
-    aTopic = gCorsCspListener.value;
-  }
-
   if (!GM_util.getEnabled()) {
-    return (addonType == 0) ? null : aDetailsIn.responseHeaders;
+    return null;
   }
 
   var corsOverride = GM_prefRoot.getValue(gCorsOverridePrefBase);
   var cspOverride = GM_prefRoot.getValue(gCspOverridePrefBase);
 
   if (!corsOverride && !cspOverride) {
-    return (addonType == 0) ? null : aDetailsIn.responseHeaders;
+    return null;
   }
 
   var _info = {
@@ -315,58 +281,48 @@ function corsCspOverride(aSubject, aTopic, aData) {
     "url": "",
   };
 
-  if (addonType == 0) {
-    var _observer = {
-      "allow": false,
-      "unknown": true,
-    };
-    for (var observer in gCorsCspObservers) {
-      if (gCorsCspObservers[observer].value == aTopic) {
-        _observer.allow = gCorsCspObservers[observer].allow;
-        _observer.unknown = false;
-        break;
-      }
+  // Validate the topic against the allowed list.
+  var _observer = {
+    "allow": false,
+    "unknown": true,
+  };
+  for (var observer in gCorsCspObservers) {
+    if (gCorsCspObservers[observer].value == aTopic) {
+      _observer.allow = gCorsCspObservers[observer].allow;
+      _observer.unknown = false;
+      break;
     }
-    if (!_observer.allow) {
-      dump(gCorsCspOverrideDumpPrefix + " - forbidden topic: " + aTopic + "\n");
-      return null;
-    }
-    if (_observer.unknown) {
-      dump(gCorsCspOverrideDumpPrefix + " - unknown topic: " + aTopic + "\n");
-      return null;
-    }
-
-    var channel = aSubject.QueryInterface(Ci.nsIChannel);
-    if (!channel) {
-      return null;
-    }
-
-    _info.url = channel.URI.spec;
-  } else {
-    _info.url = aDetailsIn.url;
   }
-  // dump(gCorsCspOverrideDumpPrefix + " - topic (" + aTopic + ") - url: " + _info.url + "\n");
-
-  if (addonType == 0) {
-    try {
-      var httpChannel = channel.QueryInterface(Ci.nsIHttpChannel);
-      _info.status = httpChannel.responseStatus;
-    } catch (e) {
-      // dump(gCorsCspOverrideDumpPrefix + " - http - file:// ? - e:" + "\n" + e + "\n");
-      return null;
-    }
-  } else {
-    _info.status = aDetailsIn.statusCode;
+  if (!_observer.allow) {
+    dump(gCorsCspOverrideDumpPrefix + " - forbidden topic: " + aTopic + "\n");
+    return null;
   }
-  // dump(gCorsCspOverrideDumpPrefix + " - http - status: " + _info.status + "\n");
+  if (_observer.unknown) {
+    dump(gCorsCspOverrideDumpPrefix + " - unknown topic: " + aTopic + "\n");
+    return null;
+  }
+
+  var channel = aSubject.QueryInterface(Ci.nsIChannel);
+  if (!channel) {
+    return null;
+  }
+
+  _info.url = channel.URI.spec;
+
+  try {
+    var httpChannel = channel.QueryInterface(Ci.nsIHttpChannel);
+    _info.status = httpChannel.responseStatus;
+  } catch (e) {
+    // Not an HTTP channel (e.g. file:// after redirect chain).  Skip.
+    return null;
+  }
 
   if (_info.status != 200) {
-    return (addonType == 0) ? null : aDetailsIn.responseHeaders;
+    return null;
   }
 
   if (!_corsCspTestUrl(_info.url)) {
-    // dump(gCorsCspOverrideDumpPrefix + " - testUrl (" + aUrl + "): false" + "\n");
-    return (addonType == 0) ? null : aDetailsIn.responseHeaders;
+    return null;
   }
 
   var corsHeaders = [
@@ -419,46 +375,12 @@ function corsCspOverride(aSubject, aTopic, aData) {
 
   var corsCspHeaders = corsHeaders.concat(cspHeaders);
 
-  if (addonType != 0) {
-    // dump(gCorsCspOverrideDumpPrefix + " - headers - details: " + JSON.stringify(aDetailsIn) + "\n");
-    var inHeaders = aDetailsIn.responseHeaders;
-    var corsCspRulesIn = {
-      "index": [],
-      "value": [],
-    };
-    var corsCspRulesOut = {
-      "index": [],
-      "value": [],
-    };
-    // dump(gCorsCspOverrideDumpPrefix + " - headers - details - responseHeaders - before: " + JSON.stringify(inHeaders) + "\n");
-  }
-
   for (var i = 0, iLen = corsCspHeaders.length; i < iLen; i++) {
     if ((corsOverride && (corsCspHeaders[i].type == gCorsType))
         || (cspOverride && (corsCspHeaders[i].type == gCspType))) {
-      try {    
-        if (addonType == 0) {
-          corsCspRules = channel.getResponseHeader(corsCspHeaders[i].value);
-        } else {
-          corsCspRulesIn = {
-            "index": [],
-            "value": [],
-          };
-          for (var j = 0, jLen = inHeaders.length;
-              j < jLen; j++) {
-            if (inHeaders[j].name.toLowerCase()
-                == corsCspHeaders[i].value) {
-              corsCspRulesIn.index.push(j);
-              corsCspRulesIn.value.push(inHeaders[j].value);
-              // break;
-            }
-          }
-          if (corsCspRulesIn.index.length == 0) {
-            throw gCorsCspMessages.notDefined.value;
-          }
-          corsCspRules = JSON.stringify(corsCspRulesIn);
-        }
-        // dump(gCorsCspOverrideDumpPrefix + " - header (" + corsCspHeaders[i].type + " / " + corsCspHeaders[i].value + ") - before: " + corsCspRules + "\n");
+      try {
+        corsCspRules = channel.getResponseHeader(corsCspHeaders[i].value);
+
         _corsCspOverride = false;
         if (corsOverride && (corsCspHeaders[i].type == gCorsType)) {
           _corsCspOverride = true;
@@ -466,65 +388,26 @@ function corsCspOverride(aSubject, aTopic, aData) {
         if (cspOverride && (corsCspHeaders[i].type == gCspType)) {
           _corsCspOverride = true;
         }
-        if (addonType == 0) {
-          if (_corsCspOverride) {
-            corsCspRulesMy = _corsCspRulesOverride(
-                corsCspRules, corsCspHeaders[i]);
-            channel.setResponseHeader(
-                corsCspHeaders[i].value, corsCspRulesMy, false);
-          }
-        } else {
-          for (var j = 0, jLen = corsCspRulesIn.index.length;
-              j < jLen; j++) {
-            if (_corsCspOverride) {
-              corsCspRulesMy = _corsCspRulesOverride(
-                  corsCspRulesIn.value[j], corsCspHeaders[i]);
-              inHeaders[corsCspRulesIn.index[j]].value
-                  = corsCspRulesMy;
-            }
-          }
+
+        if (_corsCspOverride) {
+          corsCspRulesMy = _corsCspRulesOverride(
+              corsCspRules, corsCspHeaders[i]);
+          channel.setResponseHeader(
+              corsCspHeaders[i].value, corsCspRulesMy, false);
         }
+
         try {
-          if (addonType == 0) {
-            corsCspRules = channel.getResponseHeader(corsCspHeaders[i].value);
-          } else {
-            corsCspRulesOut = {
-              "index": [],
-              "value": [],
-            };
-            for (var j = 0, jLen = corsCspRulesIn.index.length;
-                j < jLen; j++) {
-              if (corsCspRulesIn.value[j].toLowerCase()
-                  == corsCspHeaders[i].value) {
-                corsCspRulesOut.index.push(j);
-                corsCspRulesOut.value.push(corsCspRulesIn.value[j]);
-                // break;
-              }
-            }
-            if ((corsCspRulesOut.index.length == 0)
-                || (corsCspRulesOut.value.filter(_corsCspRulesEmpty)
-                  .length == 0)) {
-              throw gCorsCspMessages.notDefined.value;
-            }
-            corsCspRules = JSON.stringify(corsCspRulesOut);
-          }
+          corsCspRules = channel.getResponseHeader(corsCspHeaders[i].value);
         } catch (e) {
-          // dump(gCorsCspOverrideDumpPrefix + " - header (" + corsCspHeaders[i].type + " / " + corsCspHeaders[i].value + ") - after - " + gCorsCspMessages.notDefined.content + "? - e:" + "\n" + e + "\n");
           continue;
         }
-        // dump(gCorsCspOverrideDumpPrefix + " - header (" + corsCspHeaders[i].type + " / " + corsCspHeaders[i].value + ") - after: " + corsCspRules + "\n");
       } catch (e) {
-        // dump(gCorsCspOverrideDumpPrefix + " - header (" + corsCspHeaders[i].type + " / " + corsCspHeaders[i].value + ") - " + gCorsCspMessages.notDefined.content + "? - e:" + "\n" + e + "\n");
         continue;
       }
     }
   }
 
-  if (addonType != 0) {
-    aDetailsOut.responseHeaders = inHeaders.filter(_corsCspRulesEmpty);
-    // dump(gCorsCspOverrideDumpPrefix + " - headers - details - responseHeaders - after: " + JSON.stringify(aDetailsOut.responseHeaders) + "\n");
-    return aDetailsOut;
-  }
+  return null;
 }
 
 /**
@@ -1099,26 +982,17 @@ function _cspOverride(aCspRules) {
 
 // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ //
 
-try {
-  for (var observer in gCorsCspObservers) {
-    Services.obs.addObserver({
-      "observe": function (aSubject, aTopic, aData) {
-        try {
-          corsCspOverride(aSubject, aTopic, aData);
-        } catch (e) {
-          dump(gCorsCspName + " observer failed:" + "\n" + e + "\n");
-        }
+// Register one observer per HTTP-response topic.  Failures inside any
+// individual callback are caught and logged so a runtime error does not
+// take the whole observer chain down with it.
+for (var observer in gCorsCspObservers) {
+  Services.obs.addObserver({
+    "observe": function (aSubject, aTopic, aData) {
+      try {
+        corsCspOverride(aSubject, aTopic, aData);
+      } catch (e) {
+        dump(gCorsCspName + " observer failed:" + "\n" + e + "\n");
       }
-    }, gCorsCspObservers[observer].value, false);
-  }
-} catch (e) {
-  try {
-    chrome.webRequest[gCorsCspListener.value].addListener(
-      corsCspOverride,
-      {"urls": ["<all_urls>"]},
-      ["responseHeaders", "blocking"]
-    );
-  } catch (e) {
-    dump(gCorsCspName + " listener failed:" + "\n" + e + "\n");
-  }
+    }
+  }, gCorsCspObservers[observer].value, false);
 }

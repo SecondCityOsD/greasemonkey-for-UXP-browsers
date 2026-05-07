@@ -28,8 +28,13 @@
  *     (see bug #2236).
  *   - Basic-Auth header injection (aDetails.user/password) partial support
  *     is commented out pending resolution of bugs #1945 and #2008.
- *   - mozAnon on Pale Moon < 27.2 is emulated via LOAD_ANONYMOUS flag
- *     (see Pale Moon PR #968).
+ *
+ * Historical note:
+ *   Pre-cleanup, this module emulated mozAnon on Pale Moon < 27.2 by
+ *   manually setting LOAD_ANONYMOUS on the request channel (Pale Moon
+ *   PR #968).  The minimum supported target is now Pale Moon 28+ /
+ *   Basilisk current; both honour the mozAnon constructor option
+ *   directly, so the fallback was unreachable and was removed.
  */
 
 const EXPORTED_SYMBOLS = ["GM_xmlHttpRequester"];
@@ -406,12 +411,6 @@ function (aSafeUrl, aDetails, aReq) {
         "GM_xmlhttpRequest():"
         + "\n" + aDetails.url + "\n" + e,
         this.fileURL, null);
-  }
-
-  // Pale Moon 27.2.x-
-  // https://github.com/MoonchildProductions/Pale-Moon/pull/968
-  if ((aDetails.mozAnon || aDetails.anonymous) && !aReq.mozAnon) {
-    aReq.channel.loadFlags |= Ci.nsIRequest.LOAD_ANONYMOUS;
   }
 
   let channel;
