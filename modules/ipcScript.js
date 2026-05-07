@@ -14,15 +14,25 @@
  *   - scriptsForUrl()— filters the global script list to those that match a URL.
  *   - getByUuid()    — looks up a script by UUID in the global list.
  *
- * The module also maintains the global gScripts array (updated via IPC) and
- * patches IPCScript.prototype.globalExcludes to reflect the current list
- * received from the parent.
+ * The module also maintains the global gScripts array (updated by the
+ * GreasemonkeyService whenever scripts are installed, modified, removed,
+ * or reordered) and patches IPCScript.prototype.globalExcludes to
+ * reflect the current site-wide exclude list.
  *
- * Initialisation strategy (Firefox 41+ vs older):
- *   - Firefox 41+ supports initialProcessData, so the first update is
- *     synchronously available without a blocking message.
- *   - Older builds fall back to a synchronous "greasemonkey:scripts-update"
- *     message to avoid a race condition at startup.
+ * Population on UXP:
+ *   The service calls IPCScript.update(data) directly with the result
+ *   of GreasemonkeyService.scriptUpdateData() — no IPC.
+ *
+ * Historical note:
+ *   Pre-cleanup, this module bootstrapped via Services.cpmm:
+ *     - Firefox 41+ would read initialProcessData["greasemonkey:scripts-update"]
+ *     - Older builds would sendSyncMessage to fetch an initial copy
+ *     - Subsequent updates arrived via cpmm.addMessageListener
+ *   The matching parent-side broadcasts lived in
+ *   GreasemonkeyService.broadcastScriptUpdates (ppmm.broadcastAsyncMessage
+ *   plus a write to ppmm.initialProcessData).  UXP is single-process; the
+ *   IPC bus was a self-loop with no benefit and was replaced by a direct
+ *   call to IPCScript.update from the service.
  */
 
 const EXPORTED_SYMBOLS = ["IPCScript"];
@@ -271,16 +281,13 @@ function updateData(aData) {
   });
 }
 
-// Firefox 41+
-// Check if initialProcessData is supported, else child will use sync message.
-if (Services.cpmm.initialProcessData) {
-  updateData(Services.cpmm.initialProcessData["greasemonkey:scripts-update"]);
-} else {
-  let results = Services.cpmm.sendSyncMessage("greasemonkey:scripts-update");
-  updateData(results[0]);
-}
-
-Services.cpmm.addMessageListener(
-    "greasemonkey:scripts-update", function (aMessage) {
-      updateData(aMessage.data);
-    });
+/**
+ * Replaces the in-memory script list.  The GreasemonkeyService calls this
+ * directly from its broadcastScriptUpdates() method whenever the live
+ * config changes (script installed / modified / uninstalled / reordered,
+ * cludes edited, enable-toggle, etc.).  Public alias of updateData().
+ *
+ * @param {object|null} aData - { globalExcludes, scripts } from
+ *   GreasemonkeyService.scriptUpdateData(), or null/undefined for "clear".
+ */
+IPCScript.update = updateData;

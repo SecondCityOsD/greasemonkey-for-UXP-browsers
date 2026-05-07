@@ -442,9 +442,13 @@ function GM_popupClicked(aEvent) {
     } else {
       if ((button == _buttons.middle)
           || ((button == _buttons.right) && modifier)) {
-        // Open folder.
-        Services.cpmm.sendAsyncMessage("greasemonkey:script-open-folder", {
-          "scriptId": script.id,
+        // Open the script's folder.  Pre-cleanup, this round-tripped
+        // through Services.cpmm.sendAsyncMessage("greasemonkey:script-
+        // open-folder", { scriptId }).  UXP is single-process, so we
+        // call the service directly.  Argument shape preserves the
+        // method signature shared with the legacy ppmm message handler.
+        GM_util.getService().scriptOpenFolder({
+          "data": { "scriptId": script.id },
         });
       } else {
         if ((button == _buttons.right) && shift) {

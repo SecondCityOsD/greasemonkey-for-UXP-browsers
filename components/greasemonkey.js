@@ -61,22 +61,15 @@ function startup(aService) {
   // (modules/storageBack.js), no script ever sends those messages, so
   // the listeners were unreachable code and were removed.
 
-  // Others go to the "parent" message manager.
-  Services.ppmm.addMessageListener(
-      "greasemonkey:scripts-update", function (aMessage) {
-        return aService.scriptUpdateData();
-      });
-  Services.ppmm.addMessageListener(
-      "greasemonkey:broadcast-script-updates", function (aMessage) {
-        return aService.broadcastScriptUpdates();
-      });
-  Services.ppmm.addMessageListener(
-      "greasemonkey:script-install", aService.scriptInstall.bind(aService));
-  Services.ppmm.addMessageListener(
-      "greasemonkey:script-open-folder",
-      aService.scriptOpenFolder.bind(aService)); 
-  Services.ppmm.addMessageListener(
-      "greasemonkey:url-is-temp-file", aService.urlIsTempFile.bind(aService));
+  // The five greasemonkey:* ppmm listeners that used to live here
+  // (scripts-update, broadcast-script-updates, script-install,
+  // script-open-folder, url-is-temp-file) were the parent-side
+  // handlers for cpmm.sendAsyncMessage / sendSyncMessage calls in
+  // installPolicy.js, options.js, content/newScript.js,
+  // content/browser.js, and modules/ipcScript.js.  Phases 4c, 4d,
+  // and 4e replaced every one of those senders with direct calls
+  // into the service or into IPCScript, so the listeners are
+  // unreachable code and were removed.
 
   Services.mm.loadFrameScript(
       "chrome://greasemonkey/content/frameScript.js", true);
@@ -175,15 +168,14 @@ service.prototype.scriptUpdateData = function () {
 };
 
 service.prototype.broadcastScriptUpdates = function () {
-  // Check if initialProcessData is supported, else child will use sync message.
-  let data = this.scriptUpdateData();
-  if (Services.ppmm.initialProcessData) {
-    // Initial data for any new processes.
-    Services.ppmm.initialProcessData["greasemonkey:scripts-update"] = data;
-  }
-
-  // Updates for existing ones.
-  Services.ppmm.broadcastAsyncMessage("greasemonkey:scripts-update", data);
+  // UXP single-process: the only consumer of the script list is the
+  // module-private gScripts inside ipcScript.js, which lives in the
+  // same JS runtime as this service.  Push the fresh snapshot directly
+  // — no cpmm round-trip, no initialProcessData write.  Pre-cleanup
+  // this method also did Services.ppmm.broadcastAsyncMessage; that
+  // hop existed only because the parent process couldn't reach
+  // content-process module state without IPC.
+  IPCScript.update(this.scriptUpdateData());
 };
 
 // Pre-cleanup, this file maintained service.scriptValStores (a registry
