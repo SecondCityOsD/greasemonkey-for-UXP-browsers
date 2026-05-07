@@ -319,7 +319,10 @@ function createSandbox(aFrameScope, aContentWin, aUrl, aScript, aRunAt) {
       || GM_util.inArray(aScript.grants, _API2, true)) {
     // Wrap GM_openInTab to clone the returned tab handle into the sandbox.
     // Without this, Xray wrappers block access to .close()/.onclose.
-    let _openInTabFn = GM_util.hitch(null, GM_openInTab, aFrameScope, aUrl);
+    // Phase 4f-2: pass aContentWin instead of the frame message manager.
+    // GM_openInTab now finds the chrome window via getChromeWinForContentWin
+    // and calls GM_BrowserUI.openInTab / .tabClose directly.
+    let _openInTabFn = GM_util.hitch(null, GM_openInTab, aContentWin, aUrl);
     sandbox[_API1] = function (aTabUrl, aTabOptions) {
       let chromeHandle = _openInTabFn(aTabUrl, aTabOptions);
       // Create a sandbox-side tab handle that proxies to the chrome one.
@@ -408,7 +411,7 @@ function createSandbox(aFrameScope, aContentWin, aUrl, aScript, aRunAt) {
       || GM_util.inArray(aScript.grants, _API2, true)
       || GM_util.inArray(aScript.grants, "window.close")) {
     sandbox[_API1] = GM_util.hitch(
-        null, GM_window, aFrameScope, aScript.fileURL, "close");
+        null, GM_window, aContentWin, aScript.fileURL, "close");
   }
   _API1 = "GM_windowFocus";
   _API2 = _API1.replace(
@@ -417,7 +420,7 @@ function createSandbox(aFrameScope, aContentWin, aUrl, aScript, aRunAt) {
       || GM_util.inArray(aScript.grants, _API2, true)
       || GM_util.inArray(aScript.grants, "window.focus")) {
     sandbox[_API1] = GM_util.hitch(
-        null, GM_window, aFrameScope, aScript.fileURL, "focus");
+        null, GM_window, aContentWin, aScript.fileURL, "focus");
   }
 
   _API1 = "GM_xmlhttpRequest";

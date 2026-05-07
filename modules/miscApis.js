@@ -21,9 +21,12 @@
  *     Low-level logger used by GM_log() and GM_console.log().
  *     Writes to nsIConsoleService with a script-name prefix.
  *
- *   GM_window(aFrame, aFileURL, aWhat)
- *     Implements GM_windowClose() and GM_windowFocus() by sending an IPC
- *     message to the parent process.
+ *   GM_window(aContentWin, aFileURL, aWhat)
+ *     Implements GM_windowClose() and GM_windowFocus() by calling
+ *     GM_BrowserUI.window directly on the chrome window that owns
+ *     aContentWin.  Pre-cleanup, this round-tripped through
+ *     aFrame.sendAsyncMessage("greasemonkey:window", …); UXP is
+ *     single-process, so the IPC was a self-loop and was removed.
  */
 
 const EXPORTED_SYMBOLS = [
@@ -45,6 +48,7 @@ Cu.import("chrome://greasemonkey-modules/content/constants.js");
 Cu.import("resource://gre/modules/Services.jsm");
 
 Cu.import("chrome://greasemonkey-modules/content/prefManager.js");
+Cu.import("chrome://greasemonkey-modules/content/thirdParty/getChromeWinForContentWin.js");
 Cu.import("chrome://greasemonkey-modules/content/util.js");
 
 
@@ -391,16 +395,46 @@ GM_ScriptLogger.prototype.log = function (aMessage) {
 // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ //
 
 /**
- * Implements GM_windowClose() and GM_windowFocus() by sending an async IPC
- * message to the parent process, which performs the actual window operation.
+ * Implements GM_windowClose() and GM_windowFocus() by calling
+ * GM_BrowserUI.window directly on the chrome window that owns
+ * aContentWin.
  *
- * @param {nsIMessageSender} aFrame   - Frame message manager.
- * @param {string}           aFileURL - Script file URL (sent for attribution).
- * @param {string}           aWhat    - Operation: "close" or "focus".
+ * @param {nsIDOMWindow} aContentWin - The script's content window.
+ * @param {string}       aFileURL    - Script file URL (forwarded to the
+ *                                     handler for attribution).
+ * @param {string}       aWhat       - Operation: "close" or "focus".
  */
-function GM_window(aFrame, aFileURL, aWhat) {
-  aFrame.sendAsyncMessage("greasemonkey:window", {
-    "fileURL": aFileURL,
-    "what": aWhat,
-  });
+function GM_window(aContentWin, aFileURL, aWhat) {
+  let chromeWin = getChromeWinForContentWin(aContentWin);
+  if (!chromeWin || !chromeWin.GM_BrowserUI
+      || (typeof chromeWin.GM_BrowserUI.window != "function")) {
+    return undefined;
+  }
+  // GM_BrowserUI.window expects the IPC-message envelope shape; preserve
+  // it verbatim so that the chrome-side handler stays unchanged.  The
+  // .target field locates the script's owning <browser> element so the
+  // GM_windowClose handler closes the right tab even when the script is
+  // running in a background tab.
+  let scriptBrowser;
+  try {
+    scriptBrowser = aContentWin
+        .QueryInterface(Ci.nsIInterfaceRequestor)
+        .getInterface(Ci.nsIDocShell)
+        .chromeEventHandler;
+  } catch (e) {
+    scriptBrowser = chromeWin.gBrowser
+        ? chromeWin.gBrowser.selectedBrowser
+        : null;
+  }
+  try {
+    chromeWin.GM_BrowserUI.window({
+      "target": scriptBrowser || chromeWin.gBrowser.selectedBrowser,
+      "data": {
+        "fileURL": aFileURL,
+        "what": aWhat,
+      },
+    });
+  } catch (e) {
+    // Window may have closed; ignore.
+  }
 };

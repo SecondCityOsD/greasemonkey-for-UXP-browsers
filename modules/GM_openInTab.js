@@ -3,8 +3,17 @@
  * @overview Implements the GM_openInTab() API for userscripts.
  *
  * Opens a URL in a new browser tab.  The URL is resolved relative to the
- * current content window's location before being sent to the parent process
- * via an async IPC message ("greasemonkey:open-in-tab").
+ * script's content window, then GM_BrowserUI.openInTab on the chrome
+ * window that owns that content window is invoked directly.
+ *
+ * Historical note:
+ *   Pre-cleanup, this module sent two IPC messages
+ *   ("greasemonkey:open-in-tab" and "greasemonkey:tab-close") via the
+ *   sandbox's frame message manager, which content/browser.js consumed
+ *   through window.messageManager.addMessageListener.  UXP is single-
+ *   process; both legs were self-loops with no benefit.  We now find
+ *   the chrome window via getChromeWinForContentWin() and call
+ *   GM_BrowserUI.openInTab / .tabClose directly.
  *
  * Supported option forms (mirrors the GM4 specification):
  *   GM_openInTab(url)                        — opens in background
@@ -28,6 +37,8 @@ if (typeof Cu === "undefined") {
 
 Cu.import("chrome://greasemonkey-modules/content/constants.js");
 
+Cu.import("chrome://greasemonkey-modules/content/thirdParty/getChromeWinForContentWin.js");
+
 
 // Tab tracking for .close() and .onclose support.
 var gTabIdCounter = 0;
@@ -36,11 +47,12 @@ var gOpenTabs = {};
 /**
  * Opens aUrl in a new browser tab and returns a tab-like object.
  *
- * @param {nsIMessageSender} aFrame   - The frame's message manager, used to
- *                                      send the open-in-tab IPC message.
- * @param {string}           aBaseUrl - Base URL of the current content window,
- *                                      used to resolve relative URLs.
- * @param {string}           aUrl     - The URL to open (may be relative).
+ * @param {nsIDOMWindow} aContentWin - The script's content window; used to
+ *                                     locate the owning chrome window and
+ *                                     to resolve aUrl against the page URL.
+ * @param {string}       aBaseUrl    - Base URL captured at sandbox creation;
+ *                                     used to resolve relative aUrls.
+ * @param {string}       aUrl        - The URL to open (may be relative).
  * @param {boolean|object|undefined} aOptions
  *   - If a boolean: treated as the legacy "loadInBackground" flag.
  *   - If an object: may contain:
@@ -48,12 +60,13 @@ var gOpenTabs = {};
  *       insert  {boolean} — true to insert the new tab adjacent to the current one.
  *       setParent {boolean} — true to inherit parent tab association.
  *   - If omitted/null: browser default behaviour applies.
- * @returns {object} Tab handle with:
+ * @returns {object|null} Tab handle, or null when the chrome window can't
+ *   be resolved.  Tab handle members:
  *   - closed  {boolean}  — true after the tab is closed.
  *   - onclose {function} — called when the tab is closed.
  *   - close() {function} — closes the tab programmatically.
  */
-function GM_openInTab(aFrame, aBaseUrl, aUrl, aOptions) {
+function GM_openInTab(aContentWin, aBaseUrl, aUrl, aOptions) {
   let loadInBackground = null;
   if ((typeof aOptions != "undefined") && (aOptions != null)) {
     if (typeof aOptions.active == "undefined") {
@@ -78,23 +91,54 @@ function GM_openInTab(aFrame, aBaseUrl, aUrl, aOptions) {
 
   let tabId = ++gTabIdCounter;
 
+  // Find the chrome window that hosts this content window.
+  let chromeWin = getChromeWinForContentWin(aContentWin);
+  if (!chromeWin || !chromeWin.GM_BrowserUI
+      || (typeof chromeWin.GM_BrowserUI.openInTab != "function")) {
+    return null;
+  }
+
+  // Build the synthetic { target, data } argument shape that
+  // GM_BrowserUI.openInTab / .tabClose still accept.  Pre-cleanup that
+  // shape was the IPC message envelope; on UXP single-process we just
+  // pass the same structure to the same method directly.
+  let scriptBrowser;
+  try {
+    scriptBrowser = aContentWin
+        .QueryInterface(Ci.nsIInterfaceRequestor)
+        .getInterface(Ci.nsIDocShell)
+        .chromeEventHandler;
+  } catch (e) {
+    scriptBrowser = chromeWin.gBrowser
+        ? chromeWin.gBrowser.selectedBrowser
+        : null;
+  }
+
   // Create the tab handle returned to the script.
   let tabHandle = {
     "closed": false,
     "onclose": null,
     "close": function () {
-      aFrame.sendAsyncMessage("greasemonkey:tab-close", {
-        "tabId": tabId,
-      });
+      try {
+        chromeWin.GM_BrowserUI.tabClose({
+          "target": scriptBrowser || chromeWin.gBrowser.selectedBrowser,
+          "data": { "tabId": tabId },
+        });
+      } catch (e) {
+        // Window may have closed; ignore.
+      }
     },
   };
   gOpenTabs[tabId] = tabHandle;
 
-  aFrame.sendAsyncMessage("greasemonkey:open-in-tab", {
-    "afterCurrent": insertRelatedAfterCurrent,
-    "inBackground": loadInBackground,
-    "tabId": tabId,
-    "url": uri.spec,
+  chromeWin.GM_BrowserUI.openInTab({
+    "target": scriptBrowser || chromeWin.gBrowser.selectedBrowser,
+    "data": {
+      "afterCurrent": insertRelatedAfterCurrent,
+      "inBackground": loadInBackground,
+      "tabId": tabId,
+      "url": uri.spec,
+    },
   });
 
   return tabHandle;
