@@ -304,6 +304,31 @@ Object.defineProperty(Script.prototype, "connects", {
   "enumerable": true,
 });
 
+/**
+ * Read-only view of the script's @antifeature declarations.  Returned as
+ * a copy so callers can't mutate our private array.  Surfaced for the
+ * Permissions section of the per-script preferences dialog (3.7.0).
+ */
+Object.defineProperty(Script.prototype, "antifeatures", {
+  "get": function Script_getAntifeatures() {
+    return this._antifeatures.concat();
+  },
+  "configurable": true,
+  "enumerable": true,
+});
+
+/**
+ * Read-only @supportURL the script declared.  Surfaced for the Metadata
+ * section of the per-script preferences dialog (3.7.0).
+ */
+Object.defineProperty(Script.prototype, "supportURL", {
+  "get": function Script_getSupportURL() {
+    return this._supportURL;
+  },
+  "configurable": true,
+  "enumerable": true,
+});
+
 Object.defineProperty(Script.prototype, "injectInto", {
   "get": function Script_getInjectInto() {
     return this._injectInto || "auto";

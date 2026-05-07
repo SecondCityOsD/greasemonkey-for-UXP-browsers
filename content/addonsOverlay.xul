@@ -75,6 +75,15 @@
     <label value="&backup.import;" class="text-link"
       onclick="GM_backupImport();" />
     <spacer flex="1"/>
+    <!-- Live-search box (3.7.0).  Filters the visible richlistitems in
+         #addon-list as the user types, against name + namespace +
+         description + id.  Independent of AOM's own top-right search
+         box (which navigates to a separate "search results" view). -->
+    <textbox id="gm-live-search" class="greasemonkey-live-search"
+      type="search" emptytext="&greasemonkey.search.placeholder;"
+      placeholder="&greasemonkey.search.placeholder;"
+      oninput="gmLiveSearchInput();"
+      oncommand="gmLiveSearchInput();"/>
     <button label="&sort.status;" tooltiptext="&sort.byStatus;"
       class="sorter" sortBy="uiState,name" checkState="2" />
     <button label="&sort.name;" tooltiptext="&sort.byName;"
@@ -106,7 +115,29 @@
   the user's configured external editor.
 -->
 <hbox id="detail-controls">
-  <button id="gm-detail-edit-btn" insertafter="detail-prefs-btn"
+  <!-- Greasemonkey-owned Options button.  Placed right after the AOM's
+       built-in #detail-prefs-btn.  We hide the AOM button for user
+       scripts and show this one instead, because the AOM button has
+       internal short-circuits (e.g. for `isActive == false`) that we
+       repeatedly tried and failed to override from the outside.  This
+       button has its own command + handler with no AOM dependence, so
+       the dialog opens for disabled scripts too.
+
+       NOTE: deliberately NOT in the .addon-control class.  Pale Moon's
+       extensions.js iterates `.addon-control` elements in the detail
+       pane and sets `disabled=true` on every one of them when the
+       currently-viewed add-on is inactive (userDisabled / softDisabled).
+       Even if we win every CSS battle and force the button visible, a
+       `disabled=true` button silently swallows clicks at the platform
+       level — which is why prior fixes still resulted in "the button
+       does nothing" for disabled scripts.  Dropping the class makes
+       AOM's iterator skip us entirely.  We use an explicit onclick
+       (instead of command=) for the same reason — command dispatch
+       is suppressed on disabled buttons even if our class were back. -->
+  <button id="gm-detail-prefs-btn" insertafter="detail-prefs-btn"
+    class="greasemonkey" hidden="true"
+    onclick="if (event.button == 0) gmDetailPrefsClicked(event);" />
+  <button id="gm-detail-edit-btn" insertafter="gm-detail-prefs-btn"
     class="addon-control greasemonkey" hidden="true"
     label="&edit;" accesskey="&edit.accesskey;"
     tooltiptext="&edit.tooltip;"

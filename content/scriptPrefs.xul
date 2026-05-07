@@ -7,7 +7,7 @@
 <?xml-stylesheet href="chrome://greasemonkey/skin/scriptPrefs.css"
   type="text/css"?>
 
-<!DOCTYPE prefwindow [
+<!DOCTYPE window [
   <!ENTITY % addonsDTD SYSTEM
     "chrome://greasemonkey/locale/gmAddons.dtd">
   <!ENTITY % cludesDTD SYSTEM
@@ -19,82 +19,387 @@
   %greasemonkeyDTD;
 ]>
 
-<dialog xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul"
-  buttons="accept,cancel"
+<!-- Root element is <window>, not <dialog>, so the OS gives us the
+     standard chrome (Min / Max / Close in the title bar).  XUL <dialog>
+     would have been simpler but Pale Moon hands a <dialog>-rooted window
+     dialog-style chrome on Windows even when openWindow features ask for
+     resizable.  See user feedback: "I don't see the maximize button next
+     to the X button or the Minimize icon either" — that was the symptom.
+
+     The OK / Cancel row at the bottom of the body and the Escape key
+     binding below replace the auto-buttons that <dialog> would have
+     supplied. -->
+<window xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul"
   id="greasemonkey-script-preferences"
   title="&scriptPrefs.title;"
-  ondialogaccept="return onDialogAccept();"
-  persist="screenX screenY width height">
+  persist="screenX screenY sizemode"
+  width="720" height="720">
 
 <script type="application/x-javascript"
   src="chrome://greasemonkey/content/scriptPrefs.js" />
 
-<tabbox flex="1">
-  <tabs>
-    <tab label="&scriptPrefs.userSettings;" />
-    <tab label="&scriptPrefs.scriptSettings;" />
-    <resizer id="resizer" dir="right" />
+<!-- Escape closes the window without committing changes (matches the
+     previous <dialog buttons="...,cancel"> behaviour).  Enter does NOT
+     accept globally — too easy to accidentally trigger while typing in
+     a search-style textbox in the Pages tab.  Use the OK button. -->
+<keyset id="prefs-keys">
+  <key id="key-cancel" keycode="VK_ESCAPE" oncommand="window.close();"/>
+</keyset>
+
+<!-- Right-click menu shown over any metadata <description>.  Commits
+     the current text selection to the clipboard via nsIClipboardHelper
+     (see scriptPrefs.js → onMetaCopy).  We previously routed Copy
+     through `cmd_copy`, but in this <window>-rooted dialog the
+     platform's cmd_copy controller does not pick up selections made
+     inside <description> nodes — clicking the menu item produced a
+     no-op clipboard.  Going through nsIClipboardHelper directly
+     bypasses the controller chain entirely. -->
+<menupopup id="meta-context-menu"
+  onpopupshowing="onMetaContextShowing(event);">
+  <menuitem id="meta-copy"
+    label="&scriptPrefs.copy;"
+    accesskey="&scriptPrefs.copy.accesskey;"
+    oncommand="onMetaCopy();"/>
+  <menuitem id="meta-selectall"
+    label="&scriptPrefs.selectAll;"
+    accesskey="&scriptPrefs.selectAll.accesskey;"
+    oncommand="onMetaSelectAll(event);"/>
+</menupopup>
+
+<!-- ── Two-tab top-level ─────────────────────────────────────────────────
+     Settings: dense form (Metadata / Behaviour / Pages / Permissions).
+     Values:   GM_setValue browser, populated in M3.
+     ────────────────────────────────────────────────────────────────────── -->
+<tabbox id="prefs-tabbox" flex="1">
+  <tabs id="prefs-tabs">
+    <tab id="tab-settings" label="&scriptPrefs.tab.settings;"/>
+    <tab id="tab-values"   label="&scriptPrefs.tab.values;"/>
   </tabs>
-  <tabpanels flex="1">
-    <tabpanel flex="1">
-      <vbox flex="1">
-        <vbox flex="1" class="include">
-          <hbox flex="1">
-            <label class="name" value="&label.grpIncluded;" />
-            <label class="count" id="user-includes-count" value="" />
-          </hbox>
-          <cludes flex="1" id="user-includes" />
-        </vbox>
-        <vbox flex="1" class="match">
-          <hbox flex="1">
-            <label class="name" value="&label.grpMatched;" />
-            <label class="count" id="user-matches-count" value="" />
-          </hbox>
-          <cludes flex="1" id="user-matches" />
-        </vbox>
-        <vbox flex="1" class="exclude">
-          <hbox flex="1">
-            <label class="name" value="&label.grpExcluded;" />
-            <label class="count" id="user-excludes-count" value="" />
-          </hbox>
-          <cludes flex="1" id="user-excludes" />
-        </vbox>
+
+  <tabpanels id="prefs-tabpanels" flex="1">
+
+    <!-- ─── Settings tab — single dense scrollable form ──────────────── -->
+    <tabpanel flex="1" orient="vertical">
+      <vbox flex="1" id="settings-scroll" class="settings-scroll">
+
+        <!-- ─── Metadata (read-only) ──────────────────────────────────── -->
+        <groupbox id="grp-metadata" class="prefs-section">
+          <caption label="&scriptPrefs.section.metadata;"/>
+          <grid>
+            <columns>
+              <column class="prefs-meta-key"/>
+              <column flex="1"/>
+            </columns>
+            <rows>
+              <!-- Metadata values are <description> (text-content based)
+                   rather than <label value="">.  XUL <label value="…">
+                   stores its text in an attribute, which the platform
+                   does NOT make selectable — that's why double-clicking
+                   in the Description row used to highlight only that
+                   single field that was already a <description>.  Using
+                   <description> uniformly fixes the selectability and
+                   we add CSS truncation in scriptPrefs.css to keep the
+                   single-line look the old `crop="end"` gave us. -->
+              <row align="center">
+                <label class="prefs-meta-key" value="&scriptPrefs.label.metaName;"/>
+                <description id="meta-name" class="prefs-meta-value prefs-meta-trunc" context="meta-context-menu"
+                  flex="1"/>
+              </row>
+              <row align="center">
+                <label class="prefs-meta-key" value="&scriptPrefs.label.metaNamespace;"/>
+                <description id="meta-namespace" class="prefs-meta-value prefs-meta-trunc" context="meta-context-menu"
+                  flex="1"/>
+              </row>
+              <row align="center">
+                <label class="prefs-meta-key" value="&scriptPrefs.label.metaVersion;"/>
+                <description id="meta-version" class="prefs-meta-value" context="meta-context-menu"
+                  flex="1"/>
+              </row>
+              <row align="start">
+                <label class="prefs-meta-key" value="&scriptPrefs.label.metaDescription;"/>
+                <description id="meta-description" class="prefs-meta-value" context="meta-context-menu"
+                  flex="1"/>
+              </row>
+              <row align="center">
+                <label class="prefs-meta-key" value="&scriptPrefs.label.metaAuthor;"/>
+                <description id="meta-author" class="prefs-meta-value prefs-meta-trunc" context="meta-context-menu"
+                  flex="1"/>
+              </row>
+              <row align="center">
+                <label class="prefs-meta-key" value="&scriptPrefs.label.metaHomepage;"/>
+                <description id="meta-homepage" class="prefs-meta-value text-link prefs-meta-trunc" context="meta-context-menu"
+                  flex="1"
+                  onclick="onLinkClick(event, 'meta-homepage');"/>
+              </row>
+              <row align="center">
+                <label class="prefs-meta-key" value="&scriptPrefs.label.metaSupport;"/>
+                <description id="meta-support" class="prefs-meta-value text-link prefs-meta-trunc" context="meta-context-menu"
+                  flex="1"
+                  onclick="onLinkClick(event, 'meta-support');"/>
+              </row>
+              <row align="center">
+                <label class="prefs-meta-key" value="&scriptPrefs.label.metaUpdateURL;"/>
+                <description id="meta-updateurl" class="prefs-meta-value prefs-meta-trunc" context="meta-context-menu"
+                  flex="1"/>
+              </row>
+              <row align="center">
+                <label class="prefs-meta-key" value="&scriptPrefs.label.metaDownloadURL;"/>
+                <description id="meta-downloadurl" class="prefs-meta-value prefs-meta-trunc" context="meta-context-menu"
+                  flex="1"/>
+              </row>
+              <row align="center">
+                <label class="prefs-meta-key" value="&scriptPrefs.label.metaInstalled;"/>
+                <description id="meta-installed" class="prefs-meta-value" context="meta-context-menu"
+                  flex="1"/>
+              </row>
+              <row align="center">
+                <label class="prefs-meta-key" value="&scriptPrefs.label.metaSize;"/>
+                <description id="meta-size" class="prefs-meta-value" context="meta-context-menu"
+                  flex="1"/>
+              </row>
+              <row align="center">
+                <label class="prefs-meta-key" value="&scriptPrefs.label.metaLastUpdate;"/>
+                <description id="meta-lastupdate" class="prefs-meta-value" context="meta-context-menu"
+                  flex="1"/>
+              </row>
+            </rows>
+          </grid>
+        </groupbox>
+
+        <!-- ─── Behaviour (editable) ──────────────────────────────────── -->
+        <groupbox id="grp-behaviour" class="prefs-section">
+          <caption label="&scriptPrefs.section.behaviour;"/>
+          <grid>
+            <columns>
+              <column class="prefs-meta-key"/>
+              <column flex="1"/>
+            </columns>
+            <rows>
+              <row align="center">
+                <label class="prefs-meta-key" value="&scriptPrefs.label.runAt;"/>
+                <menulist id="behave-runat">
+                  <menupopup>
+                    <menuitem value="document-start" label="document-start"/>
+                    <menuitem value="document-body"  label="document-body"/>
+                    <menuitem value="document-end"   label="document-end"/>
+                    <menuitem value="document-idle"  label="document-idle"/>
+                  </menupopup>
+                </menulist>
+              </row>
+              <row align="center">
+                <label class="prefs-meta-key" value="&scriptPrefs.label.noFrames;"/>
+                <hbox align="center">
+                  <checkbox id="behave-noframes"
+                    label="&scriptPrefs.label.noFramesValue;"
+                    tooltiptext="&scriptPrefs.label.noFramesTooltip;"/>
+                </hbox>
+              </row>
+              <row align="center">
+                <label class="prefs-meta-key" value="&scriptPrefs.label.injectInto;"/>
+                <menulist id="behave-injectinto">
+                  <menupopup>
+                    <menuitem value="auto"    label="&scriptPrefs.injectInto.auto;"/>
+                    <menuitem value="page"    label="&scriptPrefs.injectInto.page;"/>
+                    <menuitem value="content" label="&scriptPrefs.injectInto.content;"/>
+                  </menupopup>
+                </menulist>
+              </row>
+              <row align="center">
+                <label class="prefs-meta-key" value="&scriptPrefs.label.autoUpdate;"/>
+                <radiogroup id="behave-autoupdate" orient="horizontal">
+                  <radio value="default" label="&scriptPrefs.autoUpdate.default;"/>
+                  <radio value="enable"  label="&scriptPrefs.autoUpdate.on;"/>
+                  <radio value="disable" label="&scriptPrefs.autoUpdate.off;"/>
+                </radiogroup>
+              </row>
+              <row align="center">
+                <label class="prefs-meta-key" value="&scriptPrefs.label.position;"/>
+                <hbox align="center">
+                  <menulist id="behave-position">
+                    <!-- Populated at runtime from scriptPrefs.js. -->
+                    <menupopup id="behave-position-popup"/>
+                  </menulist>
+                  <label id="behave-position-suffix" value=""/>
+                </hbox>
+              </row>
+            </rows>
+          </grid>
+        </groupbox>
+
+        <!-- ─── Pages (existing UX preserved per user choice) ─────────── -->
+        <groupbox id="grp-pages" class="prefs-section">
+          <caption label="&scriptPrefs.section.pages;"/>
+
+          <vbox class="include">
+            <hbox align="center">
+              <label class="name" value="&label.grpIncluded;"/>
+              <label class="count" id="user-includes-count" value=""/>
+              <spacer flex="1"/>
+              <label class="prefs-pages-hint" value="&scriptPrefs.pages.userHint;"/>
+            </hbox>
+            <cludes id="user-includes" class="prefs-pages-cludes"/>
+          </vbox>
+
+          <vbox class="match">
+            <hbox align="center">
+              <label class="name" value="&label.grpMatched;"/>
+              <label class="count" id="user-matches-count" value=""/>
+            </hbox>
+            <cludes id="user-matches" class="prefs-pages-cludes"/>
+          </vbox>
+
+          <vbox class="exclude">
+            <hbox align="center">
+              <label class="name" value="&label.grpExcluded;"/>
+              <label class="count" id="user-excludes-count" value=""/>
+            </hbox>
+            <cludes id="user-excludes" class="prefs-pages-cludes"/>
+          </vbox>
+
+          <separator class="thin"/>
+
+          <vbox class="include script-declared">
+            <hbox align="center">
+              <label class="name" value="&scriptPrefs.pages.scriptDeclaredHeader;"/>
+              <spacer flex="1"/>
+              <label class="prefs-pages-hint" value="&scriptPrefs.pages.scriptHint;"/>
+            </hbox>
+            <hbox align="start">
+              <vbox flex="1">
+                <hbox align="center">
+                  <label class="sub-name" value="&label.grpIncluded;"/>
+                  <label class="count" id="script-includes-count" value=""/>
+                </hbox>
+                <cludes id="script-includes" class="readonly prefs-pages-cludes"/>
+              </vbox>
+              <vbox flex="1">
+                <hbox align="center">
+                  <label class="sub-name" value="&label.grpMatched;"/>
+                  <label class="count" id="script-matches-count" value=""/>
+                </hbox>
+                <cludes id="script-matches" class="readonly prefs-pages-cludes"/>
+              </vbox>
+              <vbox flex="1">
+                <hbox align="center">
+                  <label class="sub-name" value="&label.grpExcluded;"/>
+                  <label class="count" id="script-excludes-count" value=""/>
+                </hbox>
+                <cludes id="script-excludes" class="readonly prefs-pages-cludes"/>
+              </vbox>
+            </hbox>
+          </vbox>
+
+          <checkbox id="user-override" label="&checkbox.grpOverride;"/>
+        </groupbox>
+
+        <!-- ─── Permissions (read-only summary) ───────────────────────── -->
+        <groupbox id="grp-permissions" class="prefs-section">
+          <caption label="&scriptPrefs.section.permissions;"/>
+          <grid>
+            <columns>
+              <column class="prefs-meta-key"/>
+              <column flex="1"/>
+            </columns>
+            <rows>
+              <row align="start">
+                <label class="prefs-meta-key" value="&scriptPrefs.label.grants;"/>
+                <description id="perms-grants" class="prefs-meta-value"
+                  flex="1"/>
+              </row>
+              <row align="start">
+                <label class="prefs-meta-key" value="&scriptPrefs.label.connects;"/>
+                <description id="perms-connects" class="prefs-meta-value"
+                  flex="1"/>
+              </row>
+              <row align="start">
+                <label class="prefs-meta-key" value="&scriptPrefs.label.requires;"/>
+                <description id="perms-requires" class="prefs-meta-value"
+                  flex="1"/>
+              </row>
+              <row align="start">
+                <label class="prefs-meta-key" value="&scriptPrefs.label.resources;"/>
+                <description id="perms-resources" class="prefs-meta-value"
+                  flex="1"/>
+              </row>
+              <row align="start">
+                <label class="prefs-meta-key" value="&scriptPrefs.label.antifeatures;"/>
+                <description id="perms-antifeatures" class="prefs-meta-value"
+                  flex="1"/>
+              </row>
+            </rows>
+          </grid>
+        </groupbox>
+
       </vbox>
     </tabpanel>
-    <tabpanel flex="1">
-      <vbox flex="1">
-        <vbox flex="1" class="include">
-          <hbox flex="1">
-            <label class="name" value="&label.grpIncluded;" />
-            <label class="count" id="script-includes-count" value="" />
-          </hbox>
-          <cludes flex="1" id="script-includes" class="readonly" />
-        </vbox>
-        <vbox flex="1" class="match">
-          <hbox flex="1">
-            <label class="name" value="&label.grpMatched;" />
-            <label class="count" id="script-matches-count" value="" />
-          </hbox>
-          <cludes flex="1" id="script-matches" class="readonly" />
-        </vbox>
-        <vbox flex="1" class="exclude">
-          <hbox flex="1">
-            <label class="name" value="&label.grpExcluded;" />
-            <label class="count" id="script-excludes-count" value="" />
-          </hbox>
-          <cludes flex="1" id="script-excludes" class="readonly" />
-        </vbox>
+
+    <!-- ─── Values tab — populated in M3 ─────────────────────────────── -->
+    <tabpanel flex="1" orient="vertical">
+      <vbox flex="1" id="values-pane" class="values-pane">
+        <!-- Toolbar above the values list. -->
+        <hbox align="center" id="values-toolbar">
+          <label id="values-count" value=""/>
+          <spacer flex="1"/>
+          <button id="values-add"    label="&scriptPrefs.values.add;"
+            oncommand="onValueAdd();" disabled="true"/>
+          <button id="values-edit"   label="&scriptPrefs.values.edit;"
+            oncommand="onValueEdit();" disabled="true"/>
+          <button id="values-delete" label="&scriptPrefs.values.delete;"
+            oncommand="onValueDelete();" disabled="true"/>
+        </hbox>
+        <!-- The browser tree.  Empty placeholder until M3 wires it. -->
+        <tree id="values-tree" flex="1" seltype="single"
+          onselect="onValueSelect();">
+          <treecols>
+            <treecol id="values-col-key"   label="&scriptPrefs.values.key;"
+              flex="2" persist="width"/>
+            <splitter class="tree-splitter"/>
+            <treecol id="values-col-type"  label="&scriptPrefs.values.type;"
+              flex="1" persist="width"/>
+            <splitter class="tree-splitter"/>
+            <treecol id="values-col-value" label="&scriptPrefs.values.value;"
+              flex="3" persist="width"/>
+          </treecols>
+          <treechildren id="values-treechildren"/>
+        </tree>
+        <hbox align="center" id="values-empty" hidden="true">
+          <spacer flex="1"/>
+          <label value="&scriptPrefs.values.empty;"
+            class="values-empty-label"/>
+          <spacer flex="1"/>
+        </hbox>
       </vbox>
     </tabpanel>
+
   </tabpanels>
 </tabbox>
 
-<spacer height="5" />
-<!--
-  Translations used (partially) from Scriptish.
-  https://github.com/scriptish/scriptish/
--->
-<checkbox id="user-override" label="&checkbox.grpOverride;" />
-<button label="&edit.tooltip;" oncommand="GM_util.openInEditor(gScript);" />
+<separator class="thin"/>
 
-</dialog>
+<hbox align="center" id="bottom-row">
+  <button id="edit-script"
+    label="&edit.tooltip;"
+    oncommand="GM_util.openInEditor(gScript);"/>
+  <spacer flex="1"/>
+  <!-- Toggle the script's enabled state without dismissing the dialog.
+       Label and tooltip are set in scriptPrefs.js based on the live
+       state, and re-synced after every click. -->
+  <button id="toggle-enabled"
+    oncommand="onToggleEnabled();"/>
+</hbox>
+
+<!-- OK / Cancel.  OK commits any pending changes via onDialogAccept and
+     closes the window; Cancel just closes (commits nothing).  Replaces
+     the auto-buttons that the old <dialog> root supplied. -->
+<hbox align="end" pack="end" id="dialog-buttons">
+  <spacer flex="1"/>
+  <button id="btn-cancel"
+    label="&scriptPrefs.button.cancel;"
+    oncommand="window.close();"/>
+  <button id="btn-ok"
+    label="&scriptPrefs.button.ok;"
+    default="true"
+    oncommand="onDialogAcceptAndClose();"/>
+</hbox>
+
+</window>

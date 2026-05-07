@@ -16,6 +16,7 @@ Cu.import("chrome://greasemonkey-modules/content/constants.js");
 
 (function private_scope() {
 Cu.import("resource://gre/modules/AddonManager.jsm");
+Cu.import("resource://gre/modules/Services.jsm");
 
 Cu.import("chrome://greasemonkey-modules/content/addons.js");
 Cu.import("chrome://greasemonkey-modules/content/prefManager.js");
@@ -149,6 +150,11 @@ var observer = {
         break;
       case events["install"]:
         gListView.addItem(addon);
+        // The newly-appended richlistitem needs to respect any active
+        // live-search filter.  Re-apply.
+        try {
+          if (typeof gmLiveSearchInput == "function") gmLiveSearchInput();
+        } catch (e) {}
 
         break;
       case events["modified"]:
@@ -291,6 +297,15 @@ function init() {
       "isEnabled": addonIsInstalledScript,
       "doCommand": function (aAddon) {
         GM_openFolder(aAddon._script.file);
+      }
+    };
+  gViewController.commands.cmd_userscript_showItemPreferences = {
+      // Always enabled for installed user scripts — including disabled
+      // ones.  The AOM's built-in prefs button gates on `isActive`; ours
+      // does not, which is the whole point of having our own command.
+      "isEnabled": addonIsInstalledScript,
+      "doCommand": function (aAddon) {
+        gmOpenScriptPrefs(aAddon);
       }
     };
 
@@ -472,6 +487,12 @@ function applySort() {
   elements.forEach(function (aElm) {
     list.appendChild(aElm);
   });
+
+  // Re-apply the live-search filter so re-ordering doesn't make
+  // hidden rows reappear.  No-op if the search box is empty.
+  try {
+    if (typeof gmLiveSearchInput == "function") gmLiveSearchInput();
+  } catch (e) {}
 };
 
 function onViewChanged(aEvent) {
@@ -483,6 +504,7 @@ function onViewChanged(aEvent) {
     document.documentElement.classList.remove("greasemonkey");
   }
   updateDetailEditButton();
+  updateDetailPrefsButton();
 };
 
 /**
@@ -521,6 +543,146 @@ function updateDetailEditButton() {
 
   btn.hidden = !(addon && (addon.type == GM_CONSTANTS.scriptAddonType));
 };
+
+/**
+ * For Greasemonkey user-script detail views, hides the AOM's built-in
+ * Options button (#detail-prefs-btn) and shows our own
+ * (#gm-detail-prefs-btn) in the same spot.  Our button is wired to
+ * cmd_userscript_showItemPreferences via the command= attribute in
+ * addonsOverlay.xul, and that command always opens the prefs dialog
+ * regardless of `isActive` — fixes the disabled-script bug that
+ * resisted every attempt to override the AOM's button from the outside.
+ *
+ * For every other addon type and every non-detail view, the AOM button
+ * is restored to whatever state it had before we touched it (visible
+ * for addons with optionsURL, hidden otherwise) and the original
+ * tooltip is put back.  That stops the user-script tooltip from
+ * leaking into the Extensions tab (#3 in the v3.7.0 feedback).
+ */
+function updateDetailPrefsButton() {
+  let aomBtn = document.getElementById("detail-prefs-btn");
+  let gmBtn  = document.getElementById("gm-detail-prefs-btn");
+
+  let viewId = gViewController.currentViewId;
+  let isDetail = viewId
+      && (viewId.indexOf(GM_CONSTANTS.scriptViewIDDetailPrefix) == 0);
+
+  let addon = null;
+  if (isDetail) {
+    try {
+      if (typeof gDetailView != "undefined" && gDetailView) {
+        addon = gDetailView._addon || null;
+      }
+    } catch (e) { addon = null; }
+  }
+
+  let isUserscript = !!(addon
+      && addon.type == GM_CONSTANTS.scriptAddonType);
+
+  if (!isUserscript) {
+    // Restore AOM's button to whatever it was before we touched it.
+    // Both `hidden` and an explicit `style.display = none` so the AOM
+    // CSS rule that hides .addon-control for inactive addons takes back
+    // over without our inline style winning the cascade.
+    if (gmBtn) {
+      gmBtn.hidden = true;
+      gmBtn.style.display = "none";
+    }
+    if (aomBtn && aomBtn._gmHiddenByGM) {
+      aomBtn.hidden = aomBtn._gmAomOrigHidden;
+      aomBtn._gmHiddenByGM = false;
+    }
+    return;
+  }
+
+  // ─── Userscript detail view ────────────────────────────────────────
+  // Hide AOM's button (remembering its original hidden state so we can
+  // restore it on leave), show ours.
+  if (aomBtn && !aomBtn._gmHiddenByGM) {
+    aomBtn._gmAomOrigHidden = aomBtn.hidden;
+    aomBtn._gmHiddenByGM = true;
+  }
+  if (aomBtn) aomBtn.hidden = true;
+
+  if (gmBtn) {
+    gmBtn.hidden = false;
+    // ── Disabled-script Options-button fix (3.7.0 feedback #1) ─────
+    // Belt-and-braces:
+    //   1. Inline `display` overrides any AOM CSS that hides
+    //      .addon-control descendants for inactive add-ons.
+    //   2. Clearing `disabled` keeps the button click-able even if
+    //      AOM's gDetailView_updateState walks the detail pane and
+    //      tries to gray it out.  We dropped the `addon-control`
+    //      class in addonsOverlay.xul so the iterator should not
+    //      touch us, but this is cheap defence-in-depth.
+    gmBtn.style.display = "-moz-box";
+    gmBtn.removeAttribute("disabled");
+    if ("disabled" in gmBtn) gmBtn.disabled = false;
+    // Set our button's label + tooltip from locale.  Doing it here
+    // (rather than in the XUL via &entity;) so the strings can come
+    // from the gmAddons.properties bundle and stay in sync with the
+    // AOM's "Options" wording on platforms where we want to mirror it.
+    try {
+      let bundle = GM_CONSTANTS.localeStringBundle.createBundle(
+          GM_CONSTANTS.localeGmAddonsProperties);
+      gmBtn.setAttribute("tooltiptext",
+          bundle.GetStringFromName("scriptPrefs.optionsBtn.tooltip"));
+    } catch (e) {}
+    // Re-use the AOM's "Options" label from the platform DTD by reading
+    // the AOM button's label.  Falls back to a hard-coded "Options" if
+    // the AOM button somehow has no label.
+    if (!gmBtn.getAttribute("label")) {
+      let aomLabel = aomBtn ? aomBtn.getAttribute("label") : null;
+      gmBtn.setAttribute("label", aomLabel || "Options");
+    }
+  }
+}
+
+/**
+ * Opens the per-script preferences window as a non-modal, resizable,
+ * maximizable top-level chrome window.  Used by both the AOM Options
+ * button (via the capture-phase listener installed in
+ * updateDetailPrefsButton) and any other future entry point that wants
+ * to surface a script's prefs.
+ *
+ * If a prefs window for this exact script is already open, focuses it
+ * instead of stacking duplicates.
+ */
+function gmOpenScriptPrefs(aAddon) {
+  let url = aAddon.optionsURL;
+  if (!url) return;
+
+  // Already open?  Focus it.
+  let enumerator = Services.wm.getEnumerator(null);
+  while (enumerator.hasMoreElements()) {
+    let win = enumerator.getNext();
+    try {
+      if (win.closed) continue;
+      if (win.document && win.document.documentURI === url) {
+        win.focus();
+        return;
+      }
+    } catch (e) { /* tear-down race; keep looking */ }
+  }
+
+  // ── 3.7.0 feedback #2: window must be resizable + minimisable ───
+  // Earlier attempts that asked for "chrome,titlebar,toolbar,...,
+  // resizable,dialog=no" produced a window whose corners couldn't be
+  // dragged on Pale Moon.  The recipe Pale Moon's own PageInfo
+  // window uses ("chrome,toolbar,dialog=no,resizable,minimizable,
+  // centerscreen") DOES give a fully resizable, Min/Max-equipped
+  // chrome window — so we adopt it verbatim here.  The presence of
+  // `minimizable` is what convinces Windows' WM to add the Min/Max
+  // buttons to the title bar; without it some builds render only a
+  // close button.
+  let features = "chrome,toolbar,dialog=no,resizable,minimizable,centerscreen";
+  let browserWin = Services.wm.getMostRecentWindow("navigator:browser");
+  if (browserWin) {
+    browserWin.openDialog(url, "_blank", features);
+  } else {
+    Services.ww.openWindow(null, url, "_blank", features, null);
+  }
+}
 
 function onPopupShowing(aEvent) {
   // e.g. the restart to gDetailView - aAddon.richlistitem is undefined
@@ -601,6 +763,80 @@ function unload() {
   GM_config.removeObserver(observer);
 };
 })();
+
+/**
+ * Click handler for the Greasemonkey Options button in the AOM
+ * detail-view (#gm-detail-prefs-btn).  Lives at module scope (not
+ * inside the IIFE) because XUL inline `onclick="…"` is evaluated in
+ * the document's global scope.
+ *
+ * Why we use this instead of `command="cmd_userscript_showItemPreferences"`:
+ * Pale Moon's extensions.js disables every `.addon-control` button in
+ * the detail pane when the addon is inactive (userDisabled), and a
+ * disabled XUL button silently swallows the click that would otherwise
+ * dispatch the command.  Routing through onclick + a direct call to
+ * the controller bypasses that path entirely.
+ */
+function gmDetailPrefsClicked(aEvent) {
+  if (aEvent && aEvent.button) return;
+  let addon = null;
+  try {
+    if (typeof gDetailView != "undefined" && gDetailView) {
+      addon = gDetailView._addon || null;
+    }
+  } catch (e) {}
+  if (!addon) return;
+  // Defensive: even if our class drop didn't help, a disabled button
+  // sometimes still fires onclick.  Just call the command's doCommand
+  // directly so the dialog opens regardless of UI state.
+  try {
+    let cmd = gViewController.commands.cmd_userscript_showItemPreferences;
+    if (cmd && typeof cmd.doCommand == "function") {
+      cmd.doCommand(addon);
+    }
+  } catch (e) {
+    Components.utils.reportError(
+        "Greasemonkey: gmDetailPrefsClicked failed: " + e);
+  }
+}
+
+/**
+ * Live-search filter for the Greasemonkey tab in about:addons (3.7.0).
+ * Walks #addon-list and toggles `hidden` on every richlistitem whose
+ * name / namespace / description / id does NOT contain the query.
+ *
+ * Lives at module scope because XUL inline `oninput="…"` is evaluated
+ * in the document's global, not inside the IIFE above.
+ *
+ * Independent of the AOM's own top-right "Search all add-ons" box —
+ * that one navigates to a different view; ours just filters in place
+ * so the user can sort + scope at the same time.
+ */
+function gmLiveSearchInput() {
+  let input = document.getElementById("gm-live-search");
+  if (!input) return;
+  let q = (input.value || "").toLowerCase().trim();
+  let list = document.getElementById("addon-list");
+  if (!list) return;
+
+  // childNodes covers both legacy XUL trees and modern DOM-rooted lists.
+  let nodes = list.childNodes;
+  for (let i = 0; i < nodes.length; i++) {
+    let r = nodes[i];
+    if (!r || r.localName != "richlistitem") continue;
+    if (!q) {
+      r.hidden = false;
+      continue;
+    }
+    let hay = ((r.getAttribute("name")        || "") + "\n"
+             + (r.getAttribute("namespace")   || "") + "\n"
+             + (r.getAttribute("description") || "") + "\n"
+             + (r.getAttribute("value")       || "") + "\n"
+             + (r.getAttribute("version")     || ""))
+        .toLowerCase();
+    r.hidden = (hay.indexOf(q) < 0);
+  }
+}
 
 function GM_openUserscriptsOrg() {
   let chromeWin = GM_util.getBrowserWindow();

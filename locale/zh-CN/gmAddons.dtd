@@ -30,3 +30,6 @@
 <!ENTITY sort.status "状态">
 <!ENTITY backup.exportAll "全部导出…">
 <!ENTITY backup.import "导入…">
+
+<!-- 3.7.0: live-search placeholder; translate as needed. -->
+<!ENTITY greasemonkey.search.placeholder "Search scripts...">

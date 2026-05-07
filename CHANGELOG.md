@@ -1,5 +1,65 @@
 ## Changelog
 
+#### 3.7.0 (2026-04-30)
+
+Per-script preferences dialog redesign.  Right-click any user script in
+`about:addons` and pick "Options" — what was a two-tab "User Settings /
+Script Settings" pattern-list dialog is now a dense single-form Settings
+panel showing the full picture of a script in one place, plus a new
+**Values** tab for inspecting and editing the script's `GM_setValue` /
+`GM.setValue` storage.
+
+New features
+
+* **Metadata section** — read-only display of every metadata directive
+  the script declared (or that GM inferred): name, namespace, version,
+  description, author, homepage, support URL, update URL, download URL,
+  install timestamp, last-update timestamp.  Homepage and support URL
+  are clickable and open in a new tab.
+* **Behaviour section** — editable controls for `@run-at`, `@noframes`,
+  `@inject-into`, automatic-updates state (Default / On / Off), and a
+  **TM-style "Execution position" dropdown** (`<position> of <total>`)
+  that drives the same script-ordering as the existing Add-ons Manager
+  "Sort by execution order".  Changing position in the Options dialog
+  takes effect immediately on OK.
+* **Pages section (redesigned layout, same UX)** — keeps the existing
+  Add / Edit / Remove buttons users already know.  User-side patterns
+  (Included / Matched / Excluded) are now stacked above the script's
+  own declared patterns (read-only) so the user sees both at once
+  instead of toggling between tabs.  The "Disable script's rules"
+  override checkbox stays.
+* **Permissions section** — read-only summary of `@grant`, `@connect`,
+  `@require`, `@resource`, and `@antifeature` declarations.
+* **Values tab** — full GM_setValue browser.  Lists every key with its
+  type (string / number / boolean / object / array / null) and an
+  inline preview of the value (truncated for long blobs).  **Add /
+  Edit / Delete** buttons go through the existing
+  `GM_ScriptStorageBack` plumbing so the script's
+  `GM_addValueChangeListener` observers fire correctly.  Edits accept
+  any JSON-serialisable value; objects and arrays are pretty-printed
+  for editing convenience.  An "(invalid)" row type surfaces malformed
+  legacy entries so the user can repair them rather than seeing the
+  Values list silently hide them.
+
+Engineering
+
+* New read-only getters on `Script.prototype`: `antifeatures` and
+  `supportURL`.  Those fields were stored privately and used at parse
+  time but never exposed to consumers; the redesigned dialog needs
+  both.
+* `scriptPrefs.css` extended with the new section / metadata-grid /
+  values-pane / theme-aware styles.  No skin assets added.
+* All new locale strings (~50 entities + ~12 properties) propagated to
+  every shipping locale at the same time the en-US source landed.
+  English placeholders for non-translated locales; translators can
+  localise later without breaking the dialog.
+
+Note: the standalone CodeMirror editor draft from Phase L was parked
+under `_attic/editor-draft/` so that the M-series redesign could land
+without depending on it.  Right-click → "Edit" still opens the user's
+configured external editor (or Scratchpad if none is set), exactly as
+in 3.6.2.
+
 #### 3.6.2 (2026-04-20)
 
 Quality-of-life release that fixes a long-standing default that broke

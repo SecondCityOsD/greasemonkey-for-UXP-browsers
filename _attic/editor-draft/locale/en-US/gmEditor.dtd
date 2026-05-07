@@ -1,0 +1,42 @@
+<!ENTITY editor.title              "Greasemonkey Editor">
+
+<!-- Menubar labels -->
+<!ENTITY editor.menu.file          "File">
+<!ENTITY editor.menu.file.accesskey "F">
+<!ENTITY editor.menu.edit          "Edit">
+<!ENTITY editor.menu.edit.accesskey "E">
+<!ENTITY editor.menu.view          "View">
+<!ENTITY editor.menu.view.accesskey "V">
+
+<!-- File menu -->
+<!ENTITY editor.cmd.save                  "Save">
+<!ENTITY editor.cmd.save.accesskey         "S">
+<!ENTITY editor.cmd.saveAndClose          "Save and Close">
+<!ENTITY editor.cmd.saveAndClose.accesskey "C">
+<!ENTITY editor.cmd.revert                "Revert">
+<!ENTITY editor.cmd.revert.accesskey       "R">
+<!ENTITY editor.cmd.close                 "Close">
+<!ENTITY editor.cmd.close.accesskey        "X">
+
+<!-- Edit menu -->
+<!ENTITY editor.cmd.undo                  "Undo">
+<!ENTITY editor.cmd.undo.accesskey         "U">
+<!ENTITY editor.cmd.redo                  "Redo">
+<!ENTITY editor.cmd.redo.accesskey         "R">
+<!ENTITY editor.cmd.find                  "Find…">
+<!ENTITY editor.cmd.find.accesskey         "F">
+<!ENTITY editor.cmd.findNext              "Find Next">
+<!ENTITY editor.cmd.findNext.accesskey     "N">
+
+<!-- View menu -->
+<!ENTITY editor.cmd.theme                 "Theme">
+<!ENTITY editor.cmd.theme.accesskey        "T">
+<!ENTITY editor.theme.auto                "Auto (follow system)">
+<!ENTITY editor.theme.light               "Light">
+<!ENTITY editor.theme.dark                "Dark">
+<!ENTITY editor.cmd.wordWrap              "Word Wrap">
+<!ENTITY editor.cmd.lineNumbers           "Line Numbers">
+
+<!-- Status bar -->
+<!ENTITY editor.status.divider            "·">
+<!ENTITY editor.status.language           "JavaScript">

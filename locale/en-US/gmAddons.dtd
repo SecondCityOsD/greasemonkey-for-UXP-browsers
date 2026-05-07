@@ -30,3 +30,9 @@
 <!ENTITY sort.status "Status">
 <!ENTITY backup.exportAll "Export All…">
 <!ENTITY backup.import "Import…">
+
+<!-- Live-search placeholder (3.7.0).  Filters the user-script list in
+     the Greasemonkey tab of about:addons by name / namespace /
+     description / id, separately from the Add-ons Manager's own
+     top-right search box. -->
+<!ENTITY greasemonkey.search.placeholder "Search scripts…">

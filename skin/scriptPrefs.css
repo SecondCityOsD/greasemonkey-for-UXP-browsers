@@ -1,13 +1,216 @@
+/*
+ * Greasemonkey per-script preferences dialog
+ * chrome://greasemonkey/skin/scriptPrefs.css
+ *
+ * 3.7.0 redesign — single-form Settings tab + Values tab.  See
+ * content/scriptPrefs.xul for the matching layout.
+ */
+
 cludes {
-  /*
-  XUL flex will expand to an appropriate height.
-  See #2191.
-  Just don't start too tall.
-  */
+  /* See #2191 — XUL flex will expand to an appropriate height; just
+     don't start too tall.  Min-width keeps the includes/matches/excludes
+     rows readable when the dialog is at its narrowest. */
   height: 0;
-  min-width: 500px;
+  min-width: 320px;
 }
 
 #resizer {
   display: none;
+}
+
+/* ─── Top-level dialog layout ─────────────────────────────────────────── */
+
+#prefs-tabbox {
+  margin: 4px;
+}
+
+/* The Settings tab is a single dense form; allow it to scroll vertically
+   when the contents overflow the dialog height.  XUL handles vertical
+   scrolling on a vbox via the `style="overflow: auto"` shim below. */
+#settings-scroll {
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 4px 6px;
+}
+
+.prefs-section {
+  margin: 4px 0;
+}
+
+/* ─── Metadata + Permissions: two-column "key: value" grid ─────────── */
+
+.prefs-meta-key {
+  /* Right-aligned, fixed-width "label:" column.  140 px is enough for
+     "Allowed connect hosts" without forcing the value column tiny. */
+  text-align: end;
+  font-weight: bold;
+  min-width: 140px;
+  padding-right: 8px;
+  -moz-padding-end: 8px;
+  color: -moz-FieldText;
+}
+
+.prefs-meta-value {
+  margin: 1px 0;
+  padding: 0;
+  /* In 3.7.0 the metadata fields are <description> elements (text in a
+     child text node), so user-select: text is honoured natively — but
+     the `!important` is kept as belt-and-braces in case a future
+     theme regression sets it back to none on description elements. */
+  -moz-user-select: text !important;
+  user-select: text !important;
+  -moz-user-focus: normal;
+  cursor: text;
+}
+
+/* Single-line metadata rows: emulate the old `crop="end"` ellipsis on
+   labels, but on <description> elements.  Without these three lines a
+   long URL would wrap onto a second visual line and bloat the row. */
+.prefs-meta-trunc {
+  white-space: nowrap;
+  overflow: hidden;
+  -moz-binding: none; /* avoid the default <description> XBL line-break behaviour */
+  text-overflow: ellipsis;
+}
+
+/* Multi-line description text (script @description) keeps wrapping. */
+#meta-description {
+  white-space: normal;
+  text-overflow: clip;
+}
+
+/* Click-to-open URL fields: pointer cursor wins over the `text` cursor
+   from .prefs-meta-value above.  Selection still works on
+   ctrl-click-and-drag and via right-click → "Select All". */
+.prefs-meta-value.text-link {
+  cursor: pointer;
+}
+
+/* Click-to-open URL labels (homepage, support).  Subtle underline + colour
+   change on hover so the affordance is obvious without cluttering the
+   read-only sections. */
+.prefs-meta-value.text-link {
+  color: -moz-nativehyperlinktext;
+  cursor: pointer;
+}
+.prefs-meta-value.text-link:hover {
+  text-decoration: underline;
+}
+/* When the URL is empty, hide the link styling so the row reads "—". */
+.prefs-meta-value.text-link[value=""] {
+  color: GrayText;
+  cursor: default;
+  text-decoration: none;
+}
+
+/* ─── Behaviour section ──────────────────────────────────────────────── */
+
+#behave-runat,
+#behave-injectinto,
+#behave-position {
+  min-width: 180px;
+}
+
+#behave-autoupdate {
+  margin: 0;
+}
+#behave-autoupdate radio {
+  margin: 0 12px 0 0;
+}
+
+#behave-position-suffix {
+  margin-left: 6px;
+  color: GrayText;
+}
+
+/* ─── Pages section ──────────────────────────────────────────────────── */
+
+.prefs-pages-cludes {
+  margin: 2px 0 8px 0;
+}
+
+#grp-pages .name {
+  font-weight: bold;
+}
+#grp-pages .sub-name {
+  font-style: italic;
+  color: -moz-FieldText;
+}
+#grp-pages .count {
+  margin-left: 6px;
+  color: GrayText;
+  font-size: 0.9em;
+}
+.prefs-pages-hint {
+  color: GrayText;
+  font-style: italic;
+  font-size: 0.9em;
+}
+
+/* Visual divider between user-side patterns and script-declared ones. */
+#grp-pages separator.thin {
+  border-top: 1px solid ThreeDShadow;
+  margin: 6px 0;
+  height: 0;
+  padding: 0;
+}
+
+/* The script-declared cludes lists run side by side; give each enough
+   width to stay legible. */
+#grp-pages .script-declared cludes {
+  min-width: 0;       /* override the dialog-wide min above */
+  height: 100px;
+  margin-right: 6px;
+}
+
+/* ─── Permissions section ─────────────────────────────────────────────── */
+
+#grp-permissions description.prefs-meta-value {
+  white-space: pre-wrap;
+}
+/* When a permissions row is empty, show "—" via :empty styling so the row
+   doesn't disappear and confuse the layout. */
+#grp-permissions description.prefs-meta-value:empty::before {
+  content: "—";
+  color: GrayText;
+}
+
+/* ─── Values tab ──────────────────────────────────────────────────────── */
+
+.values-pane {
+  padding: 6px;
+}
+#values-toolbar {
+  padding: 0 0 4px 0;
+}
+#values-toolbar > button {
+  margin-left: 4px;
+}
+#values-count {
+  color: GrayText;
+}
+#values-tree {
+  height: 320px;
+}
+.values-empty-label {
+  color: GrayText;
+  font-style: italic;
+  margin: 24px 0;
+}
+
+/* ─── Bottom row (Edit Script + dialog buttons) ──────────────────────── */
+
+#bottom-row {
+  margin: 4px 6px;
+}
+
+/* Section captions get a touch more breathing room than the XUL default. */
+.prefs-section > caption {
+  font-weight: bold;
+}
+
+/* Tab labels: slightly more padding makes the two tabs feel less cramped
+   in narrow dialog widths. */
+#prefs-tabs > tab {
+  padding: 4px 12px;
 }

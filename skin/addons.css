@@ -31,6 +31,15 @@ page.greasemonkey #user-script-list-empty {
   display: none;
 }
 
+/* Live-search box in #greasemonkey-sort-bar (3.7.0).  Sized so it
+   doesn't crowd the sort buttons but remains usable.  Margins keep
+   it separated from the surrounding spacers / sort buttons. */
+#gm-live-search.greasemonkey-live-search {
+  min-width: 180px;
+  max-width: 260px;
+  margin: 0 8px;
+}
+
 /* Do not show native items when view is user scripts. */
 #addonitem-popup[addontype="greasemonkey-user-script"] menuitem:not(.greasemonkey),
 #addonitem-popup[addontype="greasemonkey-user-script"] menuseparator:not(.greasemonkey),

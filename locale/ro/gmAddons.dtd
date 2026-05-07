@@ -30,3 +30,6 @@
 <!ENTITY sort.status "Stare">
 <!ENTITY backup.exportAll "Export All…">
 <!ENTITY backup.import "Import…">
+
+<!-- 3.7.0: live-search placeholder; translate as needed. -->
+<!ENTITY greasemonkey.search.placeholder "Search scripts...">

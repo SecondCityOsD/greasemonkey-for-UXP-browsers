@@ -13,3 +13,68 @@
 <!ENTITY promptForNewPage.defVal "http://example.com/*">
 <!ENTITY promptForNewPage.msg "請輸入一個新的網址，可以利用萬用字元(*)來一次指定多個頁面。">
 <!ENTITY promptForNewPage.title "新增網址">
+<!ENTITY scriptPrefs.tab.settings           "Settings">
+<!ENTITY scriptPrefs.tab.values             "Values">
+
+<!-- Section captions in the Settings tab -->
+<!ENTITY scriptPrefs.section.metadata       "Metadata">
+<!ENTITY scriptPrefs.section.behaviour      "Behavior">
+<!ENTITY scriptPrefs.section.pages          "Pages">
+<!ENTITY scriptPrefs.section.permissions    "Permissions">
+
+<!-- Metadata field labels (read-only fields populated from the script) -->
+<!ENTITY scriptPrefs.label.metaName         "Name">
+<!ENTITY scriptPrefs.label.metaNamespace    "Namespace">
+<!ENTITY scriptPrefs.label.metaVersion      "Version">
+<!ENTITY scriptPrefs.label.metaDescription  "Description">
+<!ENTITY scriptPrefs.label.metaAuthor       "Author">
+<!ENTITY scriptPrefs.label.metaHomepage     "Homepage">
+<!ENTITY scriptPrefs.label.metaSupport      "Support URL">
+<!ENTITY scriptPrefs.label.metaUpdateURL    "Update URL">
+<!ENTITY scriptPrefs.label.metaDownloadURL  "Download URL">
+<!ENTITY scriptPrefs.label.metaInstalled    "Installed">
+<!ENTITY scriptPrefs.label.metaLastUpdate   "Last updated">
+
+<!-- Behaviour field labels and dropdown values -->
+<!ENTITY scriptPrefs.label.runAt            "Run at">
+<!ENTITY scriptPrefs.label.noFrames         "No frames">
+<!ENTITY scriptPrefs.label.noFramesValue    "Skip child frames">
+<!ENTITY scriptPrefs.label.injectInto       "Inject into">
+<!ENTITY scriptPrefs.injectInto.auto        "Auto">
+<!ENTITY scriptPrefs.injectInto.page        "Page context">
+<!ENTITY scriptPrefs.injectInto.content     "Content (sandbox)">
+<!ENTITY scriptPrefs.label.autoUpdate       "Automatic updates">
+<!ENTITY scriptPrefs.autoUpdate.default     "Default">
+<!ENTITY scriptPrefs.autoUpdate.on          "On">
+<!ENTITY scriptPrefs.autoUpdate.off         "Off">
+<!ENTITY scriptPrefs.label.position         "Execution position">
+
+<!-- Pages section sub-headers -->
+<!ENTITY scriptPrefs.pages.userHint         "These rules are added on top of the script's own.">
+<!ENTITY scriptPrefs.pages.scriptDeclaredHeader "Script-declared (read-only)">
+<!ENTITY scriptPrefs.pages.scriptHint       "From the script's @include / @match / @exclude.">
+
+<!-- Permissions section field labels -->
+<!ENTITY scriptPrefs.label.grants           "Granted APIs">
+<!ENTITY scriptPrefs.label.connects         "Allowed connect hosts">
+<!ENTITY scriptPrefs.label.requires         "@require">
+<!ENTITY scriptPrefs.label.resources        "@resource">
+<!ENTITY scriptPrefs.label.antifeatures     "Antifeatures">
+
+<!-- Values tab -->
+<!ENTITY scriptPrefs.values.add             "Add…">
+<!ENTITY scriptPrefs.values.edit            "Edit…">
+<!ENTITY scriptPrefs.values.delete          "Delete">
+<!ENTITY scriptPrefs.values.key             "Key">
+<!ENTITY scriptPrefs.values.type            "Type">
+<!ENTITY scriptPrefs.values.value           "Value">
+<!ENTITY scriptPrefs.values.empty           "This script has no stored values.">
+<!ENTITY scriptPrefs.label.noFramesTooltip  "When checked, the script runs only in the top-level page and is skipped inside iframes / child frames.  Maps to the @noframes metadata directive.">
+<!ENTITY scriptPrefs.label.noFramesTooltip.short "@noframes — skip iframes / child frames">
+<!ENTITY scriptPrefs.label.metaSize          "Size">
+<!ENTITY scriptPrefs.button.ok              "OK">
+<!ENTITY scriptPrefs.button.cancel          "Cancel">
+<!ENTITY scriptPrefs.copy                   "Copy">
+<!ENTITY scriptPrefs.copy.accesskey         "C">
+<!ENTITY scriptPrefs.selectAll              "Select All">
+<!ENTITY scriptPrefs.selectAll.accesskey    "A">
