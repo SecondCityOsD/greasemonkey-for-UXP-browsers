@@ -12,6 +12,7 @@ if (typeof Cu === "undefined") {
 // TypeError: setting a property that has only a getter
 // Cu.import("resource://gre/modules/Services.jsm");
 
+Cu.import("chrome://greasemonkey-modules/content/menuCommand.js");
 Cu.import("chrome://greasemonkey-modules/content/util.js");
 
 
@@ -21,22 +22,63 @@ var GM_MenuCommander = {
   "popup": null,
 };
 
+// Pre-cleanup, the chrome ↔ sandbox menu-command IPC went through:
+//   chrome → mm.sendAsync → frameScript.js → CustomEvent into sandbox
+//   sandbox → MenuCommandRespond → cpmm.sendAsync → ppmm listener (here)
+// On UXP single-process, both legs were self-loops with no benefit.
+// We now dispatch CustomEvents directly onto the active tab's
+// content window, and listen for the response via Services.obs.
+
+/**
+ * Bridge object passed to Services.obs.addObserver.  The platform calls
+ * .observe(subject, topic, data); we re-shape the payload to match the
+ * pre-cleanup messageManager listener signature so the existing
+ * messageMenuCommandResponse handler runs unchanged.
+ */
+GM_MenuCommander._observer = {
+  "observe": function (aSubject, aTopic, aData) {
+    if (aTopic !== "greasemonkey:menu-command-response") {
+      return undefined;
+    }
+    let payload;
+    try {
+      payload = JSON.parse(aData);
+    } catch (e) {
+      return undefined;
+    }
+    GM_MenuCommander.messageMenuCommandResponse({ "data": payload });
+  },
+};
+
 GM_MenuCommander.initialize = function () {
-  Services.ppmm.addMessageListener("greasemonkey:menu-command-response",
-      GM_MenuCommander.messageMenuCommandResponse);
+  Services.obs.addObserver(GM_MenuCommander._observer,
+      "greasemonkey:menu-command-response", false);
 };
 
 GM_MenuCommander.uninitialize = function () {
-  Services.ppmm.removeMessageListener("greasemonkey:menu-command-response",
-      GM_MenuCommander.messageMenuCommandResponse);
+  Services.obs.removeObserver(GM_MenuCommander._observer,
+      "greasemonkey:menu-command-response");
 };
 
 GM_MenuCommander.commandClicked = function (aCommand) {
-  gBrowser.selectedBrowser.messageManager.sendAsyncMessage(
-      "greasemonkey:menu-command-run", {
-        "cookie": aCommand.cookie,
-        "scriptUuid": aCommand.scriptUuid,
+  // Dispatch the run-command CustomEvent directly onto the active tab's
+  // content window.  Pre-cleanup, this went through
+  //   gBrowser.selectedBrowser.messageManager.sendAsyncMessage(
+  //       "greasemonkey:menu-command-run", { … })
+  // which frameScript.js (MenuCommandRun) translated into the same
+  // CustomEvent we now create inline.
+  let win = gBrowser.selectedBrowser.contentWindow;
+  if (!win) {
+    return undefined;
+  }
+  let evt = new win.CustomEvent(
+      "greasemonkey-menu-command-run-" + MenuCommandEventNameSuffix, {
+        "detail": JSON.stringify({
+          "cookie": aCommand.cookie,
+          "scriptUuid": aCommand.scriptUuid,
+        }),
       });
+  win.dispatchEvent(evt);
 };
 
 GM_MenuCommander.createMenuItem = function (aCommand) {
@@ -99,9 +141,21 @@ GM_MenuCommander.onPopupShowing = function (aEventTarget) {
   // Start disabled and empty...
   GM_MenuCommander.popup.parentNode.disabled = true;
   GM_util.emptyElm(GM_MenuCommander.popup);
-  // ...ask the selected browser to fill up our menu.
-  gBrowser.selectedBrowser.messageManager.sendAsyncMessage(
-      "greasemonkey:menu-command-list", {
-        "cookie": GM_MenuCommander.cookieShowing,
+
+  // ...ask each sandbox running on the active tab for its registered
+  // commands by dispatching a CustomEvent directly onto the content
+  // window.  Pre-cleanup, this used
+  //   gBrowser.selectedBrowser.messageManager.sendAsyncMessage(
+  //       "greasemonkey:menu-command-list", { cookie })
+  // which frameScript.js (MenuCommandListRequest) translated into the
+  // same CustomEvent we now create inline.
+  let win = gBrowser.selectedBrowser.contentWindow;
+  if (!win) {
+    return undefined;
+  }
+  let evt = new win.CustomEvent(
+      "greasemonkey-menu-command-list-" + MenuCommandEventNameSuffix, {
+        "detail": GM_MenuCommander.cookieShowing,
       });
+  win.dispatchEvent(evt);
 };

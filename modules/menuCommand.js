@@ -3,24 +3,34 @@
  * @overview Implements GM_registerMenuCommand() — allows userscripts to add
  *   items to the Greasemonkey toolbar/context menu.
  *
- * Architecture overview (three layers communicate via DOM events + IPC):
+ * Architecture overview (two layers communicate via DOM events on the
+ * content window):
  *
- *   [Parent process]
- *     Requests the list of registered commands by sending an IPC message to
- *     the frame.  Receives the response via MenuCommandRespond().
- *     Sends a "run this command" IPC message when the user clicks a menu item.
- *
- *   [Frame scope / content process]
- *     MenuCommandListRequest() — receives the list-request IPC message and
- *       re-dispatches it into the sandbox as a CustomEvent.
- *     MenuCommandRun() — receives the run-request IPC message and re-dispatches
- *       it as a CustomEvent so the sandbox can pick it up.
+ *   [Chrome scope]
+ *     content/menuCommander.js dispatches CustomEvents directly onto the
+ *     active tab's content window:
+ *       - "greasemonkey-menu-command-list-<suffix>" when the popup opens,
+ *         to ask each sandbox for its registered commands.
+ *       - "greasemonkey-menu-command-run-<suffix>" when the user clicks a
+ *         menu item.
+ *     Receives responses via Services.obs ("greasemonkey:menu-command-
+ *     response" topic), emitted from MenuCommandRespond() below.
  *
  *   [Script sandbox]
  *     MenuCommandSandbox() — injected BY SOURCE into the sandbox (not by
  *       reference) so that it runs in the script's security context.
  *       Registers the GM_registerMenuCommand function and sets up listeners
  *       for the list/run CustomEvents.
+ *
+ * Historical note:
+ *   Pre-cleanup, an extra layer lived in content/frameScript.js
+ *   (MenuCommandListRequest / MenuCommandRun) that re-dispatched the
+ *   chrome-side messageManager IPC into CustomEvents.  MenuCommandRespond
+ *   used Services.cpmm.sendAsyncMessage to forward replies back to the
+ *   chrome menu commander, which listened via Services.ppmm.  UXP is
+ *   single-process; both hops were self-loops with no benefit.  The
+ *   chrome side now dispatches CustomEvents directly onto the content
+ *   window, and responses come back via Services.obs.
  *
  * Security:
  *   The event name is suffixed with a per-session random token
@@ -81,9 +91,13 @@ var MenuCommandEventNameSuffix = (function () {
 
 /**
  * Frame-scope handler for the "list menu commands" IPC message.
- * Re-dispatches the request into the sandbox by firing a CustomEvent on the
- * content window.  MenuCommandSandbox listens for this event and responds
- * via MenuCommandRespond().
+ *
+ * RETAINED FOR BACKWARDS COMPATIBILITY of the EXPORTED_SYMBOLS contract
+ * (frameScript.js still imports it until Phase 4f-2 deletes the
+ * framescript entirely).  After the chrome side switched to dispatching
+ * CustomEvents directly onto the content window, no caller invokes this
+ * function.  Kept as a thin shim so any pending-load framescript
+ * doesn't fail its Cu.import.
  *
  * @param {Window} aContent  - The content window of the tab.
  * @param {object} aMessage  - IPC message; aMessage.data.cookie identifies
@@ -99,24 +113,34 @@ function MenuCommandListRequest(aContent, aMessage) {
 
 /**
  * Callback invoked from inside the script sandbox when it responds to a
- * "list menu commands" request.  Forwards the list up to the parent process.
+ * list-commands request.  Forwards the list to any subscribed chrome menu
+ * commander via the platform observer service.
  *
  * @param {number} aCookie - The request cookie echoed from the list-request event.
  * @param {object} aData   - Map of cookie → command descriptor for all registered
  *                           commands in this script.
  */
 function MenuCommandRespond(aCookie, aData) {
-  Services.cpmm.sendAsyncMessage(
-      "greasemonkey:menu-command-response", {
-        "commands": aData,
-        "cookie": aCookie,
-      });
+  // Pre-cleanup, this round-tripped through
+  // Services.cpmm.sendAsyncMessage("greasemonkey:menu-command-response").
+  // UXP is single-process; the platform observer service reaches the
+  // chrome menu commander listener (content/menuCommander.js) directly
+  // in this same process.  Subject is null, topic identifies the
+  // message, data is a JSON-serialised payload (Services.obs only
+  // accepts strings as the data argument).
+  let payload = JSON.stringify({
+    "commands": aData,
+    "cookie": aCookie,
+  });
+  Services.obs.notifyObservers(null,
+      "greasemonkey:menu-command-response", payload);
 }
 
 /**
  * Frame-scope handler for the "run this menu command" IPC message.
- * Re-dispatches the run request into the sandbox as a CustomEvent so that
- * MenuCommandSandbox can invoke the registered callback.
+ *
+ * RETAINED FOR BACKWARDS COMPATIBILITY of the EXPORTED_SYMBOLS contract
+ * (frameScript.js still imports it until Phase 4f-2).  No live caller.
  *
  * @param {Window} aContent  - The content window of the tab.
  * @param {object} aMessage  - IPC message; aMessage.data contains the
