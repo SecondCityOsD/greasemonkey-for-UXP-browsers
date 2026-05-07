@@ -93,6 +93,7 @@ var observer = {
       "edit-enabled": "edit-enabled",
       "install": "install",
       "modified": "modified",
+      "move": "move",
       "uninstall": "uninstall",
     };
     let _eventsAlsoDetail = [
@@ -156,6 +157,32 @@ var observer = {
           if (typeof gmLiveSearchInput == "function") gmLiveSearchInput();
         } catch (e) {}
 
+        break;
+      case events["move"]:
+        // Refresh every richlistitem's executionIndex attribute and
+        // re-apply the sort, mirroring what reorderScriptExecution()
+        // does after its own config.move() call.  This makes the AOM
+        // row order reflect any caller of config.move() — including
+        // the per-script Options dialog (scriptPrefs.js) where the
+        // user picks a position from the dropdown.  Pre-fix, only the
+        // right-click "Execute first/sooner/later/last" path worked,
+        // because it manually invoked this same logic; the Options
+        // dialog called config.move() but the row order didn't redraw
+        // until the user switched tabs.
+        AddonManager.getAddonsByTypes(
+            [GM_CONSTANTS.scriptAddonType], function (aAddons) {
+          for (let i = 0, iLen = aAddons.length; i < iLen; i++) {
+            let movedAddon = aAddons[i];
+            if (addonExecutesRichlistitem(movedAddon)) {
+              setRichlistitemExecutionIndex(movedAddon);
+            }
+          }
+          applySort();
+          let richlistbox = document.getElementById("addon-list");
+          if (richlistbox && richlistbox.currentItem) {
+            richlistbox.ensureElementIsVisible(richlistbox.currentItem);
+          }
+        });
         break;
       case events["modified"]:
         if (!aData) {

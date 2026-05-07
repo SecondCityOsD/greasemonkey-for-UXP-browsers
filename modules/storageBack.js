@@ -196,7 +196,13 @@ GM_ScriptStorageBack.prototype.setValue = function (aName, aVal) {
     stmt.reset();
   }
 
-  this._script.changed("val-set", aName);
+  // Defensive: getStorageBackForScript() resolves the IPCScript view
+  // back to the full Script via the service, but on very early startup
+  // it may fall back to the IPCScript which lacks .changed().  Skip
+  // the notification rather than throwing.
+  if (typeof this._script.changed == "function") {
+    this._script.changed("val-set", aName);
+  }
 };
 
 /**
@@ -242,7 +248,10 @@ GM_ScriptStorageBack.prototype.deleteValue = function (aName) {
     stmt.reset();
   }
 
-  this._script.changed("val-del", aName);
+  // Defensive — see setValue() above.
+  if (typeof this._script.changed == "function") {
+    this._script.changed("val-del", aName);
+  }
 };
 
 /**
@@ -282,14 +291,40 @@ var gBackByScriptId = new Map();
  * Backs are kept open for the lifetime of the application; closeAllStorageBacks
  * is called from the GreasemonkeyService's quit-application observer.
  *
- * @param {Script} aScript - Script object with .id and .baseDirName.
+ * IMPORTANT: callers commonly pass an IPCScript (the frozen IPC-shaped
+ * view) rather than the full Script object, because that's what the
+ * sandbox layer has on hand.  The IPCScript carries id / baseDirName but
+ * NOT the live Script.changed() method, which the Back uses to fire
+ * val-set / val-del observer notifications.  We therefore resolve the
+ * id back to the full Script via the GreasemonkeyService here.  If the
+ * service is not yet available (very early startup, or running in a
+ * test harness) we fall back to the IPCScript and leave the Back's
+ * setValue / deleteValue methods to typeof-check before calling
+ * .changed().
+ *
+ * @param {Script|IPCScript} aScript - Either a full Script or its IPC view.
+ *                                     Must expose at least .id and .baseDirName.
  * @returns {GM_ScriptStorageBack}
  */
 function getStorageBackForScript(aScript) {
   let id = aScript.id;
   let back = gBackByScriptId.get(id);
   if (!back) {
-    back = new GM_ScriptStorageBack(aScript);
+    let fullScript = aScript;
+    try {
+      let svc = GM_util.getService();
+      if (svc && svc.config
+          && (typeof svc.config.getScriptById == "function")) {
+        let resolved = svc.config.getScriptById(id);
+        if (resolved) {
+          fullScript = resolved;
+        }
+      }
+    } catch (e) {
+      // Service not ready yet; use whatever we got.  setValue /
+      // deleteValue will skip .changed() if the method is missing.
+    }
+    back = new GM_ScriptStorageBack(fullScript);
     gBackByScriptId.set(id, back);
   }
   return back;
