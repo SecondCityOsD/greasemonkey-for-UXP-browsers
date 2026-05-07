@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>GM Smoke Runner</title>
+<style>
+    body { font-family: -moz-fixed, monospace; padding: 24px; max-width: 720px; }
+    h1 { font-size: 18px; }
+    h2 { font-size: 14px; margin-top: 24px; }
+    code { background: #f5f5f5; padding: 1px 4px; }
+    .marker { background: #fffacd; padding: 6px 10px; margin: 6px 0; }
+    iframe { width: 100%; height: 80px; border: 1px solid #888; }
+    a { color: #06c; }
+</style>
+</head>
+<body>
+<h1>Greasemonkey for UXP — Smoke Test Runner</h1>
+
+<p>This page is the target for tests <code>01–15</code>.  Open the
+   <strong>Browser Console</strong> (<code>Ctrl+Shift+J</code>) and reload
+   to watch the results.</p>
+
+<div class="marker" id="smoke-target">smoke-target — scripts may decorate this</div>
+
+<h2>Iframe (test 09 — @noframes must NOT execute inside it)</h2>
+<iframe src="runner-frame.html" title="iframe for test 09"></iframe>
+
+<h2>Other test pages</h2>
+<ul>
+    <li><a href="runner-other.html">runner-other.html</a> — does NOT match test 02</li>
+    <li><a href="runner-excluded.html">runner-excluded.html</a> — excluded by test 04</li>
+    <li><a href="runner-frame.html">runner-frame.html</a> — open standalone to verify it DOES match if not in an iframe</li>
+</ul>
+
+<h2>Reset stored values</h2>
+<p>To reset the test 05 / 14 counters, open
+   <code>about:addons</code> → Greasemonkey tab → click the affected
+   script's <strong>Options</strong> button → <strong>Values</strong> tab
+   → delete the stored key.</p>
+
+</body>
+</html>

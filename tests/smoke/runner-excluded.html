@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>GM Smoke Runner — excluded</title>
+<style>body { font-family: -moz-fixed, monospace; padding: 24px; max-width: 720px; }</style>
+</head>
+<body>
+<h1>runner-excluded.html</h1>
+<p>This page is matched by tests 02 and 04 but excluded by test 04's
+   <code>@exclude</code> directive.  When you load this page:</p>
+<ul>
+    <li>Test 02 (<code>@match *://*/runner.html</code>) — must NOT log.
+        It targets <code>runner.html</code> only, not this page.</li>
+    <li>Test 04 (<code>@match runner.html, runner-excluded.html;
+        @exclude *runner-excluded*</code>) — must NOT log.
+        Exclude takes priority.</li>
+</ul>
+<p>If either logs <code>[GM-SMOKE-NN]</code> in the Browser Console while
+   you're on this page, that test is broken.</p>
+</body>
+</html>

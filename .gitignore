@@ -1,3 +1,7 @@
 *.xpi
 .project
 .settings
+
+# Smoke-test per-run log — chronological record of pass/fail across phases.
+# Local-only; not part of the smoke set itself.  See tests/smoke/README.md.
+tests/smoke/results.log
