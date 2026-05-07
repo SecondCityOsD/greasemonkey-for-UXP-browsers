@@ -1,18 +1,49 @@
 /**
  * @file storageBack.js
- * @overview Back-end (privileged / component-scope) implementation of
- *   GM_ScriptStorageBack — the SQLite-based persistent key/value store for
- *   userscript GM_getValue / GM_setValue / GM_deleteValue / GM_listValues.
+ * @overview Per-script SQLite key/value store for GM_setValue / GM_getValue /
+ *   GM_deleteValue / GM_listValues — and the GM4 async equivalents
+ *   GM.setValue / GM.getValue / GM.deleteValue / GM.listValues, plus the
+ *   batched GM_getValues / GM_setValues / GM_deleteValues and
+ *   GM_addValueChangeListener / GM_removeValueChangeListener APIs.
  *
- * Each script gets its own SQLite database file located at:
- *   <profile>/gm_scripts/<baseDirName>.db
+ * Two classes live here:
  *
- * The database contains a single table "scriptvals" with (name TEXT, value TEXT)
- * where values are JSON-serialised to support all JS primitive types.
+ *   GM_ScriptStorageBack(aScript)
+ *     Owns the SQLite database for a single script.  One instance per script,
+ *     shared across all sandboxes that script is running in.  Provides the
+ *     low-level setValue/getValue/deleteValue/listValues over JSON-encoded
+ *     values.  Each script's database lives at:
+ *       <profile>/gm_scripts/<baseDirName>.db
  *
- * This module is loaded into the privileged parent process.  The unprivileged
- * content-side counterpart is storageFront.js, which talks to this module via
- * IPC messages.
+ *   GM_ScriptStorageFront(aWrappedContentWin, aSandbox, aScript)
+ *     Per-sandbox wrapper around a Back instance.  Adds:
+ *       - Read cache with hit-counter promotion (avoids hitting SQLite for
+ *         hot keys; large values bypass the cache).
+ *       - Sandbox-cloning of returned values (Cu.cloneInto) so scripts
+ *         cannot hold privileged references.
+ *       - Value-change listeners (addValueChangeListener / removeValue-
+ *         ChangeListener) with a "remote" flag distinguishing in-sandbox
+ *         changes from changes made by other sandboxes watching the same
+ *         key (other tabs, other scripts).
+ *       - Batched getValues / setValues / deleteValues helpers.
+ *
+ *   getStorageBackForScript(aScript)
+ *     Returns the singleton Back for the script, creating it on first use.
+ *
+ *   closeAllStorageBacks()
+ *     Closes every Back this module has opened.  Called on quit-application.
+ *
+ * Historical note:
+ *   Pre-cleanup, the front-end and back-end lived in separate modules
+ *   (storageFront.js + storageBack.js) and communicated through Services.
+ *   cpmm RPC messages (greasemonkey:scriptVal-{get,set,delete,list}) plus
+ *   a value-invalidate broadcast.  UXP is single-process — chrome and
+ *   content share the same JS runtime — so the IPC was a self-loop with
+ *   no benefit.  Both classes now live in this single module; sandbox.js
+ *   constructs the Front directly with no message-manager argument, and
+ *   the GreasemonkeyService no longer maintains its own scriptValStores
+ *   registry (the registry is now module-private and accessed via the
+ *   getStorageBackForScript / closeAllStorageBacks exports).
  *
  * SQLite PRAGMA notes (see bug #1879):
  *   auto_vacuum=INCREMENTAL — reclaims free pages gradually rather than on VACUUM.
@@ -21,11 +52,12 @@
  *   wal_autocheckpoint=10   — checkpoints the WAL every 10 pages.
  */
 
-// The "back end" implementation of GM_ScriptStorageBack().
-// This is loaded into the component scope and is capable of accessing
-// the file based SQL store.
-
-const EXPORTED_SYMBOLS = ["GM_ScriptStorageBack"];
+const EXPORTED_SYMBOLS = [
+  "GM_ScriptStorageBack",
+  "GM_ScriptStorageFront",
+  "getStorageBackForScript",
+  "closeAllStorageBacks",
+];
 
 if (typeof Cc === "undefined") {
   var Cc = Components.classes;
@@ -45,8 +77,18 @@ Cu.import("chrome://greasemonkey-modules/content/prefManager.js");
 Cu.import("chrome://greasemonkey-modules/content/util.js");
 
 
-const MESSAGE_ERROR_PREFIX = "Script storage back end: ";
+const MESSAGE_ERROR_PREFIX_BACK  = "Script storage back end: ";
+const MESSAGE_ERROR_PREFIX_FRONT = "Script storage front end: ";
 
+/** Start caching a value only after it has been read this many times. */
+const CACHE_AFTER_N_GETS = 3;
+/** Values longer than this (in characters) are never cached. */
+const CACHE_MAX_VALUE = 4096;
+/** Maximum number of entries in the in-memory value cache. */
+const CACHE_SIZE = 1024;
+
+// \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ //
+// ─── Back: per-script SQLite store ──────────────────────────────────────────
 // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ //
 
 /**
@@ -121,7 +163,10 @@ Object.defineProperty(GM_ScriptStorageBack.prototype, "dbFile", {
  * Should be called when the script is uninstalled or the extension shuts down.
  */
 GM_ScriptStorageBack.prototype.close = function () {
-  this._db.close();
+  if (this._db) {
+    this._db.close();
+    this._db = null;
+  }
 };
 
 /**
@@ -172,7 +217,7 @@ GM_ScriptStorageBack.prototype.getValue = function (aName) {
     }
   } catch (e) {
     GM_util.logError(
-        MESSAGE_ERROR_PREFIX + "getValue():" + "\n" + e, false,
+        MESSAGE_ERROR_PREFIX_BACK + "getValue():" + "\n" + e, false,
         e.fileName, e.lineNumber);
   } finally {
     stmt.reset();
@@ -218,4 +263,443 @@ GM_ScriptStorageBack.prototype.listValues = function () {
   }
 
   return valueNames;
+};
+
+// \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ //
+// ─── Module-level Back registry ─────────────────────────────────────────────
+// \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ //
+
+/**
+ * One Back instance per script id, shared across all sandboxes that ever
+ * touch that script's storage in this browser session.  Replaces the
+ * historical service.scriptValStores map (which was duplicated work
+ * because storageFront.js had its own caching layer above the cpmm RPC).
+ */
+var gBackByScriptId = new Map();
+
+/**
+ * Returns the Back instance for the given script, creating it on first use.
+ * Backs are kept open for the lifetime of the application; closeAllStorageBacks
+ * is called from the GreasemonkeyService's quit-application observer.
+ *
+ * @param {Script} aScript - Script object with .id and .baseDirName.
+ * @returns {GM_ScriptStorageBack}
+ */
+function getStorageBackForScript(aScript) {
+  let id = aScript.id;
+  let back = gBackByScriptId.get(id);
+  if (!back) {
+    back = new GM_ScriptStorageBack(aScript);
+    gBackByScriptId.set(id, back);
+  }
+  return back;
+}
+
+/**
+ * Closes every Back instance this module has opened.  Called once on
+ * quit-application.  Safe to call multiple times.
+ */
+function closeAllStorageBacks() {
+  gBackByScriptId.forEach(function (aBack) {
+    try {
+      aBack.close();
+    } catch (e) {
+      // Ignore — best-effort shutdown.
+    }
+  });
+  gBackByScriptId.clear();
+}
+
+// \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ //
+// ─── Front: per-sandbox cache + listeners ───────────────────────────────────
+// \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ //
+
+/**
+ * Module-level value cache keyed by "<scriptId>:<name>".  Shared across
+ * all Front instances so that a setValue in one sandbox invalidates the
+ * cache entry that another sandbox might have read.  On UXP single-
+ * process the same module instance is loaded everywhere, so all Fronts
+ * share this Map automatically.
+ */
+var cache = new Map();
+var cacheHitCounter = new Map();
+
+/**
+ * Listener registry.  gListeners maps each listener id to its descriptor;
+ * gListenersByKey maps each cache key to the set of listener ids watching it.
+ *   gListeners: id → {cacheKey, name, callback, storageFront}
+ *   gListenersByKey: cacheKey → Set<id>
+ */
+var gListeners = new Map();
+var gListenersByKey = new Map();
+var gNextListenerId = 0;
+
+/**
+ * Generates the cache key for a script/name pair.
+ *
+ * @param {Script} aScript - The script whose value is being accessed.
+ * @param {string} aName   - The value name.
+ * @returns {string} Cache key string, e.g. "abc-123:myKey".
+ */
+function cacheKey(aScript, aName) {
+  return aScript.id + ":" + aName;
+}
+
+/**
+ * Removes a single entry from both the value cache and the hit-count map.
+ * Called when a setValue / deleteValue is performed locally.
+ *
+ * @param {string} aKey - Cache key in the form "<scriptId>:<name>".
+ */
+function invalidateCache(aKey) {
+  cache["delete"](aKey);
+  cacheHitCounter["delete"](aKey);
+}
+
+/**
+ * Fires every listener registered for the given key.  Listeners whose
+ * owning Front matches aSetterFront receive aRemote=false; listeners
+ * owned by other Fronts (other sandboxes watching the same key) receive
+ * aRemote=true.  This preserves the pre-cleanup contract where "remote"
+ * meant "the change came from a different document context".
+ *
+ * @param {string}  aKey          - Cache key in "<scriptId>:<name>" format.
+ * @param {*}       aOldValue     - Previous value (may be undefined).
+ * @param {*}       aNewValue     - New value (may be undefined).
+ * @param {object}  aSetterFront  - The Front instance that triggered the change.
+ */
+function fireValueChangeListeners(aKey, aOldValue, aNewValue, aSetterFront) {
+  let listenerIds = gListenersByKey.get(aKey);
+  if (!listenerIds || listenerIds.size == 0) {
+    return undefined;
+  }
+  listenerIds.forEach(function (aListenerId) {
+    let entry = gListeners.get(aListenerId);
+    if (!entry) {
+      return undefined;
+    }
+    let aRemote = entry.storageFront !== aSetterFront;
+    try {
+      entry.callback(entry.name, aOldValue, aNewValue, aRemote);
+    } catch (e) {
+      GM_util.logError(e, false, e.fileName, e.lineNumber);
+    }
+  });
+}
+
+/**
+ * Sandbox-side wrapper around a Back instance.  One per sandbox.
+ *
+ * @constructor
+ * @param {Window}   aWrappedContentWin - The content window (used to
+ *   construct Error objects that point back to the script).
+ * @param {Sandbox}  aSandbox           - The script's sandbox; values
+ *   are cloned into it before being returned.
+ * @param {Script}   aScript            - The script object; provides
+ *   the id used for cache keys and Back lookup.
+ */
+function GM_ScriptStorageFront(aWrappedContentWin, aSandbox, aScript) {
+  this._sandbox = aSandbox;
+  this._script = aScript;
+  this._wrappedContentWin = aWrappedContentWin;
+  this._back = getStorageBackForScript(aScript);
+}
+
+/**
+ * The db / dbFile / close members are intentionally non-functional from
+ * the Front — direct database access is the Back's responsibility.  These
+ * remain as thin throws to preserve the pre-cleanup interface contract
+ * (a Front "looks like" a Back to anything that imported one historically).
+ */
+Object.defineProperty(GM_ScriptStorageFront.prototype, "db", {
+  "get": function GM_ScriptStorageFront_getDb() {
+    throw new Error(
+        MESSAGE_ERROR_PREFIX_FRONT
+        + GM_CONSTANTS.localeStringBundle.createBundle(
+            GM_CONSTANTS.localeGreasemonkeyProperties)
+            .GetStringFromName("error.storage.db.noConnection"));
+  },
+  "enumerable": true,
+});
+
+Object.defineProperty(GM_ScriptStorageFront.prototype, "dbFile", {
+  "get": function GM_ScriptStorageFront_getDbFile() {
+    throw new Error(
+        MESSAGE_ERROR_PREFIX_FRONT
+        + GM_CONSTANTS.localeStringBundle.createBundle(
+            GM_CONSTANTS.localeGreasemonkeyProperties)
+            .GetStringFromName("error.storage.db.noFile"));
+  },
+  "enumerable": true,
+});
+
+GM_ScriptStorageFront.prototype.close = function () {
+  throw new this._wrappedContentWin.Error(
+      MESSAGE_ERROR_PREFIX_FRONT
+      + GM_CONSTANTS.localeStringBundle.createBundle(
+          GM_CONSTANTS.localeGreasemonkeyProperties)
+          .GetStringFromName("error.storage.db.noConnection"),
+      this._script.fileURL, null);
+};
+
+/**
+ * Stores a value via the Back, invalidates this key's cache entry, and
+ * fires any registered value-change listeners.
+ *
+ * @param {string} aName - Storage key.
+ * @param {*}      aVal  - Value to store (must be JSON-serialisable).
+ *   undefined is normalised to null before being passed down.
+ * @throws {Error} If called with a wrong number of arguments.
+ */
+GM_ScriptStorageFront.prototype.setValue = function (aName, aVal) {
+  if (arguments.length !== 2) {
+    throw new this._wrappedContentWin.Error(
+        GM_CONSTANTS.localeStringBundle.createBundle(
+            GM_CONSTANTS.localeGreasemonkeyProperties)
+            .GetStringFromName("error.setValue.arguments"),
+            this._script.fileURL, null);
+  }
+
+  aName = String(aName);
+
+  let key = cacheKey(this._script, aName);
+
+  // Capture old value for change listeners before invalidation.
+  let oldValue = cache.has(key) ? cache.get(key) : undefined;
+
+  invalidateCache(key);
+
+  if (typeof aVal == "undefined") {
+    aVal = null;
+  }
+
+  this._back.setValue(aName, aVal);
+
+  // Listeners owned by this Front get aRemote=false; listeners owned
+  // by other Fronts watching the same key get aRemote=true.
+  fireValueChangeListeners(key, oldValue, aVal, this);
+};
+
+/**
+ * Retrieves a stored value, using the in-memory cache when available.
+ *
+ * Cache promotion strategy:
+ *   - The hit counter for the key is incremented on every call.
+ *   - Once the hit count exceeds CACHE_AFTER_N_GETS, the next successful
+ *     fetch also stores the value in the cache map.
+ *   - Values > CACHE_MAX_VALUE chars are excluded from caching.
+ *   - When the cache map exceeds CACHE_SIZE entries it is cleared entirely.
+ *
+ * The returned value is deep-cloned into the script sandbox via Cu.cloneInto
+ * so that scripts cannot hold privileged references.
+ *
+ * @param {string} aName     - Storage key to look up.
+ * @param {*}      [aDefVal] - Returned when the key is absent or null.
+ * @returns {*} The stored value (cloned into sandbox scope), or aDefVal.
+ */
+GM_ScriptStorageFront.prototype.getValue = function (aName, aDefVal) {
+  let value;
+
+  aName = String(aName);
+
+  let key = cacheKey(this._script, aName);
+
+  if (cache.has(key)) {
+    value = cache.get(key);
+  } else {
+    let count = (cacheHitCounter.get(key) || 0) + 1;
+    let intentToCache = count > CACHE_AFTER_N_GETS;
+
+    let raw = this._back.getValue(aName);
+
+    // Avoid caching large values.
+    if ((typeof raw == "string") && (raw.length > CACHE_MAX_VALUE)) {
+      count = 0;
+      intentToCache = false;
+    }
+
+    try {
+      value = JSON.parse(raw);
+    } catch (e) {
+      GM_util.logError(
+          MESSAGE_ERROR_PREFIX_FRONT.trim() + "\n" + e, false,
+          e.fileName, e.lineNumber);
+      return aDefVal;
+    }
+
+    if (intentToCache) {
+      // Clean caches if scripts dynamically generate lots of keys.
+      if (cache.size > CACHE_SIZE) {
+        cache.clear();
+        cacheHitCounter.clear();
+      }
+      cache.set(key, value);
+    }
+
+    cacheHitCounter.set(key, count);
+  }
+
+  if (typeof aDefVal == "undefined") {
+    aDefVal = undefined;
+  }
+  if ((typeof value == "undefined") || (value === null)) {
+    return aDefVal;
+  }
+
+  return Cu.cloneInto(value, this._sandbox, {
+    "wrapReflectors": true,
+  });
+};
+
+/**
+ * Deletes a stored value and invalidates this key's cache entry.
+ *
+ * @param {string} aName - Storage key to delete.
+ */
+GM_ScriptStorageFront.prototype.deleteValue = function (aName) {
+  aName = String(aName);
+
+  let key = cacheKey(this._script, aName);
+
+  // Capture old value for change listeners before invalidation.
+  let oldValue = cache.has(key) ? cache.get(key) : undefined;
+
+  invalidateCache(key);
+
+  this._back.deleteValue(aName);
+
+  fireValueChangeListeners(key, oldValue, undefined, this);
+};
+
+/**
+ * Returns all stored key names for this script (cloned into sandbox scope).
+ *
+ * @returns {string[]} Array of key names (cloned), or [] on error.
+ */
+GM_ScriptStorageFront.prototype.listValues = function () {
+  let value;
+  try {
+    value = this._back.listValues() || [];
+    // Round-trip through JSON to detach from any chrome-side references
+    // before cloning into the sandbox.
+    value = JSON.parse(JSON.stringify(value));
+    return Cu.cloneInto(value, this._sandbox, {
+      "wrapReflectors": true,
+    });
+  } catch (e) {
+    GM_util.logError(
+        MESSAGE_ERROR_PREFIX_FRONT.trim() + "\n" + e, false,
+        e.fileName, e.lineNumber);
+    return Cu.cloneInto([], this._sandbox);
+  }
+};
+
+/**
+ * Retrieves multiple values at once.
+ *
+ * @param {string[]|object} aWhat - Array of key names, or an object whose
+ *   keys are the names and values are the defaults.
+ * @returns {object} Object mapping each key to its stored value (cloned into
+ *   sandbox scope).
+ */
+GM_ScriptStorageFront.prototype.getValues = function (aWhat) {
+  let keys;
+  let defaults = {};
+  if (Array.isArray(aWhat)) {
+    keys = aWhat;
+  } else if (aWhat && typeof aWhat == "object") {
+    keys = Object.keys(aWhat);
+    defaults = aWhat;
+  } else {
+    keys = [];
+  }
+  let result = {};
+  for (let i = 0; i < keys.length; i++) {
+    let name = keys[i];
+    result[name] = this.getValue(name, defaults[name]);
+  }
+  return Cu.cloneInto(result, this._sandbox, {
+    "wrapReflectors": true,
+  });
+};
+
+/**
+ * Stores multiple values at once.
+ *
+ * @param {object} aObj - Object whose keys/values are stored.
+ */
+GM_ScriptStorageFront.prototype.setValues = function (aObj) {
+  if (!aObj || typeof aObj != "object") {
+    return undefined;
+  }
+  let keys = Object.keys(aObj);
+  for (let i = 0; i < keys.length; i++) {
+    this.setValue(keys[i], aObj[keys[i]]);
+  }
+};
+
+/**
+ * Deletes multiple values at once.
+ *
+ * @param {string[]} aKeys - Array of key names to delete.
+ */
+GM_ScriptStorageFront.prototype.deleteValues = function (aKeys) {
+  if (!Array.isArray(aKeys)) {
+    return undefined;
+  }
+  for (let i = 0; i < aKeys.length; i++) {
+    this.deleteValue(aKeys[i]);
+  }
+};
+
+/**
+ * Registers a callback to be invoked whenever the named value changes.
+ * The callback receives (name, oldValue, newValue, remote) where remote
+ * is true when the change originated from a different sandbox.
+ *
+ * @param {string}   aName     - Storage key to watch.
+ * @param {function} aCallback - Called on value change.
+ * @returns {number} Listener ID that can be passed to removeValueChangeListener.
+ */
+GM_ScriptStorageFront.prototype.addValueChangeListener = function (
+    aName, aCallback) {
+  aName = String(aName);
+  let key = cacheKey(this._script, aName);
+  let id = gNextListenerId++;
+
+  gListeners.set(id, {
+    "cacheKey": key,
+    "callback": aCallback,
+    "name": aName,
+    "storageFront": this,
+  });
+
+  if (!gListenersByKey.has(key)) {
+    gListenersByKey.set(key, new Set());
+  }
+  gListenersByKey.get(key).add(id);
+
+  return id;
+};
+
+/**
+ * Removes a previously registered value-change listener.
+ *
+ * @param {number} aListenerId - The ID returned by addValueChangeListener.
+ */
+GM_ScriptStorageFront.prototype.removeValueChangeListener = function (
+    aListenerId) {
+  let entry = gListeners.get(aListenerId);
+  if (!entry) {
+    return undefined;
+  }
+
+  let keyListeners = gListenersByKey.get(entry.cacheKey);
+  if (keyListeners) {
+    keyListeners["delete"](aListenerId);
+    if (keyListeners.size == 0) {
+      gListenersByKey["delete"](entry.cacheKey);
+    }
+  }
+  gListeners["delete"](aListenerId);
 };

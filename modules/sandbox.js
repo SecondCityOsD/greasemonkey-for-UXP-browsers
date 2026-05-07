@@ -82,7 +82,7 @@ Cu.import("chrome://greasemonkey-modules/content/menuCommand.js");
 Cu.import("chrome://greasemonkey-modules/content/miscApis.js");
 Cu.import("chrome://greasemonkey-modules/content/notificationer.js");
 Cu.import("chrome://greasemonkey-modules/content/prefManager.js");
-Cu.import("chrome://greasemonkey-modules/content/storageFront.js");
+Cu.import("chrome://greasemonkey-modules/content/storageBack.js");
 Cu.import("chrome://greasemonkey-modules/content/thirdParty/getChromeWinForContentWin.js");
 Cu.import("chrome://greasemonkey-modules/content/thirdParty/GM_cookie.js");
 Cu.import("chrome://greasemonkey-modules/content/util.js");
@@ -200,8 +200,12 @@ function createSandbox(aFrameScope, aContentWin, aUrl, aScript, aRunAt) {
     }
   }
 
+  // Pre-cleanup, the Front took aFrameScope as its first arg so it could
+  // route scriptVal-* RPCs to the parent process via cpmm.  UXP single-
+  // process collapsed the front/back IPC into a same-module direct call,
+  // so the message-manager handle is no longer needed.
   let scriptStorage = new GM_ScriptStorageFront(
-      aFrameScope, aContentWin, sandbox, aScript);
+      aContentWin, sandbox, aScript);
   _API1 = "GM_deleteValue";
   _API2 = _API1.replace(
       API_PREFIX_REGEXP, GM_CONSTANTS.addonAPIPrefix2 + "$2");

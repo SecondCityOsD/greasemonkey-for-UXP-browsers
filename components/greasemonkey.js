@@ -27,7 +27,6 @@ Cu.import("chrome://greasemonkey-modules/content/util.js");
 
 const DIRECTORY_TEMP = GM_CONSTANTS.directoryService
     .get(GM_CONSTANTS.directoryServiceTempName, Ci.nsIFile);
-const CACHE_SIZE = 1024;
 
 var gGreasemonkeyVersion = "unknown";
 var gStartupHasRun = false;
@@ -35,7 +34,11 @@ var gStartupHasRun = false;
 /////////////////////// Component-global Helper Functions //////////////////////
 
 function shutdown(aService) {
-  aService.closeAllScriptValStores();
+  // Closes every per-script SQLite Back this session opened.  Pre-cleanup
+  // this was a method on the service backed by service.scriptValStores;
+  // ownership of that registry moved into modules/storageBack.js so the
+  // shutdown is now a one-line module call.
+  closeAllStorageBacks();
 }
 
 function startup(aService) {
@@ -52,16 +55,11 @@ function startup(aService) {
   GM_CONSTANTS.jsSubScriptLoader.loadSubScript(
       "chrome://greasemonkey/content/thirdParty/mplUtils.js");
 
-  // Most incoming messages go to the "global" message manager.
-  let scriptValHandler = aService.handleScriptValMsg.bind(aService);
-  Services.mm.addMessageListener(
-      "greasemonkey:scriptVal-delete", scriptValHandler);
-  Services.mm.addMessageListener(
-      "greasemonkey:scriptVal-get", scriptValHandler);
-  Services.mm.addMessageListener(
-      "greasemonkey:scriptVal-list", scriptValHandler);
-  Services.mm.addMessageListener(
-      "greasemonkey:scriptVal-set", scriptValHandler);
+  // The four greasemonkey:scriptVal-* mm listeners that used to live
+  // here were the parent-process handlers for storageFront's RPCs.
+  // After Phase 4d collapsed the front/back into a single module
+  // (modules/storageBack.js), no script ever sends those messages, so
+  // the listeners were unreachable code and were removed.
 
   // Others go to the "parent" message manager.
   Services.ppmm.addMessageListener(
@@ -124,7 +122,6 @@ function startup(aService) {
 
 function service() {
   this.filename = Components.stack.filename;
-  this.scriptValStores = {};
   this.wrappedJSObject = this;
 }
 
@@ -189,12 +186,18 @@ service.prototype.broadcastScriptUpdates = function () {
   Services.ppmm.broadcastAsyncMessage("greasemonkey:scripts-update", data);
 };
 
-service.prototype.closeAllScriptValStores = function () {
-  for (let scriptId in this.scriptValStores) {
-    let scriptValStore = this.scriptValStores[scriptId];
-    scriptValStore.close();
-  }
-};
+// Pre-cleanup, this file maintained service.scriptValStores (a registry
+// of per-script SQLite Back instances) along with closeAllScriptValStores,
+// getStoreByScriptId, handleScriptValMsg (the cpmm RPC dispatch) and the
+// gRemoteCacheTracker / remoteCached / invalidateRemoteValueCaches helpers
+// used to broadcast value-invalidate messages to other processes.
+//
+// All of that machinery lived in service of the storageFront ↔ storageBack
+// IPC bus.  Phase 4d collapsed front + back into a single module
+// (modules/storageBack.js) that owns its own registry; the cpmm bus is no
+// longer needed on UXP single-process.  The ~85 lines of code that lived
+// here are gone.  Shutdown delegates to closeAllStorageBacks() (see top of
+// this file).
 
 service.prototype.scriptRefresh = function (aUrl, aWindowId, aBrowser) {
   if (!GM_util.getEnabled()) {
@@ -211,66 +214,6 @@ service.prototype.scriptRefresh = function (aUrl, aWindowId, aBrowser) {
     this.config.updateModifiedScripts("document-start", aUrl, aWindowId, aBrowser);
     this.config.updateModifiedScripts("document-end", aUrl, aWindowId, aBrowser);
     this.config.updateModifiedScripts("document-idle", aUrl, aWindowId, aBrowser);
-  }
-};
-
-service.prototype.getStoreByScriptId = function (aScriptId) {
-  if (typeof this.scriptValStores[aScriptId] == "undefined") {
-    let script = this.config.getScriptById(aScriptId);
-    this.scriptValStores[aScriptId] = new GM_ScriptStorageBack(script);
-  }
-  return this.scriptValStores[aScriptId];
-};
-
-var gRemoteCacheTracker = new Set();
-
-service.prototype.remoteCached = function (aKey) {
-  if (gRemoteCacheTracker.size > CACHE_SIZE) {
-    Services.ppmm.broadcastAsyncMessage("greasemonkey:value-invalidate", {
-      "keys": Array.from(gRemoteCacheTracker),
-    });
-    gRemoteCacheTracker.clear();
-  }
-  gRemoteCacheTracker.add(aKey);
-};
-
-service.prototype.invalidateRemoteValueCaches = function (aKey) {
-  if (!gRemoteCacheTracker.has(aKey)) {
-    return undefined;
-  }
-
-  gRemoteCacheTracker["delete"](aKey);
-  Services.ppmm.broadcastAsyncMessage("greasemonkey:value-invalidate", {
-    "keys": [aKey],
-  });
-};
-
-service.prototype.handleScriptValMsg = function (aMessage) {
-  let d = aMessage.data;
-  let cacheKey = d.cacheKey;
-  let scriptStore = this.getStoreByScriptId(d.scriptId);
-  switch (aMessage.name) {
-    case "greasemonkey:scriptVal-delete":
-      scriptStore.deleteValue(d.name);
-      this.invalidateRemoteValueCaches(cacheKey);
-      return undefined;
-    case "greasemonkey:scriptVal-get":
-      if (d.willCache) {
-        this.remoteCached(cacheKey);
-      }
-      return scriptStore.getValue(d.name);
-    case "greasemonkey:scriptVal-list":
-      return scriptStore.listValues();
-    case "greasemonkey:scriptVal-set":
-      scriptStore.setValue(d.name, d.val);
-      this.invalidateRemoteValueCaches(cacheKey);
-      return undefined;
-    default:
-      GM_util.logError(
-          GM_CONSTANTS.info.scriptHandler + " - "
-          + "Service handleScriptValMsg: "
-          + 'Unknown message name "' + aMessage.name + '"');
-      break;
   }
 };
 
