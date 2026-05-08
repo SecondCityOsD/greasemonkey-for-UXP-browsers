@@ -1,7 +1,9 @@
 pref("extensions.{544fad5a-9b62-418f-a9ff-616e388cf6c4}.description", "chrome://greasemonkey/locale/greasemonkey.properties");
 pref("extensions.greasemonkey.api.@match.better", false);
 pref("extensions.greasemonkey.api.@match.hash", true);
-pref("extensions.greasemonkey.api.GM_cookie", false);
+// Phase 7b: GM_cookie is now a native methods-object built on
+// Services.cookies (see modules/GM_cookie.js).  Default true.
+pref("extensions.greasemonkey.api.GM_cookie", true);
 pref("extensions.greasemonkey.api.object.polyfill", true);
 pref("extensions.greasemonkey.api.unsafeWindow.grant", false);
 pref("extensions.greasemonkey.cors_csp_override.excludes", false);

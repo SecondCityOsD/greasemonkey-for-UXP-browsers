@@ -90,7 +90,7 @@ Cu.import("chrome://greasemonkey-modules/content/notificationer.js");
 Cu.import("chrome://greasemonkey-modules/content/prefManager.js");
 Cu.import("chrome://greasemonkey-modules/content/storageBack.js");
 Cu.import("chrome://greasemonkey-modules/content/thirdParty/getChromeWinForContentWin.js");
-Cu.import("chrome://greasemonkey-modules/content/thirdParty/GM_cookie.js");
+Cu.import("chrome://greasemonkey-modules/content/GM_cookie.js");
 Cu.import("chrome://greasemonkey-modules/content/util.js");
 Cu.import("chrome://greasemonkey-modules/content/xmlHttpRequester.js");
 
@@ -230,9 +230,13 @@ function createSandbox(aFrameScope, aContentWin, aUrl, aScript, aRunAt) {
         || aScript.grants.some(function (aItem) {
              return String(aItem).toLowerCase() === String(_API2).toLowerCase();
            })) {
-      sandbox[_API1] = GM_cookie.bind(
-          null, aContentWin, sandbox,
-          aScript.fileURL, aUrl);
+      // Phase 7b: GM_cookie is now a methods-object (.list/.set/.delete)
+      // built natively on top of Services.cookies, replacing the
+      // third-party dispatch-function polyfill.  buildGMObject's
+      // special-case picks up the object shape and mirrors it as
+      // GM.cookie (Promise-wrapped methods).
+      sandbox[_API1] = createGMCookieAPI(
+          aContentWin, sandbox, aScript.fileURL, aUrl);
     }
   }
 
@@ -792,6 +796,34 @@ function runScriptInSandbox(aSandbox, aScript) {
       if (typeof aSandbox.GM_info !== "undefined") {
         let infoProp = "GM_info".replace(API_PREFIX_REGEXP, "$2");
         gmObj[infoProp] = aSandbox.GM_info;
+      }
+
+      // GM_cookie special-case: sandbox.GM_cookie is a methods-object
+      // (.list / .set / .delete) — the GM3 form scripts use as
+      // GM_cookie.list(filter, callback).  buildGMObject's main loop
+      // skips it because typeof !== "function"; mirror the methods
+      // here as GM.cookie.X with Promise wrapping so GM4 scripts can
+      // do `await GM.cookie.list({})` etc.
+      if (aSandbox.GM_cookie
+          && (typeof aSandbox.GM_cookie === "object")) {
+        let cookieGmObj = Cu.createObjectIn(gmObj, { "defineAs": "cookie" });
+        ["list", "set", "delete"].forEach(function (aMethod) {
+          let method = aSandbox.GM_cookie[aMethod];
+          if (typeof method !== "function") return;
+          let wrapper = (function (fn) {
+            return function gmCookieAsyncWrapper() {
+              let args = arguments;
+              return new aSandbox.Promise(function (resolve, reject) {
+                try {
+                  resolve(fn.apply(null, args));
+                } catch (e) {
+                  reject(e);
+                }
+              });
+            };
+          })(method);
+          Cu.exportFunction(wrapper, cookieGmObj, { "defineAs": aMethod });
+        });
       }
 
       // Freeze through the sandbox's own Object so the operation happens
