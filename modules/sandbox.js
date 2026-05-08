@@ -10,7 +10,7 @@
  *     GM_* functions the script's @grant list requests.  Returns the sandbox.
  *
  *   runScriptInSandbox(aSandbox, aScript)
- *     Builds the GM.* Promise-wrapper polyfill (evalAPI2Polyfill), loads all
+ *     Builds the GM.* Promise-wrapper API surface (buildGMObject), loads all
  *     @require files in order, then loads the script itself.
  *
  * ── Sandbox modes ──────────────────────────────────────────────────────────
@@ -30,18 +30,24 @@
  *     _API1 = "GM_getValue"
  *     _API2 = "GM.getValue"   (derived via API_PREFIX_REGEXP)
  *     If either is in script.grants → inject under the GM3 name (GM_getValue).
- *     The GM4 GM.getValue wrapper is added later by evalAPI2Polyfill().
+ *     The GM4 GM.getValue wrapper is added later by buildGMObject().
  *
- * ── GM.* Promise polyfill (evalAPI2Polyfill) ───────────────────────────────
+ * ── GM.* Promise surface (buildGMObject) ───────────────────────────────────
  *
  *   Called from runScriptInSandbox() when the "api.object.polyfill" pref is
- *   set (default: true).  Constructs and evals a code snippet that:
- *     1. Creates a `var GM = {}` object in the sandbox.
- *     2. For each entry in GM_CONSTANTS.addonAPI, wraps the corresponding
- *        GM_* sandbox function in a Promise-returning arrow function and
- *        assigns it to GM.<name>.
- *     3. Copies GM_info directly (it is not a function — no Promise needed).
- *     4. Object.freeze(GM) to prevent script tampering.
+ *   set (default: true).  Builds the GM object natively in chrome scope:
+ *     1. Cu.createObjectIn(aSandbox, {defineAs: "GM"}) creates the holder.
+ *     2. For each entry in the pre-computed module-level GM_API_MAPPING,
+ *        Cu.exportFunction installs a Promise-returning wrapper as GM.<name>.
+ *        Each wrapper runs in chrome scope and constructs the Promise via
+ *        aSandbox.Promise so it integrates with the sandbox microtask queue.
+ *     3. Copies GM_info directly (not a function — no Promise needed).
+ *     4. aSandbox.Object.freeze(GM) prevents script tampering.
+ *
+ *   Pre-cleanup, this was a runtime string-build (evalAPI2Polyfill) that ran
+ *   Cu.evalInSandbox on a freshly-built JS string per script.  The native
+ *   build removes the per-sandbox string-construction cost, gives errors
+ *   real chrome stack traces, and shrinks the eval-attack surface.
  *
  * ── GM_info injection (injectGMInfo) ──────────────────────────────────────
  *
@@ -103,6 +109,30 @@ const JAVASCRIPT_VERSION_MAX = "latest";
  */
 const API_PREFIX_REGEXP = new RegExp(
     "(^" + GM_CONSTANTS.addonAPIPrefix1 + ")(.+)", "");
+
+/**
+ * Pre-computed [legacyName, modernName] pairs for every GM3 API that has a
+ * GM4 (Promise-based) counterpart.  Built once at module load (not once per
+ * sandbox) so buildGMObject() runs in linear time without any string-build.
+ *
+ * Pre-cleanup, this mapping was reconstructed inside the eval'd
+ * evalAPI2Polyfill string for every script, every time.
+ */
+const GM_API_MAPPING = (function () {
+  let pairs = [];
+  let conv = GM_CONSTANTS.addonAPIConversion;
+  GM_CONSTANTS.addonAPI.forEach(function (legacy) {
+    if (legacy.indexOf(GM_CONSTANTS.addonAPIPrefix1) !== 0) {
+      // Skip non-prefixed entries like "unsafeWindow".
+      return;
+    }
+    let modern = (conv && conv[legacy])
+        ? conv[legacy]
+        : legacy.replace(API_PREFIX_REGEXP, "$2");
+    pairs.push([legacy, modern]);
+  });
+  return Object.freeze(pairs);
+})();
 
 /**
  * Creates and returns the JavaScript sandbox for a userscript.
@@ -608,7 +638,7 @@ function injectGMInfo(aSandbox, aContentWin, aScript) {
  * Executes a userscript (and all its @require files) inside the given sandbox.
  *
  * Execution order:
- *   1. evalAPI2Polyfill  — builds the GM.* Promise object (if pref is set).
+ *   1. buildGMObject     — builds the GM.* Promise object (if pref is set).
  *   2. @require files    — loaded in declaration order via loadSubScript.
  *   3. The script itself — loaded last via loadSubScript.
  *
@@ -698,111 +728,98 @@ function runScriptInSandbox(aSandbox, aScript) {
   }
 
   /**
-   * Builds and evals the GM.* Promise polyfill inside the sandbox.
+   * Builds the script-facing GM4 surface (the `GM` object exposing
+   * GM.getValue / GM.setValue / GM.xmlHttpRequest / etc. as Promise-
+   * returning methods) for the given sandbox.
    *
-   * Constructs a JS code snippet at runtime that:
-   *   - Creates `var GM = {}` in the sandbox global.
-   *   - For each API name in GM_CONSTANTS.addonAPI, checks if the corresponding
-   *     GM_* function is defined on `this` (the sandbox global).
-   *   - If it is, assigns `GM.<name> = (...args) => new Promise(...)` wrapping
-   *     the synchronous GM_* function.
-   *   - Copies GM_info reference directly (not wrapped in Promise).
-   *   - Calls Object.freeze(GM) to make the object read-only.
+   * Replaces the historical evalAPI2Polyfill, which ran a runtime-built
+   * JS string through Cu.evalInSandbox per script.  This implementation:
    *
-   * Name mapping uses GM_CONSTANTS.addonAPIConversion for non-obvious renames
-   * (e.g. GM_xmlhttpRequest → GM.xmlHttpRequest) and strips the "GM_" prefix
-   * for everything else (e.g. GM_getValue → GM.getValue).
+   *   - Uses Cu.createObjectIn + Cu.exportFunction (native chrome →
+   *     sandbox object construction; no eval).
+   *   - Iterates the pre-computed module-level GM_API_MAPPING instead
+   *     of rebuilding the legacy→modern map on every call.
+   *   - Constructs each GM.X wrapper as a chrome-side closure that
+   *     `new aSandbox.Promise(...)` — so the script's `await GM.X(...)`
+   *     integrates with the sandbox microtask queue and stack traces
+   *     point at this function rather than at an eval'd string.
+   *   - Copies GM_info as a direct property (not Promise-wrapped, since
+   *     it's the metadata snapshot).
+   *   - Freezes the GM object using the sandbox's own Object.freeze so
+   *     scripts can't reassign GM.X.
    *
-   * @param {Cu.Sandbox} aSandbox - The sandbox to eval the polyfill in.
-   * @param {IPCScript}  aScript  - The script (used for the fileURL in errors).
-   * @returns {boolean} True on success, false if the eval failed.
+   * @param {Cu.Sandbox} aSandbox - Target sandbox (created by createSandbox()).
+   * @param {IPCScript}  aScript  - Script descriptor (for error attribution).
+   * @returns {boolean} True on success; false if construction failed (the
+   *                    caller aborts the script in that case, matching the
+   *                    pre-cleanup polyfill contract).
    */
-  function evalAPI2Polyfill(aSandbox, aScript) {
-    let _API1 = "GM_info";
-    let API2Polyfill = "";
-    // Alternatives (see below "async"):
-    //  (async () => {`;
-    // instead of
-    //  (() => {`;
-    API2Polyfill += `
-      var GM = {};
-      (() => {`;
-    let _APIConversion = {};
-    GM_CONSTANTS.addonAPI.forEach(function (aValue) {
-      let prop = "";
-      let isAPIConversion = false;
-      Object.entries(GM_CONSTANTS.addonAPIConversion).forEach(
-          ([aAPI1, aAPI2]) => {
-            if (aValue == aAPI1) {
-              prop = aAPI2;
-              isAPIConversion = true;
-              return true;
-            }
-          });
-      if (!isAPIConversion) {
-        prop = aValue.replace(API_PREFIX_REGEXP, "$2");
-      }
-      _APIConversion[aValue] = prop;
-    });
-    API2Polyfill += `
-        Object.entries({`;
-    Object.entries(_APIConversion).forEach(([aAPI1, aAPI2]) => {
-      if (aAPI1.indexOf(GM_CONSTANTS.addonAPIPrefix1) == 0) {
-        API2Polyfill += `
-          "` + aAPI1 + `": "` + aAPI2 + `",`;
-      }
-    });
-    API2Polyfill += `
-        }).forEach(([aAPI1, aAPI2]) => {
-          let API1 = this[aAPI1];
-          if (API1) {
-            GM[aAPI2] = (...args) => {
-              return new Promise((resolve, reject) => {
-                try {
-                  resolve(API1(...args));
-                } catch (e) {
-                  reject(e);
-                }
-              });
-            };
-          }
-        });`;
-    let prop = _API1.replace(API_PREFIX_REGEXP, "$2");
-    API2Polyfill += `
-        GM["` + prop + `"] = ` + _API1 + `;
-
-        Object.freeze(GM);
-      })();
-    `;
-    // dump(evalAPI2Polyfill.name + ":" + "\n" + API2Polyfill + "\n");
-
+  function buildGMObject(aSandbox, aScript) {
     try {
-      Cu.evalInSandbox(
-          API2Polyfill,
-          aSandbox, JAVASCRIPT_VERSION_MAX, aScript.fileURL, 1);
-    } catch (e) {
-      // "async" functions:
-      // Firefox 52.0+
-      // http://bugzil.la/1185106
-      // js/src/js.msg: JSMSG_BAD_ARROW_ARGS
-      if (e.message.indexOf("invalid arrow-function arguments") != 1) {
-        GM_util.logError(
-            GM_CONSTANTS.localeStringBundle.createBundle(
-                GM_CONSTANTS.localeGreasemonkeyProperties)
-                .GetStringFromName("error.api.object.polyfill"),
-            false, e.fileName, null);
-      } else {
-        // Log it properly.
-        GM_util.logError(e, false, e.fileName, null);
+      let gmObj = Cu.createObjectIn(aSandbox, { "defineAs": "GM" });
+
+      for (let i = 0; i < GM_API_MAPPING.length; i++) {
+        let pair = GM_API_MAPPING[i];
+        let legacyName = pair[0];
+        let modernName = pair[1];
+        let legacyFn = aSandbox[legacyName];
+        if (typeof legacyFn !== "function") {
+          // Script didn't @grant this API; skip.
+          continue;
+        }
+
+        // Closure-captures legacyFn so each wrapper invokes the right
+        // chrome-side implementation.  The wrapper itself runs in chrome
+        // scope; Cu.exportFunction handles the cross-compartment glue.
+        let wrapper = (function (fn) {
+          return function gmAsyncWrapper() {
+            let args = arguments;
+            return new aSandbox.Promise(function (resolve, reject) {
+              try {
+                resolve(fn.apply(null, args));
+              } catch (e) {
+                reject(e);
+              }
+            });
+          };
+        })(legacyFn);
+
+        Cu.exportFunction(wrapper, gmObj, { "defineAs": modernName });
       }
-      // Stop the script, in the case of requires, as if it was one big script.
+
+      // GM_info is a frozen plain object already attached to the sandbox.
+      // Mirror it as GM.info so scripts can read either name.
+      if (typeof aSandbox.GM_info !== "undefined") {
+        let infoProp = "GM_info".replace(API_PREFIX_REGEXP, "$2");
+        gmObj[infoProp] = aSandbox.GM_info;
+      }
+
+      // Freeze through the sandbox's own Object so the operation happens
+      // in sandbox scope (consistent with the pre-cleanup polyfill).
+      try {
+        aSandbox.Object.freeze(gmObj);
+      } catch (e) {
+        // Fallback — extremely rare; would only happen if Object is
+        // somehow shadowed in the sandbox prototype chain.
+        Cu.evalInSandbox(
+            "Object.freeze(this.GM);", aSandbox,
+            JAVASCRIPT_VERSION_MAX, aScript.fileURL, 1);
+      }
+    } catch (e) {
+      GM_util.logError(
+          GM_CONSTANTS.localeStringBundle.createBundle(
+              GM_CONSTANTS.localeGreasemonkeyProperties)
+              .GetStringFromName("error.api.object.polyfill"),
+          false, e.fileName || aScript.fileURL, e.lineNumber || 0);
       return false;
     }
     return true;
   }
 
+  // The pref name still says "polyfill" for backward-compatibility with
+  // any user who set it explicitly; the implementation is now native.
   if (GM_prefRoot.getValue("api.object.polyfill")) {
-    if (!evalAPI2Polyfill(aSandbox, aScript)) {
+    if (!buildGMObject(aSandbox, aScript)) {
       return undefined;
     }
   }
