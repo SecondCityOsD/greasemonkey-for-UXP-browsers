@@ -66,12 +66,13 @@ GM_BrowserUI.init = function () {
         }
       });
   */
-  window.messageManager.addMessageListener("greasemonkey:open-in-tab",
-      GM_BrowserUI.openInTab);
-  window.messageManager.addMessageListener("greasemonkey:tab-close",
-      GM_BrowserUI.tabClose);
-  window.messageManager.addMessageListener("greasemonkey:window",
-      GM_BrowserUI.window);
+  // The greasemonkey:open-in-tab / :tab-close / :window mm listeners
+  // that used to live here were retired in Phase 4f-2.  Their senders
+  // (modules/GM_openInTab.js + modules/miscApis.js GM_window) now call
+  // GM_BrowserUI.openInTab / .tabClose / .window directly via
+  // getChromeWinForContentWin, so the listeners had no remaining
+  // senders and were unreachable code.  The handler functions
+  // themselves remain on GM_BrowserUI as plain methods.
 };
 
 /**
