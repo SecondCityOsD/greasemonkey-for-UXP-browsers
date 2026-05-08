@@ -1216,7 +1216,7 @@ Script.prototype.updateFromNewScript = function (
     var rs = new scope.RemoteScript(this.downloadURL);
     newScript._basedir = this._basedir;
     rs.setScript(newScript);
-    rs.download(GM_util.hitch(this, function (aSuccess) {
+    rs.download(function (aSuccess) {
       if (!aSuccess) {
         let notificationOptions = {
           "persistence": -1,
@@ -1312,7 +1312,7 @@ Script.prototype.updateFromNewScript = function (
       // Otherwise an exception occurs:
       // openInEditor.js - script.textContent; getContents.js - !aFile.isFile()
       this._changed("modified", this.id);
-    }));
+    }.bind(this));
   }
 };
 
@@ -1535,9 +1535,9 @@ Script.prototype.checkForRemoteUpdate = function (aCallback, aForced, aManual) {
 
   // Let the server know we want a user script metadata block.
   req.setRequestHeader("Accept", "text/x-userscript-meta");
-  req.onload = GM_util.hitch(
-      this, "checkRemoteVersion", req, aCallback, aForced, aManual, usedMeta);
-  req.onerror = GM_util.hitch(null, aCallback, "noUpdateAvailable", {
+  req.onload = this.checkRemoteVersion.bind(
+      this, req, aCallback, aForced, aManual, usedMeta);
+  req.onerror = aCallback.bind(null, "noUpdateAvailable", {
     "name": this.localized.name,
     "fileURL": this.fileURL,
     "info": " = " + GM_CONSTANTS.localeStringBundle.createBundle(
@@ -1548,7 +1548,7 @@ Script.prototype.checkForRemoteUpdate = function (aCallback, aForced, aManual) {
     // "log": true,
     "log": false,
   });
-  req.ontimeout = GM_util.hitch(null, aCallback, "noUpdateAvailable", {
+  req.ontimeout = aCallback.bind(null, "noUpdateAvailable", {
     "name": this.localized.name,
     "fileURL": this.fileURL,
     "url": url,
@@ -1583,12 +1583,12 @@ Script.prototype.checkForRemoteUpdate = function (aCallback, aForced, aManual) {
  */
 Script.prototype.checkRemoteVersion = function (
     aReq, aCallback, aForced, aManual, aMeta) {
-  let metaFail = GM_util.hitch(this, function () {
+  let metaFail = function () {
     this._updateMetaStatus = UPDATE_META_STATUS_FAIL;
     this._changed("modified", null);
 
     return this.checkForRemoteUpdate(aCallback, aForced, aManual);
-  });
+  }.bind(this);
 
   if ((aReq.status != 200) && (aReq.status != 0)) {
     return (aMeta ? metaFail() : aCallback("noUpdateAvailable", {

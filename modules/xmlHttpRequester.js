@@ -232,7 +232,7 @@ GM_xmlHttpRequester.prototype.contentStartRequest = function (aDetails) {
             "mozAnon": true,
           }
           : {});
-      GM_util.hitch(this, "chromeStartRequest", url, aDetails, req)();
+      this.chromeStartRequest.bind(this, url, aDetails, req)();
       break;
     default:
       throw new this.wrappedContentWin.Error(
@@ -297,8 +297,8 @@ GM_xmlHttpRequester.prototype.contentStartRequest = function (aDetails) {
  */
 GM_xmlHttpRequester.prototype.chromeStartRequest =
 function (aSafeUrl, aDetails, aReq) {
-  let setupRequestEvent = GM_util.hitch(
-      this, "setupRequestEvent", this.wrappedContentWin, this.sandbox,
+  let setupRequestEvent = this.setupRequestEvent.bind(
+      this, this.wrappedContentWin, this.sandbox,
       this.fileURL);
 
   setupRequestEvent(aReq, "abort", aDetails);

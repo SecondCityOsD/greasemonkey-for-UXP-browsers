@@ -382,7 +382,7 @@ ScriptAddon.prototype.isCompatibleWith = function () {
  * @param {number}                 aReason         - AddonManager.UPDATE_WHEN_* constant.
  */
 ScriptAddon.prototype.findUpdates = function (aUpdateListener, aReason) {
-  let callback = GM_util.hitch(this, this._handleRemoteUpdate, aUpdateListener);
+  let callback = this._handleRemoteUpdate.bind(this, aUpdateListener);
   // Treat user-initiated update checks (clicking "Check for Updates") as
   // manual — bypasses the shouldAutoUpdate() gate so scripts get checked
   // even when "Update Add-ons Automatically" is disabled.
@@ -555,7 +555,7 @@ ScriptInstall.prototype.install = function () {
   var rs = new RemoteScript(this._script.downloadURL);
   rs.messageName = "script.updated";
   rs.onProgress(this._progressCallback);
-  rs.download(GM_util.hitch(this, function (aSuccess, aType) {
+  rs.download(function (aSuccess, aType) {
     if (aSuccess && (aType == "dependencies")) {
       this._progressCallback(rs, "progress", 1);
       AddonManagerPrivate.callInstallListeners(
@@ -589,7 +589,7 @@ ScriptInstall.prototype.install = function () {
       AddonManagerPrivate.callInstallListeners(
           "onDownloadFailed", this._listeners, this);
     }
-  }));
+  }.bind(this));
   this._remoteScript = rs;
 };
 

@@ -517,13 +517,13 @@ RemoteScript.prototype.download = function (aCompletionCallback) {
     this._downloadDependencies(aCompletionCallback);
   } else {
     this.downloadScript(
-        GM_util.hitch(this, function (aSuccess, aPoint, aStatus, aHeaders) {
+        function (aSuccess, aPoint, aStatus, aHeaders) {
           if (aSuccess) {
             this._downloadDependencies(aCompletionCallback);
           }
           aCompletionCallback(
               this._cancelled || aSuccess, aPoint, aStatus, aHeaders);
-        }));
+        }.bind(this));
   }
 };
 
@@ -548,7 +548,7 @@ RemoteScript.prototype.downloadScript = function (aCompletionCallback) {
       this._tempDir, filenameFromUri(this._uri, GM_CONSTANTS.fileScriptName));
 
   this._downloadFile(this._uri, this._scriptFile,
-      GM_util.hitch(this, this._downloadScriptCb, aCompletionCallback),
+      this._downloadScriptCb.bind(this, aCompletionCallback),
       true); // aErrorsAreFatal.
 };
 
@@ -820,7 +820,7 @@ RemoteScript.prototype.showSource = function (aBrowser) {
   tabBrowser.selectedTab = tab;
 
   // Ensure any temporary files are deleted after the tab is closed.
-  var cleanup = GM_util.hitch(this, "cleanup");
+  var cleanup = this.cleanup.bind(this);
   tab.addEventListener("TabClose", cleanup, false);
 
   let buttons = [];
@@ -834,7 +834,7 @@ RemoteScript.prototype.showSource = function (aBrowser) {
     // dialog (which is what brought them here via "Show Script Source")
     // AND just read the source — making them sit through the security
     // delay a second time adds friction without adding security.
-    "callback": GM_util.hitch(this, function () {
+    "callback": function () {
       // Skip the cleanup handler, as the downloaded files
       // are used in the installation process.
       tab.removeEventListener("TabClose", cleanup, false);
@@ -844,7 +844,7 @@ RemoteScript.prototype.showSource = function (aBrowser) {
       GM_util.timeout(function () {
         tabBrowser.removeTab(tab);
       }, 0);
-    }),
+    }.bind(this),
     "label": GM_CONSTANTS.localeStringBundle.createBundle(
         GM_CONSTANTS.localeGmBrowserProperties)
         .GetStringFromName("greeting.btn"),
@@ -909,10 +909,10 @@ RemoteScript.prototype._downloadDependencies = function (aCompletionCallback) {
     // Always call the callback asynchronously.
     // That way, the caller doesn't have to take special care of the case
     // where this is called synchronously when there is nothing to download.
-    GM_util.timeout(GM_util.hitch(this, function () {
+    GM_util.timeout(function () {
       this._dispatchCallbacks("progress", 1);
       aCompletionCallback(true, "dependencies");
-    }), 0);
+    }.bind(this), 0);
     return undefined;
   }
 
@@ -944,7 +944,7 @@ RemoteScript.prototype._downloadDependencies = function (aCompletionCallback) {
   }
 
   this._downloadFile(
-      uri, file, GM_util.hitch(this, dependencyDownloadComplete),
+      uri, file, dependencyDownloadComplete.bind(this),
       !(dependency instanceof ScriptIcon)); // aErrorsAreFatal.
 };
 
@@ -1053,7 +1053,7 @@ RemoteScript.prototype._downloadFile = function (
   this._channels.push(channel);
   let dsl = new DownloadListener(
       this._progressIndex == 0, // aTryToParse.
-      GM_util.hitch(this, this._downloadFileProgress),
+      this._downloadFileProgress.bind(this),
       aCompletionCallback,
       aFile,
       aUri,
