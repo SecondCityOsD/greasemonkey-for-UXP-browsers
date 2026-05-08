@@ -259,6 +259,138 @@ GM_ScriptStorageBack.prototype.deleteValue = function (aName) {
  *
  * @returns {string[]} Array of key names (may be empty).
  */
+/**
+ * Batched fetch of multiple stored values in a single SQL query.
+ * Returns a plain object mapping each requested name to its raw JSON
+ * string (the value as stored), or omits names that don't exist.
+ *
+ * Phase 7d: replaces N round-trips through getValue() with one
+ * SELECT … WHERE name IN (…) statement.  For scripts that read a
+ * dozen GM_*Values at once, this drops the SQL chatter from N calls
+ * to 1 — measurable on slow disks even with synchronous=OFF.
+ *
+ * @param {string[]} aNames - Storage keys to fetch.
+ * @returns {object} Map of name → raw JSON string for each found row.
+ */
+GM_ScriptStorageBack.prototype.getValuesBatch = function (aNames) {
+  let result = {};
+  if (!aNames || !aNames.length) {
+    return result;
+  }
+
+  // Build the IN-clause placeholder list.  mozStorage supports named
+  // placeholders via stmt.params, which is cleaner than positional ?N.
+  let placeholders = aNames
+      .map(function (_, i) { return ":n" + i; })
+      .join(", ");
+  let sql = "SELECT name, value FROM scriptvals WHERE name IN ("
+      + placeholders + ")";
+  let stmt = this.db.createStatement(sql);
+  try {
+    for (let i = 0; i < aNames.length; i++) {
+      stmt.params["n" + i] = aNames[i];
+    }
+    while (stmt.executeStep()) {
+      result[stmt.row.name] = stmt.row.value;
+    }
+  } catch (e) {
+    GM_util.logError(
+        MESSAGE_ERROR_PREFIX_BACK + "getValuesBatch():" + "\n" + e, false,
+        e.fileName, e.lineNumber);
+  } finally {
+    stmt.reset();
+  }
+
+  return result;
+};
+
+/**
+ * Batched write of multiple key/value pairs.  Wraps every INSERT OR
+ * REPLACE in a single SQLite transaction so the writes either all
+ * commit or all roll back — atomic from the script's perspective.
+ *
+ * Phase 7d: replaces N independent INSERTs (each its own implicit
+ * transaction) with one BEGIN … COMMIT, plus statement-reuse across
+ * the loop.
+ *
+ * @param {object} aMap - { name: value } map.  Values are JSON-
+ *                        serialised here.
+ */
+GM_ScriptStorageBack.prototype.setValuesBatch = function (aMap) {
+  let names = Object.keys(aMap || {});
+  if (!names.length) {
+    return;
+  }
+
+  let stmt = this.db.createStatement(
+      "INSERT OR REPLACE INTO scriptvals (name, value)"
+      + " VALUES (:name, :value)");
+  let inTx = false;
+  try {
+    this.db.beginTransaction();
+    inTx = true;
+    for (let i = 0; i < names.length; i++) {
+      stmt.params.name = names[i];
+      stmt.params.value = JSON.stringify(aMap[names[i]]);
+      stmt.execute();
+      stmt.reset();
+    }
+    this.db.commitTransaction();
+    inTx = false;
+  } catch (e) {
+    if (inTx) {
+      try { this.db.rollbackTransaction(); } catch (e2) {}
+    }
+    throw e;
+  } finally {
+    stmt.reset();
+  }
+
+  // Defensive — see setValue() above re: IPCScript fallback.
+  if (typeof this._script.changed == "function") {
+    for (let i = 0; i < names.length; i++) {
+      this._script.changed("val-set", names[i]);
+    }
+  }
+};
+
+/**
+ * Batched deletion of multiple stored values in a single SQL statement.
+ *
+ * @param {string[]} aNames - Storage keys to delete.
+ */
+GM_ScriptStorageBack.prototype.deleteValuesBatch = function (aNames) {
+  if (!aNames || !aNames.length) {
+    return;
+  }
+
+  let placeholders = aNames
+      .map(function (_, i) { return ":n" + i; })
+      .join(", ");
+  let sql = "DELETE FROM scriptvals WHERE name IN (" + placeholders + ")";
+  let stmt = this.db.createStatement(sql);
+  try {
+    for (let i = 0; i < aNames.length; i++) {
+      stmt.params["n" + i] = aNames[i];
+    }
+    stmt.execute();
+  } finally {
+    stmt.reset();
+  }
+
+  // Defensive — see deleteValue() above re: IPCScript fallback.
+  if (typeof this._script.changed == "function") {
+    for (let i = 0; i < aNames.length; i++) {
+      this._script.changed("val-del", aNames[i]);
+    }
+  }
+};
+
+/**
+ * Returns all stored key names for this script.
+ *
+ * @returns {string[]} Array of key names (may be empty).
+ */
 GM_ScriptStorageBack.prototype.listValues = function () {
   let valueNames = [];
 
@@ -648,18 +780,72 @@ GM_ScriptStorageFront.prototype.getValues = function (aWhat) {
   } else {
     keys = [];
   }
+
+  // Phase 7d: cache hits served from the module-level Map; only the
+  // cache MISSES go to the Back, in a single batched SELECT.
   let result = {};
+  let toFetch = [];
   for (let i = 0; i < keys.length; i++) {
-    let name = keys[i];
-    result[name] = this.getValue(name, defaults[name]);
+    let name = String(keys[i]);
+    let key = cacheKey(this._script, name);
+    if (cache.has(key)) {
+      result[name] = cache.get(key);
+    } else {
+      toFetch.push(name);
+    }
   }
+
+  if (toFetch.length) {
+    let raw = this._back.getValuesBatch(toFetch);
+    for (let i = 0; i < toFetch.length; i++) {
+      let name = toFetch[i];
+      let rawVal = raw[name];
+      let parsed;
+      if (rawVal === undefined) {
+        // Key not in DB — fall through to default below.
+        parsed = null;
+      } else {
+        try {
+          parsed = JSON.parse(rawVal);
+        } catch (e) {
+          GM_util.logError(
+              MESSAGE_ERROR_PREFIX_FRONT.trim() + " getValues parse:\n" + e,
+              false, e.fileName, e.lineNumber);
+          parsed = null;
+        }
+      }
+      // Apply per-key cache promotion identical to single-key getValue.
+      let key = cacheKey(this._script, name);
+      let count = (cacheHitCounter.get(key) || 0) + 1;
+      let intentToCache = count > CACHE_AFTER_N_GETS;
+      if (typeof rawVal == "string" && rawVal.length > CACHE_MAX_VALUE) {
+        count = 0;
+        intentToCache = false;
+      }
+      if (intentToCache && parsed !== null && parsed !== undefined) {
+        if (cache.size > CACHE_SIZE) {
+          cache.clear();
+          cacheHitCounter.clear();
+        }
+        cache.set(key, parsed);
+      }
+      cacheHitCounter.set(key, count);
+
+      result[name] = (parsed === null || parsed === undefined)
+          ? defaults[name]
+          : parsed;
+    }
+  }
+
   return Cu.cloneInto(result, this._sandbox, {
     "wrapReflectors": true,
   });
 };
 
 /**
- * Stores multiple values at once.
+ * Stores multiple values at once.  Routes through the Back's
+ * setValuesBatch so all writes commit in a single SQLite transaction.
+ * Fires per-key change listeners after the batch completes.
  *
  * @param {object} aObj - Object whose keys/values are stored.
  */
@@ -668,22 +854,63 @@ GM_ScriptStorageFront.prototype.setValues = function (aObj) {
     return undefined;
   }
   let keys = Object.keys(aObj);
+  if (!keys.length) {
+    return undefined;
+  }
+
+  // Capture pre-write old values for change-listener notifications and
+  // invalidate the cache before the Back commits the new ones.
+  let oldValues = {};
+  let normalized = {};
   for (let i = 0; i < keys.length; i++) {
-    this.setValue(keys[i], aObj[keys[i]]);
+    let name = String(keys[i]);
+    let key = cacheKey(this._script, name);
+    oldValues[name] = cache.has(key) ? cache.get(key) : undefined;
+    invalidateCache(key);
+    let val = aObj[keys[i]];
+    normalized[name] = (typeof val == "undefined") ? null : val;
+  }
+
+  this._back.setValuesBatch(normalized);
+
+  // Fan out change-listener notifications per key.
+  let names = Object.keys(normalized);
+  for (let i = 0; i < names.length; i++) {
+    let name = names[i];
+    fireValueChangeListeners(
+        cacheKey(this._script, name), oldValues[name],
+        normalized[name], this);
   }
 };
 
 /**
- * Deletes multiple values at once.
+ * Deletes multiple values at once.  Routes through the Back's
+ * deleteValuesBatch (single DELETE … WHERE name IN (…)).
  *
  * @param {string[]} aKeys - Array of key names to delete.
  */
 GM_ScriptStorageFront.prototype.deleteValues = function (aKeys) {
-  if (!Array.isArray(aKeys)) {
+  if (!Array.isArray(aKeys) || !aKeys.length) {
     return undefined;
   }
+
+  let names = [];
+  let oldValues = {};
   for (let i = 0; i < aKeys.length; i++) {
-    this.deleteValue(aKeys[i]);
+    let name = String(aKeys[i]);
+    names.push(name);
+    let key = cacheKey(this._script, name);
+    oldValues[name] = cache.has(key) ? cache.get(key) : undefined;
+    invalidateCache(key);
+  }
+
+  this._back.deleteValuesBatch(names);
+
+  for (let i = 0; i < names.length; i++) {
+    let name = names[i];
+    fireValueChangeListeners(
+        cacheKey(this._script, name), oldValues[name],
+        undefined, this);
   }
 };
 
