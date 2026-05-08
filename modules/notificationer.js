@@ -64,9 +64,8 @@ function GM_notificationer(
   this.sandbox = aSandbox;
   this.sandboxPrincipal = Cu.getObjectPrincipal(aSandbox);
   this.scriptName = aScriptName;
-  this.setupEvent = GM_util.hitch(
-      this, "setupEvent", aWrappedContentWin, aSandbox,
-      aFileURL);
+  this.setupEvent = this.setupEvent.bind(
+      this, aWrappedContentWin, aSandbox, aFileURL);
   this.wrappedContentWin = aWrappedContentWin;
 }
 
@@ -259,7 +258,7 @@ GM_notificationer.prototype.contentStart = function (
     }
     */
     // if (details.message != "") {
-      GM_util.hitch(this, "chromeStart", notification, details)();
+      this.chromeStart.bind(this, notification, details)();
     // }
   } else {
     throw new this.wrappedContentWin.Error(
@@ -322,8 +321,8 @@ GM_notificationer.prototype.setupEvent = function (
     }
   }
 
-  var startEventCallback = GM_util.hitch(
-      this, "startEventCallback", aWrappedContentWin, aDetails);
+  var startEventCallback = this.startEventCallback.bind(
+      this, aWrappedContentWin, aDetails);
 
   aNotification.addEventListener(aEvent, function (aEvt) {
     if (!aDetails.highlightOnly) {

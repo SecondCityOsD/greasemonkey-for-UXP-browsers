@@ -90,7 +90,7 @@ var SyncServiceObserver = {
       // The "weave:service:ready" observer has been identified
       // as unreliable - Electrolysis (e10s)?
       // Manually poll instead.
-      GM_util.timeout(GM_util.hitch(SyncServiceObserver, "init"), 1000);
+      GM_util.timeout(SyncServiceObserver.init.bind(SyncServiceObserver), 1000);
     }
   },
 
@@ -180,7 +180,7 @@ ScriptStore.prototype = {
 
       var rs = new RemoteScript(aRecord.cleartext.downloadURL);
       rs.setSilent();
-      rs.download(GM_util.hitch(this, function (aSuccess, aType) {
+      rs.download(function (aSuccess, aType) {
         if (aSuccess && (aType == "dependencies")) {
           rs.install();
           rs.script.enabled = aRecord.cleartext.enabled;
@@ -190,7 +190,7 @@ ScriptStore.prototype = {
           rs.script.userOverride = aRecord.cleartext.userOverride;
           setScriptValuesFromSyncRecord(rs.script, aRecord);
         }
-      }));
+      }.bind(this));
     } else {
       let script = scriptForSyncId(aRecord.cleartext.id);
       if (script) {
@@ -360,9 +360,9 @@ function ScriptEngine() {
   gWeave.SyncEngine.call(this, GM_CONSTANTS.info.scriptHandler, gWeave.Service);
 
   this.enabled = GM_prefRoot.getValue("sync.enabled");
-  GM_prefRoot.watch("sync.enabled", GM_util.hitch(this, function () {
+  GM_prefRoot.watch("sync.enabled", function () {
     this.enabled = GM_prefRoot.getValue("sync.enabled");
-  }));
+  }.bind(this));
 }
 ScriptEngine.prototype = {
   "__proto__": gWeave.SyncEngine.prototype,

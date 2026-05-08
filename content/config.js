@@ -141,7 +141,7 @@ Config.prototype._save = function (aSaveNow) {
         .createInstance(Components.interfaces.nsITimer);
 
     // Dereference "this" for the closure.
-    var _save = GM_util.hitch(this, "_save");
+    var _save = this._save.bind(this);
 
     this._saveTimer.initWithCallback({
       "notify": function () {
@@ -383,7 +383,7 @@ Config.prototype.getScriptById = function (aScriptId) {
  */
 Config.prototype._updateVersion = function () {
   Cu.import("resource://gre/modules/AddonManager.jsm");
-  AddonManager.getAddonByID(this.GM_GUID, GM_util.hitch(this, function (aAddon) {
+  AddonManager.getAddonByID(this.GM_GUID, function (aAddon) {
     var oldVersion = GM_prefRoot.getValue("version");
     var newVersion = aAddon.version;
 
@@ -428,5 +428,5 @@ Config.prototype._updateVersion = function () {
         }
       }
     }
-  }));
+  }.bind(this));
 };
