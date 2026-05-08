@@ -631,7 +631,7 @@ Read this section as "what each later phase modifies in the diagrams above."
 |-------|----------------------------|
 | **4** | Frame-script entry deleted. `documentObserver` runs chrome-side directly. `storageFront → storageBack` collapsed. All `messageManager` IPC sites become direct calls. The diagrams' `[Phase 4: …]` footnotes resolve. **Behavior unchanged.** |
 | **5** | `GM_util.getService()` → direct module export. Polyfill helpers (`hitch`, `inArray`, …) replaced by ES2015+ natives. Dead files (`windowIdForEvent.js`, `icon16Disabled.png`) removed. **Behavior unchanged.** |
-| **6** | Small XBL bindings, if any, converted to anonymous content + JS. The cludes editor binding stays (it earns its weight). **Behavior unchanged.** |
+| **6** | XBL bindings audit complete: **no code change**.  Both binding clusters (cludes editor chain and the toolbar-button popup) earn their weight; replacing them with imperative code would lose lazy-loading semantics for no observable benefit on UXP.  See legacy-inventory.md §10 for the full audit conclusion. |
 | **7** | `evalAPI2Polyfill` string-eval replaced by chrome-side `GM` object exported via `Cu.exportFunction`. Native `GM_cookie` (using `Services.cookies`). Native `GM_download` with `onprogress` and a real `saveAs` UI. Batched-SQL paths in `storageBack` for `GM_*Values`. **Behavior gains GM4 features and loses the polyfill cost.** |
 
 After Phase 7, this document describes the running code one-to-one with no
