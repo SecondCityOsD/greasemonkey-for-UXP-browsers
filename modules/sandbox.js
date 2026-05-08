@@ -123,7 +123,7 @@ function createSandbox(aFrameScope, aContentWin, aUrl, aScript, aRunAt) {
   let _API2 = "";
   let unsafeWindowDefault = "const unsafeWindow = window;";
 
-  if (GM_util.inArray(aScript.grants, "none")) {
+  if (aScript.grants.includes("none")) {
     // If there is an explicit none grant, use a plain unwrapped sandbox
     // with no other content.
     var contentSandbox = new Cu.Sandbox(
@@ -160,7 +160,7 @@ function createSandbox(aFrameScope, aContentWin, aUrl, aScript, aRunAt) {
   let _unsafeWindowGrant = GM_prefRoot.getValue("api.unsafeWindow.grant");
   _API1 = "unsafeWindow";
   if (!_unsafeWindowGrant || (_unsafeWindowGrant
-      && GM_util.inArray(aScript.grants, _API1))) {
+      && aScript.grants.includes(_API1))) {
     let unsafeWindowGetter = new sandbox.Function (
         "return window.wrappedJSObject || window;");
     Object.defineProperty(sandbox, _API1, {
@@ -173,8 +173,10 @@ function createSandbox(aFrameScope, aContentWin, aUrl, aScript, aRunAt) {
   _API1 = "GM_addElement";
   _API2 = _API1.replace(
       API_PREFIX_REGEXP, GM_CONSTANTS.addonAPIPrefix2 + "$2");
-  if (GM_util.inArray(aScript.grants, _API1)
-      || GM_util.inArray(aScript.grants, _API2, true)) {
+  if (aScript.grants.includes(_API1)
+      || aScript.grants.some(function (aItem) {
+           return String(aItem).toLowerCase() === String(_API2).toLowerCase();
+         })) {
     sandbox[_API1] = GM_addElement.bind(
         null, aContentWin, aScript.fileURL, aRunAt);
   }
@@ -182,8 +184,10 @@ function createSandbox(aFrameScope, aContentWin, aUrl, aScript, aRunAt) {
   _API1 = "GM_addStyle";
   _API2 = _API1.replace(
       API_PREFIX_REGEXP, GM_CONSTANTS.addonAPIPrefix2 + "$2");
-  if (GM_util.inArray(aScript.grants, _API1)
-      || GM_util.inArray(aScript.grants, _API2, true)) {
+  if (aScript.grants.includes(_API1)
+      || aScript.grants.some(function (aItem) {
+           return String(aItem).toLowerCase() === String(_API2).toLowerCase();
+         })) {
     sandbox[_API1] = GM_addStyle.bind(
         null, aContentWin, aScript.fileURL, aRunAt);
   }
@@ -192,8 +196,10 @@ function createSandbox(aFrameScope, aContentWin, aUrl, aScript, aRunAt) {
     _API1 = "GM_cookie";
     _API2 = _API1.replace(
         API_PREFIX_REGEXP, GM_CONSTANTS.addonAPIPrefix2 + "$2");
-    if (GM_util.inArray(aScript.grants, _API1)
-        || GM_util.inArray(aScript.grants, _API2, true)) {
+    if (aScript.grants.includes(_API1)
+        || aScript.grants.some(function (aItem) {
+             return String(aItem).toLowerCase() === String(_API2).toLowerCase();
+           })) {
       sandbox[_API1] = GM_cookie.bind(
           null, aContentWin, sandbox,
           aScript.fileURL, aUrl);
@@ -209,66 +215,84 @@ function createSandbox(aFrameScope, aContentWin, aUrl, aScript, aRunAt) {
   _API1 = "GM_deleteValue";
   _API2 = _API1.replace(
       API_PREFIX_REGEXP, GM_CONSTANTS.addonAPIPrefix2 + "$2");
-  if (GM_util.inArray(aScript.grants, _API1)
-      || GM_util.inArray(aScript.grants, _API2, true)) {
+  if (aScript.grants.includes(_API1)
+      || aScript.grants.some(function (aItem) {
+           return String(aItem).toLowerCase() === String(_API2).toLowerCase();
+         })) {
     sandbox[_API1] = scriptStorage.deleteValue.bind(scriptStorage);
   }
   _API1 = "GM_deleteValues";
   _API2 = _API1.replace(
       API_PREFIX_REGEXP, GM_CONSTANTS.addonAPIPrefix2 + "$2");
-  if (GM_util.inArray(aScript.grants, _API1)
-      || GM_util.inArray(aScript.grants, _API2, true)) {
+  if (aScript.grants.includes(_API1)
+      || aScript.grants.some(function (aItem) {
+           return String(aItem).toLowerCase() === String(_API2).toLowerCase();
+         })) {
     sandbox[_API1] = scriptStorage.deleteValues.bind(scriptStorage);
   }
   _API1 = "GM_getValue";
   _API2 = _API1.replace(
       API_PREFIX_REGEXP, GM_CONSTANTS.addonAPIPrefix2 + "$2");
-  if (GM_util.inArray(aScript.grants, _API1)
-      || GM_util.inArray(aScript.grants, _API2, true)) {
+  if (aScript.grants.includes(_API1)
+      || aScript.grants.some(function (aItem) {
+           return String(aItem).toLowerCase() === String(_API2).toLowerCase();
+         })) {
     sandbox[_API1] = scriptStorage.getValue.bind(scriptStorage);
   }
   _API1 = "GM_getValues";
   _API2 = _API1.replace(
       API_PREFIX_REGEXP, GM_CONSTANTS.addonAPIPrefix2 + "$2");
-  if (GM_util.inArray(aScript.grants, _API1)
-      || GM_util.inArray(aScript.grants, _API2, true)) {
+  if (aScript.grants.includes(_API1)
+      || aScript.grants.some(function (aItem) {
+           return String(aItem).toLowerCase() === String(_API2).toLowerCase();
+         })) {
     sandbox[_API1] = scriptStorage.getValues.bind(scriptStorage);
   }
   _API1 = "GM_setValue";
   _API2 = _API1.replace(
       API_PREFIX_REGEXP, GM_CONSTANTS.addonAPIPrefix2 + "$2");
-  if (GM_util.inArray(aScript.grants, _API1)
-      || GM_util.inArray(aScript.grants, _API2, true)) {
+  if (aScript.grants.includes(_API1)
+      || aScript.grants.some(function (aItem) {
+           return String(aItem).toLowerCase() === String(_API2).toLowerCase();
+         })) {
     sandbox[_API1] = scriptStorage.setValue.bind(scriptStorage);
   }
   _API1 = "GM_setValues";
   _API2 = _API1.replace(
       API_PREFIX_REGEXP, GM_CONSTANTS.addonAPIPrefix2 + "$2");
-  if (GM_util.inArray(aScript.grants, _API1)
-      || GM_util.inArray(aScript.grants, _API2, true)) {
+  if (aScript.grants.includes(_API1)
+      || aScript.grants.some(function (aItem) {
+           return String(aItem).toLowerCase() === String(_API2).toLowerCase();
+         })) {
     sandbox[_API1] = scriptStorage.setValues.bind(scriptStorage);
   }
 
   _API1 = "GM_listValues";
   _API2 = _API1.replace(
       API_PREFIX_REGEXP, GM_CONSTANTS.addonAPIPrefix2 + "$2");
-  if (GM_util.inArray(aScript.grants, _API1)
-      || GM_util.inArray(aScript.grants, _API2, true)) {
+  if (aScript.grants.includes(_API1)
+      || aScript.grants.some(function (aItem) {
+           return String(aItem).toLowerCase() === String(_API2).toLowerCase();
+         })) {
     sandbox[_API1] = scriptStorage.listValues.bind(scriptStorage);
   }
 
   _API1 = "GM_addValueChangeListener";
   _API2 = _API1.replace(
       API_PREFIX_REGEXP, GM_CONSTANTS.addonAPIPrefix2 + "$2");
-  if (GM_util.inArray(aScript.grants, _API1)
-      || GM_util.inArray(aScript.grants, _API2, true)) {
+  if (aScript.grants.includes(_API1)
+      || aScript.grants.some(function (aItem) {
+           return String(aItem).toLowerCase() === String(_API2).toLowerCase();
+         })) {
     sandbox[_API1] = scriptStorage.addValueChangeListener.bind(scriptStorage);
   }
   _API1 = "GM_removeValueChangeListener";
   _API2 = _API1.replace(
       API_PREFIX_REGEXP, GM_CONSTANTS.addonAPIPrefix2 + "$2");
-  if (GM_util.inArray(aScript.grants, _API1)
-      || GM_util.inArray(aScript.grants, _API2, true)) {
+  if (aScript.grants.includes(_API1)
+      || aScript.grants.some(function (aItem) {
+           return String(aItem).toLowerCase() === String(_API2).toLowerCase();
+         })) {
     sandbox[_API1] = scriptStorage.removeValueChangeListener.bind(scriptStorage);
   }
 
@@ -276,8 +300,10 @@ function createSandbox(aFrameScope, aContentWin, aUrl, aScript, aRunAt) {
   _API1 = "GM_getResourceText";
   _API2 = _API1.replace(
       API_PREFIX_REGEXP, GM_CONSTANTS.addonAPIPrefix2 + "$2");
-  if (GM_util.inArray(aScript.grants, _API1)
-      || GM_util.inArray(aScript.grants, _API2, true)) {
+  if (aScript.grants.includes(_API1)
+      || aScript.grants.some(function (aItem) {
+           return String(aItem).toLowerCase() === String(_API2).toLowerCase();
+         })) {
     sandbox[_API1] = scriptResources.getResourceText.bind(
         scriptResources,
         aContentWin, sandbox, aScript.fileURL);
@@ -285,8 +311,10 @@ function createSandbox(aFrameScope, aContentWin, aUrl, aScript, aRunAt) {
   _API1 = "GM_getResourceURL";
   _API2 = _API1.replace(
       API_PREFIX_REGEXP, GM_CONSTANTS.addonAPIPrefix2 + "$2");
-  if (GM_util.inArray(aScript.grants, _API1)
-      || GM_util.inArray(aScript.grants, _API2, true)) {
+  if (aScript.grants.includes(_API1)
+      || aScript.grants.some(function (aItem) {
+           return String(aItem).toLowerCase() === String(_API2).toLowerCase();
+         })) {
     sandbox[_API1] = scriptResources.getResourceURL.bind(
         scriptResources,
         aContentWin, sandbox, aScript);
@@ -295,8 +323,10 @@ function createSandbox(aFrameScope, aContentWin, aUrl, aScript, aRunAt) {
   _API1 = "GM_log";
   _API2 = _API1.replace(
       API_PREFIX_REGEXP, GM_CONSTANTS.addonAPIPrefix2 + "$2");
-  if (GM_util.inArray(aScript.grants, _API1)
-      || GM_util.inArray(aScript.grants, _API2, true)) {
+  if (aScript.grants.includes(_API1)
+      || aScript.grants.some(function (aItem) {
+           return String(aItem).toLowerCase() === String(_API2).toLowerCase();
+         })) {
     {
       let _logger = new GM_ScriptLogger(aScript);
       sandbox[_API1] = _logger.log.bind(_logger);
@@ -306,8 +336,10 @@ function createSandbox(aFrameScope, aContentWin, aUrl, aScript, aRunAt) {
   _API1 = "GM_notification";
   _API2 = _API1.replace(
       API_PREFIX_REGEXP, GM_CONSTANTS.addonAPIPrefix2 + "$2");
-  if (GM_util.inArray(aScript.grants, _API1)
-      || GM_util.inArray(aScript.grants, _API2, true)) {
+  if (aScript.grants.includes(_API1)
+      || aScript.grants.some(function (aItem) {
+           return String(aItem).toLowerCase() === String(_API2).toLowerCase();
+         })) {
     {
       let _notifier = new GM_notificationer(
           getChromeWinForContentWin(aContentWin), aContentWin, sandbox,
@@ -319,8 +351,10 @@ function createSandbox(aFrameScope, aContentWin, aUrl, aScript, aRunAt) {
   _API1 = "GM_openInTab";
   _API2 = _API1.replace(
       API_PREFIX_REGEXP, GM_CONSTANTS.addonAPIPrefix2 + "$2");
-  if (GM_util.inArray(aScript.grants, _API1)
-      || GM_util.inArray(aScript.grants, _API2, true)) {
+  if (aScript.grants.includes(_API1)
+      || aScript.grants.some(function (aItem) {
+           return String(aItem).toLowerCase() === String(_API2).toLowerCase();
+         })) {
     // Wrap GM_openInTab to clone the returned tab handle into the sandbox.
     // Without this, Xray wrappers block access to .close()/.onclose.
     // Phase 4f-2: pass aContentWin instead of the frame message manager.
@@ -357,10 +391,14 @@ function createSandbox(aFrameScope, aContentWin, aUrl, aScript, aRunAt) {
   let _unreg1 = "GM_unregisterMenuCommand";
   let _unreg2 = _unreg1.replace(
       API_PREFIX_REGEXP, GM_CONSTANTS.addonAPIPrefix2 + "$2");
-  if (GM_util.inArray(aScript.grants, _API1)
-      || GM_util.inArray(aScript.grants, _API2, true)
-      || GM_util.inArray(aScript.grants, _unreg1)
-      || GM_util.inArray(aScript.grants, _unreg2, true)) {
+  if (aScript.grants.includes(_API1)
+      || aScript.grants.some(function (aItem) {
+           return String(aItem).toLowerCase() === String(_API2).toLowerCase();
+         })
+      || aScript.grants.includes(_unreg1)
+      || aScript.grants.some(function (aItem) {
+           return String(aItem).toLowerCase() === String(_unreg2).toLowerCase();
+         })) {
     // Inject MenuCommandSandbox into the sandbox by source.  The function's
     // body — including its two event listeners and its closure-scoped
     // { commands, commandFuncs } maps — ends up running in sandbox
@@ -399,8 +437,10 @@ function createSandbox(aFrameScope, aContentWin, aUrl, aScript, aRunAt) {
   _API1 = "GM_setClipboard";
   _API2 = _API1.replace(
       API_PREFIX_REGEXP, GM_CONSTANTS.addonAPIPrefix2 + "$2");
-  if (GM_util.inArray(aScript.grants, _API1)
-      || GM_util.inArray(aScript.grants, _API2, true)) {
+  if (aScript.grants.includes(_API1)
+      || aScript.grants.some(function (aItem) {
+           return String(aItem).toLowerCase() === String(_API2).toLowerCase();
+         })) {
     sandbox[_API1] = GM_setClipboard.bind(
         null, aContentWin, aScript.fileURL);
   }
@@ -411,18 +451,22 @@ function createSandbox(aFrameScope, aContentWin, aUrl, aScript, aRunAt) {
   _API1 = "GM_windowClose";
   _API2 = _API1.replace(
       API_PREFIX_REGEXP, GM_CONSTANTS.addonAPIPrefix2 + "$2");
-  if (GM_util.inArray(aScript.grants, _API1)
-      || GM_util.inArray(aScript.grants, _API2, true)
-      || GM_util.inArray(aScript.grants, "window.close")) {
+  if (aScript.grants.includes(_API1)
+      || aScript.grants.some(function (aItem) {
+           return String(aItem).toLowerCase() === String(_API2).toLowerCase();
+         })
+      || aScript.grants.includes("window.close")) {
     sandbox[_API1] = GM_window.bind(
         null, aContentWin, aScript.fileURL, "close");
   }
   _API1 = "GM_windowFocus";
   _API2 = _API1.replace(
       API_PREFIX_REGEXP, GM_CONSTANTS.addonAPIPrefix2 + "$2");
-  if (GM_util.inArray(aScript.grants, _API1)
-      || GM_util.inArray(aScript.grants, _API2, true)
-      || GM_util.inArray(aScript.grants, "window.focus")) {
+  if (aScript.grants.includes(_API1)
+      || aScript.grants.some(function (aItem) {
+           return String(aItem).toLowerCase() === String(_API2).toLowerCase();
+         })
+      || aScript.grants.includes("window.focus")) {
     sandbox[_API1] = GM_window.bind(
         null, aContentWin, aScript.fileURL, "focus");
   }
@@ -430,8 +474,10 @@ function createSandbox(aFrameScope, aContentWin, aUrl, aScript, aRunAt) {
   _API1 = "GM_xmlhttpRequest";
   _API2 = _API1.replace(
       API_PREFIX_REGEXP, GM_CONSTANTS.addonAPIPrefix2 + "$2");
-  if (GM_util.inArray(aScript.grants, _API1)
-      || GM_util.inArray(aScript.grants, _API2, true)) {
+  if (aScript.grants.includes(_API1)
+      || aScript.grants.some(function (aItem) {
+           return String(aItem).toLowerCase() === String(_API2).toLowerCase();
+         })) {
     {
       let _xhr = new GM_xmlHttpRequester(
           aContentWin, sandbox, aScript.fileURL, aUrl, aScript.connects);
@@ -456,8 +502,10 @@ function createSandbox(aFrameScope, aContentWin, aUrl, aScript, aRunAt) {
   _API1 = "GM_download";
   _API2 = _API1.replace(
       API_PREFIX_REGEXP, GM_CONSTANTS.addonAPIPrefix2 + "$2");
-  if (GM_util.inArray(aScript.grants, _API1)
-      || GM_util.inArray(aScript.grants, _API2, true)) {
+  if (aScript.grants.includes(_API1)
+      || aScript.grants.some(function (aItem) {
+           return String(aItem).toLowerCase() === String(_API2).toLowerCase();
+         })) {
     if (typeof sandbox["GM_xmlhttpRequest"] == "undefined") {
       let _xhr = new GM_xmlHttpRequester(
           aContentWin, sandbox, aScript.fileURL, aUrl, aScript.connects);

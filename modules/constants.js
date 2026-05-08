@@ -147,10 +147,10 @@ const GM_CONSTANTS = {
     let statusEqual = [429, 500];     
     let statusGreaterThanAndEqual = 999;
     if (aBool) {
-      return GM_util.inArray(statusEqual, aStatus)
+      return statusEqual.includes(aStatus)
           || (statusGreaterThanAndEqual <= aStatus);
     } else {
-      return !GM_util.inArray(statusEqual, aStatus)
+      return !statusEqual.includes(aStatus)
           && !(statusGreaterThanAndEqual <= aStatus);
     }
   },

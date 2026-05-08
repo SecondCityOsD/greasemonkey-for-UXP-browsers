@@ -420,7 +420,7 @@ function setScriptValuesFromSyncRecord(aScript, aRecord) {
     if (GM_prefRoot.getValue("sync.values.deleteNonExistentValues")) {
       for (let i = 0, iLen = valuesOld.length; i < iLen; i++) {
         let valueOld = valuesOld[i];
-        if (!GM_util.inArray(valuesNew, valueOld)) {
+        if (!valuesNew.includes(valueOld)) {
           storage.deleteValue(valueOld);
         }
       }

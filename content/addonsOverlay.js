@@ -103,7 +103,7 @@ var observer = {
     if (isScriptView()) {
       type = 1;
     }
-    if (isScriptDetailView() && GM_util.inArray(_eventsAlsoDetail, aEvent)) {
+    if (isScriptDetailView() && _eventsAlsoDetail.includes(aEvent)) {
       type = 2;
     }
     if (type == 0) {

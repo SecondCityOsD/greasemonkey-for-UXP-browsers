@@ -77,7 +77,7 @@ function contentObserver(aWin, aTopic) {
     //   2. Have NO @require dependencies (libraries like jQuery need DOM)
     // Everything else is deferred to document-element-inserted.
     let earlyScripts = scripts.filter(function (s) {
-      let needsPageContext = GM_util.inArray(s.grants, "none")
+      let needsPageContext = s.grants.includes("none")
           || s.injectInto == "page";
       if (s.injectInto == "content") needsPageContext = false;
       return !needsPageContext
@@ -119,7 +119,7 @@ function contentObserver(aWin, aTopic) {
       let allStartScripts = IPCScript.scriptsForUrl(
           deferredUrl, "document-start", GM_util.windowId(aWin, "outer"));
       let deferredScripts = allStartScripts.filter(function (s) {
-        let needsPageContext = GM_util.inArray(s.grants, "none")
+        let needsPageContext = s.grants.includes("none")
             || s.injectInto == "page";
         if (s.injectInto == "content") needsPageContext = false;
         return needsPageContext
@@ -419,7 +419,7 @@ function injectScripts(aScripts, aRunAt, aContentWin) {
       continue;
     }
     try {
-      if ((GM_util.inArray(script.grants, "none")
+      if ((script.grants.includes("none")
               || script.injectInto == "page")
           && script.injectInto != "content"
           && aContentWin.document.documentElement) {

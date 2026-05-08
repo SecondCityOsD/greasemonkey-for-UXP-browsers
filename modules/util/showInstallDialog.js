@@ -68,7 +68,7 @@ function showInstallDialog(aUrlOrRemoteScript, aBrowser, aRequest) {
   // After successful authentication the user must refresh page.
   // Other solutions have been worse.
   if ((typeof status == "undefined")
-      || !GM_util.inArray(GM_CONSTANTS.installScriptReloadStatus, status)) {
+      || !GM_CONSTANTS.installScriptReloadStatus.includes(status)) {
     if (rs.script) {
       openDialog(rs.script);
     } else {
@@ -78,7 +78,7 @@ function showInstallDialog(aUrlOrRemoteScript, aBrowser, aRequest) {
     }
   }
   if ((typeof status != "undefined")
-      && GM_util.inArray(GM_CONSTANTS.installScriptReloadStatus, status)) {
+      && GM_CONSTANTS.installScriptReloadStatus.includes(status)) {
     rs.cleanup();
   }
 
