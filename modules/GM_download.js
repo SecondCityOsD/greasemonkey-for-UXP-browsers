@@ -285,16 +285,27 @@ function createGMDownloadAPI(
     if (aDetailsOrUrl) {
       if (typeof aDetailsOrUrl === "object") {
         // Cu.exportFunction wraps the chrome-side downloadImpl in an
-        // X-ray for cross-compartment calls.  Without waiving, a plain
-        // for-in over the script's details object sees only X-ray-
-        // visible properties — which excludes script-defined function
-        // properties like onload / onerror / onprogress.  Mirrors the
-        // pattern already used in xmlHttpRequester.js (Cu.waiveXrays
-        // at the top of contentStartRequest).  Without this, every
-        // callback silently stays at the noop default.
+        // X-ray for cross-compartment calls.  Without waiving, the
+        // chrome view of the script's details object filters out
+        // function-valued expandos (onload / onerror / etc.) and may
+        // also filter non-function expandos depending on UXP build.
+        //
+        // We waive the X-ray and then use bracket-access by explicit
+        // name rather than for-in.  Some UXP builds do not enumerate
+        // expandos through a waived view even though direct bracket
+        // access still works (mirrors xmlHttpRequester.js:569 +
+        // aDetails["on" + aEvent] pattern).
         let waived = Cu.waiveXrays(aDetailsOrUrl);
-        for (let k in waived) {
-          details[k] = waived[k];
+        let known = [
+          "url", "name", "saveAs", "headers", "timeout",
+          "onload", "onerror", "onabort", "onprogress", "ontimeout",
+        ];
+        for (let i = 0; i < known.length; i++) {
+          let k = known[i];
+          let v = waived[k];
+          if (v !== undefined) {
+            details[k] = v;
+          }
         }
       } else if (typeof aDetailsOrUrl === "string") {
         details.url = aDetailsOrUrl;
@@ -397,6 +408,13 @@ function createGMDownloadAPI(
           | Ci.nsIWebBrowserPersist.PERSIST_FLAGS_BYPASS_CACHE
           | Ci.nsIWebBrowserPersist.PERSIST_FLAGS_AUTODETECT_APPLY_CONVERSION;
 
+      // STATE_STOP fires once per layer that stops — for nsIWebBrowser-
+      // Persist that can be both the request and the network (and on
+      // some UXP builds, the document too).  Without a guard we'd
+      // invoke onload / onabort / onerror two or three times.  A
+      // single-shot flag mirrors the contract scripts expect: exactly
+      // one terminal callback per GM_download invocation.
+      let terminalFired = false;
       let progressListener = {
         "QueryInterface": function (aIID) {
           if (aIID.equals(Ci.nsIWebProgressListener)
@@ -409,7 +427,7 @@ function createGMDownloadAPI(
         "onProgressChange": function (aWebProgress, aRequest,
             aCurSelfProgress, aMaxSelfProgress,
             aCurTotalProgress, aMaxTotalProgress) {
-          if (aborted) {
+          if (aborted || terminalFired) {
             return;
           }
           // Match the polyfill / TM/VM event shape:
@@ -439,6 +457,10 @@ function createGMDownloadAPI(
           if (!(aStateFlags & stop)) {
             return;
           }
+          if (terminalFired) {
+            return;
+          }
+          terminalFired = true;
           if (aborted) {
             safeCall(details.onabort, {});
             return;
@@ -470,27 +492,27 @@ function createGMDownloadAPI(
         // fall back to a system principal for the persist.
       }
 
-      // nsIWebBrowserPersist.saveURI exists in two shapes across UXP
-      // builds:
+      // nsIWebBrowserPersist.saveURI has two shapes across UXP builds:
       //
-      //   9-arg (modern UXP, with triggering principal):
+      //   8-arg (the canonical shape on Pale Moon / Basilisk):
+      //     saveURI(aURI, aCacheKey, aReferrer, aReferrerPolicy,
+      //             aPostData, aExtraHeaders, aFile, aPrivacyContext)
+      //
+      //   9-arg (some mainline Firefox forks; adds triggering principal
+      //   as arg 2):
       //     saveURI(aURI, aPrincipal, aCacheKey, aReferrer,
       //             aReferrerPolicy, aPostData, aExtraHeaders, aFile,
       //             aPrivacyContext)
       //
-      //   8-arg (older Pale Moon / Basilisk):
-      //     saveURI(aURI, aCacheKey, aReferrer, aReferrerPolicy,
-      //             aPostData, aExtraHeaders, aFile, aPrivacyContext)
-      //
-      // Try the modern signature first; on NS_ERROR_XPC_BAD_PARAM_COUNT
-      // (or any other XPConnect dispatch failure), fall back to the
-      // older one.  Any other error after a successful signature match
-      // is a real download failure — surface it.
+      // Try the 8-arg shape first since every observed UXP build
+      // accepts it.  Fall back to 9-arg only if 8-arg fails — covers
+      // any future principal-required build without paying a noisy
+      // throw on every download.
       let savedOk = false;
       let lastErr = null;
       try {
         persist.saveURI(
-            uri, principal, null, referrer, 0, null, null,
+            uri, null, referrer, 0, null, null,
             aTargetFile, loadContext);
         savedOk = true;
       } catch (e) {
@@ -499,7 +521,7 @@ function createGMDownloadAPI(
       if (!savedOk) {
         try {
           persist.saveURI(
-              uri, null, referrer, 0, null, null,
+              uri, principal, null, referrer, 0, null, null,
               aTargetFile, loadContext);
           savedOk = true;
         } catch (e) {
