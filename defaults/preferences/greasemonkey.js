@@ -4,6 +4,10 @@ pref("extensions.greasemonkey.api.@match.hash", true);
 // Phase 7b: GM_cookie is now a native methods-object built on
 // Services.cookies (see modules/GM_cookie.js).  Default true.
 pref("extensions.greasemonkey.api.GM_cookie", true);
+// Phase 7c: GM_download is now a native callable built on
+// nsIWebBrowserPersist + nsIFilePicker (see modules/GM_download.js),
+// replacing the script-side polyfill.  Default true.
+pref("extensions.greasemonkey.api.GM_download", true);
 pref("extensions.greasemonkey.api.object.polyfill", true);
 pref("extensions.greasemonkey.api.unsafeWindow.grant", false);
 pref("extensions.greasemonkey.cors_csp_override.excludes", false);

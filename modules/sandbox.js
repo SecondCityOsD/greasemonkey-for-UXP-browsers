@@ -61,10 +61,11 @@
  *
  * ── GM_download ─────────────────────────────────────────────────────────────
  *
- *   GM_download is implemented as a loadSubScript polyfill
- *   (modules/thirdParty/GM_download.js).  If @grant GM_download is present
- *   but @grant GM_xmlhttpRequest is not, GM_xmlhttpRequest is auto-injected
- *   first because the polyfill depends on it.
+ *   GM_download is a native chrome-side callable built on
+ *   nsIWebBrowserPersist + nsIFilePicker (modules/GM_download.js).
+ *   It does not require GM_xmlhttpRequest — the pre-cleanup polyfill
+ *   used XHR + an <a download> click and so triggered an auto-inject
+ *   of GM_xmlhttpRequest; the native rewrite drops that side-effect.
  */
 
 const EXPORTED_SYMBOLS = ["createSandbox", "runScriptInSandbox"];
@@ -91,6 +92,7 @@ Cu.import("chrome://greasemonkey-modules/content/prefManager.js");
 Cu.import("chrome://greasemonkey-modules/content/storageBack.js");
 Cu.import("chrome://greasemonkey-modules/content/thirdParty/getChromeWinForContentWin.js");
 Cu.import("chrome://greasemonkey-modules/content/GM_cookie.js");
+Cu.import("chrome://greasemonkey-modules/content/GM_download.js");
 Cu.import("chrome://greasemonkey-modules/content/util.js");
 Cu.import("chrome://greasemonkey-modules/content/xmlHttpRequester.js");
 
@@ -530,29 +532,30 @@ function createSandbox(aFrameScope, aContentWin, aUrl, aScript, aRunAt) {
     }
   });
 
-  // [GM_download] — load polyfill into the sandbox when granted.
-  // The polyfill uses GM_xmlhttpRequest internally; auto-inject it if the
-  // script did not explicitly grant it (so @grant GM_download is sufficient).
-  _API1 = "GM_download";
-  _API2 = _API1.replace(
-      API_PREFIX_REGEXP, GM_CONSTANTS.addonAPIPrefix2 + "$2");
-  if (aScript.grants.includes(_API1)
-      || aScript.grants.some(function (aItem) {
-           return String(aItem).toLowerCase() === String(_API2).toLowerCase();
-         })) {
-    if (typeof sandbox["GM_xmlhttpRequest"] == "undefined") {
-      let _xhr = new GM_xmlHttpRequester(
-          aContentWin, sandbox, aScript.fileURL, aUrl, aScript.connects);
-      sandbox["GM_xmlhttpRequest"] = Cu.cloneInto(
-          _xhr.contentStartRequest.bind(_xhr),
-          sandbox, {
-            "cloneFunctions": true,
-            "wrapReflectors": true,
-          });
+  // Phase 7c: GM_download is now a native chrome-side callable built on
+  // nsIWebBrowserPersist + nsIFilePicker (modules/GM_download.js),
+  // replacing the script-side polyfill (modules/thirdParty/GM_download.js)
+  // that fetched via GM_xmlhttpRequest + <a download> click.
+  //
+  // The polyfill required GM_xmlhttpRequest to be present in the sandbox,
+  // so this branch used to auto-inject xmlhttpRequest whenever GM_download
+  // was granted.  The native implementation has no such dependency;
+  // scripts that need xmlhttpRequest must @grant it explicitly.
+  //
+  // No special-case is needed in buildGMObject — GM_download is a callable
+  // (typeof === "function"), so the main loop's Promise wrapping picks it
+  // up automatically as GM.download.
+  if (GM_prefRoot.getValue("api.GM_download")) {
+    _API1 = "GM_download";
+    _API2 = _API1.replace(
+        API_PREFIX_REGEXP, GM_CONSTANTS.addonAPIPrefix2 + "$2");
+    if (aScript.grants.includes(_API1)
+        || aScript.grants.some(function (aItem) {
+             return String(aItem).toLowerCase() === String(_API2).toLowerCase();
+           })) {
+      sandbox[_API1] = createGMDownloadAPI(
+          aContentWin, sandbox, aScript.fileURL, aUrl);
     }
-    GM_CONSTANTS.jsSubScriptLoader.loadSubScript(
-        "chrome://greasemonkey-modules/content/thirdParty/GM_download.js",
-        sandbox, GM_CONSTANTS.fileScriptCharset);
   }
 
   // GM_info is always provided.
