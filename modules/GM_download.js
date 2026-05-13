@@ -20,6 +20,9 @@
  * The native version uses nsIWebBrowserPersist for the actual fetch +
  * save (streamed to disk, no in-memory buffering, respects the page's
  * cookies and privacy context) and nsIFilePicker for the saveAs UI.
+ * Each download is also registered with nsIDownloadManager so it
+ * appears in Pale Moon's Downloads window with source / target /
+ * progress and a Cancel button that talks back to persist.cancelSave.
  *
  * API shape (matches Tampermonkey / Violentmonkey / GM4):
  *
@@ -29,7 +32,7 @@
  *   details = {
  *     url:      string (required),
  *     name:     string (filename to save as),
- *     saveAs:   bool   (force file picker; default honours pref),
+ *     saveAs:   bool   (force file picker; default: silent download),
  *     onload:      fn,
  *     onerror:     fn,
  *     onabort:     fn,
@@ -229,6 +232,106 @@ function getLoadContext(aContentWin) {
   }
 }
 
+/**
+ * Registers an in-flight download with the platform's transfer system
+ * (nsITransfer @mozilla.org/transfer;1) so it appears in Pale Moon's
+ * Downloads window with source / target / progress and a working
+ * Cancel button.  The transfer object itself implements
+ * nsIWebProgressListener; callers forward every progress / state event
+ * from their own listener to it so the UI stays in sync.
+ *
+ * Why nsITransfer and not nsIDownloadManager.addDownload?  Pale Moon
+ * (and post-Bug-825588 Firefox forks) stub out addDownload to throw
+ * NS_ERROR_UNEXPECTED — the underlying storage was migrated to the
+ * Downloads.jsm pipeline, which wraps nsITransfer internally.  The
+ * transfer service is what BOTH the legacy XPCOM-style callers and
+ * Downloads.jsm now go through, so this works on every UXP build.
+ *
+ * The returned listener is null if the transfer service is unavailable
+ * or init() throws (the download still runs to disk, just without a
+ * Downloads-window entry; Cu.reportError surfaces the cause).
+ *
+ * Private-browsing is derived from the page's nsILoadContext so that
+ * downloads from a private window do not leak into the regular history.
+ *
+ * @param {nsIURI}                 aSourceUri
+ * @param {nsIFile}                aTargetFile
+ * @param {string}                 aDisplayName
+ * @param {nsIWebBrowserPersist}   aPersist  - Used as the transfer's cancelable.
+ * @param {nsILoadContext|null}    aLoadContext
+ * @returns {nsIWebProgressListener|null}
+ */
+function registerWithDownloadManager(
+    aSourceUri, aTargetFile, aDisplayName, aPersist, aLoadContext) {
+  try {
+    let transfer = Cc["@mozilla.org/transfer;1"]
+        .createInstance(Ci.nsITransfer);
+    let targetUri = Services.io.newFileURI(aTargetFile);
+    let isPrivate = false;
+    try {
+      isPrivate = !!(aLoadContext && aLoadContext.usePrivateBrowsing);
+    } catch (e) {
+      // Some load contexts don't expose usePrivateBrowsing; default
+      // to non-private rather than abort the registration.
+    }
+    // nsITransfer.init signature (UXP):
+    //   void init(in nsIURI aSource,
+    //             in nsIURI aTarget,
+    //             in AString aDisplayName,
+    //             in nsIMIMEInfo aMIMEInfo,
+    //             in PRTime aStartTime,
+    //             in nsIFile aTempFile,
+    //             in nsICancelable aCancelable,
+    //             in boolean aIsPrivate);
+    transfer.init(
+        aSourceUri,
+        targetUri,
+        aDisplayName,
+        /* mimeInfo  */ null,
+        /* startTime */ Date.now() * 1000,
+        /* tempFile  */ null,
+        /* cancelable */ aPersist,
+        isPrivate);
+    return transfer.QueryInterface(Ci.nsIWebProgressListener);
+  } catch (e) {
+    // Transfer service unavailable or init signature mismatch on this
+    // build — surface for diagnosis but don't block the download.
+    Cu.reportError(
+        "GM_download: nsITransfer.init failed: " + e);
+    return null;
+  }
+}
+
+/**
+ * Forwards one nsIWebProgressListener event to the Download Manager's
+ * listener, swallowing exceptions so a DM-side failure can't take down
+ * our own progress dispatch.  Falls through silently when aDmListener
+ * is null (DM wasn't registered) or when the listener doesn't
+ * implement the named method (e.g. onContentBlockingEvent on older
+ * UXP builds).
+ *
+ * @param {nsIWebProgressListener|null} aDmListener
+ * @param {string} aMethod  - Name of the listener method to call.
+ * @param {IArguments} aArgs - Arguments object from the caller.
+ */
+function forwardToDm(aDmListener, aMethod, aArgs) {
+  if (!aDmListener) {
+    return;
+  }
+  let fn = aDmListener[aMethod];
+  if (typeof fn !== "function") {
+    return;
+  }
+  try {
+    fn.apply(aDmListener, aArgs);
+  } catch (e) {
+    // The DM should never reject events under normal operation; surface
+    // any unexpected failures via Cu.reportError but keep going.
+    Cu.reportError(
+        "GM_download: DM listener " + aMethod + " failed: " + e);
+  }
+}
+
 
 /**
  * Builds the script-facing GM_download API function.  Called once per
@@ -408,6 +511,21 @@ function createGMDownloadAPI(
           | Ci.nsIWebBrowserPersist.PERSIST_FLAGS_BYPASS_CACHE
           | Ci.nsIWebBrowserPersist.PERSIST_FLAGS_AUTODETECT_APPLY_CONVERSION;
 
+      let loadContext = getLoadContext(aWrappedContentWin);
+
+      // Register the download with the platform transfer service
+      // (nsITransfer) so it appears in Pale Moon's Downloads window
+      // with source URL, target path, live progress, and a Cancel
+      // button that wires back to persist.cancelSave() via the
+      // cancelable arg.
+      //
+      // The transfer object itself implements nsIWebProgressListener;
+      // we forward every progress / state event from our own listener
+      // below so the UI stays in sync.  Failure here is non-fatal:
+      // the download still runs, just without a Downloads-window entry.
+      let dmListener = registerWithDownloadManager(
+          uri, aTargetFile, details.name, persist, loadContext);
+
       // STATE_STOP fires once per layer that stops — for nsIWebBrowser-
       // Persist that can be both the request and the network (and on
       // some UXP builds, the document too).  Without a guard we'd
@@ -427,6 +545,9 @@ function createGMDownloadAPI(
         "onProgressChange": function (aWebProgress, aRequest,
             aCurSelfProgress, aMaxSelfProgress,
             aCurTotalProgress, aMaxTotalProgress) {
+          // Forward to the DM first so the UI updates even if our
+          // script callback throws.
+          forwardToDm(dmListener, "onProgressChange", arguments);
           if (aborted || terminalFired) {
             return;
           }
@@ -446,13 +567,25 @@ function createGMDownloadAPI(
           // Numeric arguments are 64-bit signed integers here.  The
           // payload shape is identical to onProgressChange so the
           // sandbox sees consistent fields regardless of which path
-          // the platform took.
-          this.onProgressChange(aWebProgress, aRequest,
-              aCurSelfProgress, aMaxSelfProgress,
-              aCurTotalProgress, aMaxTotalProgress);
+          // the platform took.  The DM listener gets the 64-bit
+          // variant directly (preserves precision on files > 2 GB).
+          forwardToDm(dmListener, "onProgressChange64", arguments);
+          if (aborted || terminalFired) {
+            return;
+          }
+          safeCall(details.onprogress, {
+            "done":             aCurTotalProgress,
+            "total":            aMaxTotalProgress,
+            "loaded":           aCurTotalProgress,
+            "totalSize":        aMaxTotalProgress,
+            "lengthComputable": aMaxTotalProgress > 0,
+          });
         },
         "onStateChange": function (aWebProgress, aRequest,
             aStateFlags, aStatus) {
+          // Always forward to DM — it needs every state transition,
+          // not just terminal STOP, to keep its UI accurate.
+          forwardToDm(dmListener, "onStateChange", arguments);
           let stop = Ci.nsIWebProgressListener.STATE_STOP;
           if (!(aStateFlags & stop)) {
             return;
@@ -476,14 +609,21 @@ function createGMDownloadAPI(
             });
           }
         },
-        "onLocationChange":  function () {},
-        "onStatusChange":    function () {},
-        "onSecurityChange":  function () {},
-        "onContentBlockingEvent": function () {},
+        "onLocationChange": function () {
+          forwardToDm(dmListener, "onLocationChange", arguments);
+        },
+        "onStatusChange": function () {
+          forwardToDm(dmListener, "onStatusChange", arguments);
+        },
+        "onSecurityChange": function () {
+          forwardToDm(dmListener, "onSecurityChange", arguments);
+        },
+        "onContentBlockingEvent": function () {
+          forwardToDm(dmListener, "onContentBlockingEvent", arguments);
+        },
       };
       persist.progressListener = progressListener;
 
-      let loadContext = getLoadContext(aWrappedContentWin);
       let principal = null;
       try {
         principal = aWrappedContentWin.document.nodePrincipal;
