@@ -114,10 +114,6 @@ const ERROR = {
   "NOT_WHITELISTED": "not_whitelisted",
 };
 
-/** Pref the browser itself reads to decide auto-save vs prompt. */
-const PREF_USE_DOWNLOAD_DIR = "browser.download.useDownloadDir";
-
-
 /**
  * Tests details.name against the blacklist (if enforced) and whitelist.
  * Returns null if the filename is acceptable, or an ERROR code otherwise.
@@ -150,23 +146,6 @@ function checkExtension(aName) {
     return ERROR.NOT_WHITELISTED;
   }
   return null;
-}
-
-/**
- * Reads browser.download.useDownloadDir.  If true (the default in every
- * UXP build), downloads land in the configured Downloads folder without
- * a prompt; if false, the browser would normally prompt — and so will
- * we, by forcing saveAs.
- *
- * @returns {boolean}
- */
-function shouldPromptByPref() {
-  try {
-    return !Services.prefs.getBoolPref(PREF_USE_DOWNLOAD_DIR);
-  } catch (e) {
-    // Pref missing → assume the browser's hard-coded default (true).
-    return false;
-  }
 }
 
 /**
@@ -305,10 +284,17 @@ function createGMDownloadAPI(
 
     if (aDetailsOrUrl) {
       if (typeof aDetailsOrUrl === "object") {
-        for (let k in aDetailsOrUrl) {
-          // Capture every field, including unknown ones, in case the
-          // script reads its own auxiliary data back from `details`.
-          details[k] = aDetailsOrUrl[k];
+        // Cu.exportFunction wraps the chrome-side downloadImpl in an
+        // X-ray for cross-compartment calls.  Without waiving, a plain
+        // for-in over the script's details object sees only X-ray-
+        // visible properties — which excludes script-defined function
+        // properties like onload / onerror / onprogress.  Mirrors the
+        // pattern already used in xmlHttpRequester.js (Cu.waiveXrays
+        // at the top of contentStartRequest).  Without this, every
+        // callback silently stays at the noop default.
+        let waived = Cu.waiveXrays(aDetailsOrUrl);
+        for (let k in waived) {
+          details[k] = waived[k];
         }
       } else if (typeof aDetailsOrUrl === "string") {
         details.url = aDetailsOrUrl;
@@ -476,46 +462,71 @@ function createGMDownloadAPI(
       persist.progressListener = progressListener;
 
       let loadContext = getLoadContext(aWrappedContentWin);
+      let principal = null;
       try {
-        // saveURI signature on UXP (Pale Moon / Basilisk):
-        //   void saveURI(in nsIURI aURI,
-        //                in nsISupports aCacheKey,
-        //                in nsIURI aReferrer,
-        //                in long aReferrerPolicy,
-        //                in nsIInputStream aPostData,
-        //                in string aExtraHeaders,
-        //                in nsISupports aFile,
-        //                in nsILoadContext aPrivacyContext);
-        persist.saveURI(
-            uri,
-            /* cacheKey       */ null,
-            /* referrer       */ referrer,
-            /* referrerPolicy */ 0,
-            /* postData       */ null,
-            /* extraHeaders   */ null,
-            /* file           */ aTargetFile,
-            /* loadContext    */ loadContext);
+        principal = aWrappedContentWin.document.nodePrincipal;
       } catch (e) {
+        // Detached frame; principal will be null and we'll let UXP
+        // fall back to a system principal for the persist.
+      }
+
+      // nsIWebBrowserPersist.saveURI exists in two shapes across UXP
+      // builds:
+      //
+      //   9-arg (modern UXP, with triggering principal):
+      //     saveURI(aURI, aPrincipal, aCacheKey, aReferrer,
+      //             aReferrerPolicy, aPostData, aExtraHeaders, aFile,
+      //             aPrivacyContext)
+      //
+      //   8-arg (older Pale Moon / Basilisk):
+      //     saveURI(aURI, aCacheKey, aReferrer, aReferrerPolicy,
+      //             aPostData, aExtraHeaders, aFile, aPrivacyContext)
+      //
+      // Try the modern signature first; on NS_ERROR_XPC_BAD_PARAM_COUNT
+      // (or any other XPConnect dispatch failure), fall back to the
+      // older one.  Any other error after a successful signature match
+      // is a real download failure — surface it.
+      let savedOk = false;
+      let lastErr = null;
+      try {
+        persist.saveURI(
+            uri, principal, null, referrer, 0, null, null,
+            aTargetFile, loadContext);
+        savedOk = true;
+      } catch (e) {
+        lastErr = e;
+      }
+      if (!savedOk) {
+        try {
+          persist.saveURI(
+              uri, null, referrer, 0, null, null,
+              aTargetFile, loadContext);
+          savedOk = true;
+        } catch (e) {
+          lastErr = e;
+        }
+      }
+      if (!savedOk) {
+        // Surface to the browser console too, so a future regression
+        // is visible even when the script supplies no onerror.
+        Cu.reportError("GM_download.saveURI failed: " + lastErr);
         safeCall(details.onerror, {
           "error":   ERROR.NOT_SUCCEEDED,
-          "details": "GM_download.saveURI: " + e.toString(),
+          "details": "GM_download.saveURI: " + lastErr.toString(),
         });
         persist = null;
       }
     }
 
-    // Decide whether to prompt for save location.  Honour the script's
-    // explicit `saveAs` first; otherwise fall back to the browser's own
-    // download-prompt pref so the user's choice in about:preferences is
-    // respected.
-    let needPicker;
-    if (typeof details.saveAs === "boolean") {
-      needPicker = details.saveAs;
-    } else {
-      needPicker = shouldPromptByPref();
-    }
-
-    if (needPicker) {
+    // Whether to prompt for save location.  GM_download's contract
+    // (Tampermonkey / Violentmonkey) is silent download by default;
+    // the picker is only shown when the script explicitly sets
+    // `saveAs: true`.  An earlier draft of this module also honoured
+    // browser.download.useDownloadDir, but that surprised scripts —
+    // a GM_download call would prompt on Pale Moon (which defaults
+    // useDownloadDir to false) but not on Firefox.  Aligned to the
+    // GM4 spec instead.
+    if (details.saveAs === true) {
       let picked = showFilePicker(chromeWin, details.name);
       if (!picked) {
         safeCall(details.onabort, {});
