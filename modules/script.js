@@ -56,6 +56,7 @@ Cu.import("chrome://greasemonkey-modules/content/miscApis.js");
 Cu.import("chrome://greasemonkey-modules/content/parseScript.js");
 Cu.import("chrome://greasemonkey-modules/content/prefManager.js");
 Cu.import("chrome://greasemonkey-modules/content/scriptIcon.js");
+Cu.import("chrome://greasemonkey-modules/content/scriptInjector.js");
 Cu.import("chrome://greasemonkey-modules/content/scriptRequire.js");
 Cu.import("chrome://greasemonkey-modules/content/scriptResource.js");
 Cu.import("chrome://greasemonkey-modules/content/storageBack.js");
@@ -1295,12 +1296,17 @@ Script.prototype.updateFromNewScript = function (
             this, pendingExec.url, this.runAt);
 
         if (shouldRun) {
-          pendingExec.browser.messageManager.sendAsyncMessage(
-              "greasemonkey:inject-delayed-script", {
-                "runAt": this.runAt,
-                "script": new IPCScript(this, gGreasemonkeyVersion),
-                "windowId": pendingExec.windowId,
-              });
+          // Phase 4f-3: direct call into the chrome-side injector.
+          // Pre-cleanup this fired "greasemonkey:inject-delayed-script"
+          // through pendingExec.browser.messageManager so the per-tab
+          // framescript could call IPCScript.scriptsForUrl + inject;
+          // on UXP single-process the framescript was just chrome
+          // wearing a name tag.
+          injectDelayedScript(
+              new IPCScript(this, gGreasemonkeyVersion),
+              this.runAt,
+              pendingExec.windowId,
+              pendingExec.browser);
         }
       }
 

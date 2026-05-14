@@ -20,9 +20,18 @@ Cu.import("resource://gre/modules/AddonManager.jsm");
 Cu.import("chrome://greasemonkey-modules/content/ipcScript.js");
 Cu.import("chrome://greasemonkey-modules/content/menuCommand.js");
 Cu.import("chrome://greasemonkey-modules/content/prefManager.js");
+Cu.import("chrome://greasemonkey-modules/content/scriptInjector.js");
+Cu.import("chrome://greasemonkey-modules/content/scriptProtocol.js");
 Cu.import("chrome://greasemonkey-modules/content/storageBack.js");
 Cu.import("chrome://greasemonkey-modules/content/sync.js");
 Cu.import("chrome://greasemonkey-modules/content/util.js");
+
+// Phase 4f-3: installPolicy used to be imported indirectly by
+// modules/processScript.js; with the framescript / processScript pair
+// retired, we import it here so its nsIContentPolicy registration runs
+// at chrome startup.  The module is side-effecting on import (it calls
+// InstallPolicy.init() once at the bottom).
+Cu.import("chrome://greasemonkey-modules/content/installPolicy.js");
 
 
 const DIRECTORY_TEMP = GM_CONSTANTS.directoryService
@@ -71,8 +80,14 @@ function startup(aService) {
   // into the service or into IPCScript, so the listeners are
   // unreachable code and were removed.
 
-  Services.mm.loadFrameScript(
-      "chrome://greasemonkey/content/frameScript.js", true);
+  // Phase 4f-3: register the chrome-side script-injection observers
+  // and the greasemonkey-script: protocol handler.  Pre-cleanup these
+  // were bootstrapped from inside content/frameScript.js (loaded into
+  // every tab via Services.mm.loadFrameScript) — on UXP single-process
+  // the framescript indirection was a no-op detour since chrome and
+  // content share a JS runtime.  Both startup calls are idempotent.
+  startScriptInjector();
+  initScriptProtocol();
 
   // Beam down initial set of scripts.
   aService.broadcastScriptUpdates();

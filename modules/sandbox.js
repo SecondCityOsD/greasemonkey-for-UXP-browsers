@@ -5,7 +5,7 @@
  *
  * Two functions are exported:
  *
- *   createSandbox(aFrameScope, aContentWin, aUrl, aScript, aRunAt)
+ *   createSandbox(aContentWin, aUrl, aScript, aRunAt)
  *     Constructs a Cu.Sandbox for the given script, then injects whichever
  *     GM_* functions the script's @grant list requests.  Returns the sandbox.
  *
@@ -139,18 +139,22 @@ const GM_API_MAPPING = (function () {
 /**
  * Creates and returns the JavaScript sandbox for a userscript.
  *
- * @param {nsIMessageSender} aFrameScope  - Frame message manager, passed to
- *   APIs that need to send IPC messages (storage, openInTab, etc.).
- * @param {Window}           aContentWin  - The content window the script runs
- *   in; used as the sandbox prototype and principal.
- * @param {string}           aUrl         - URL of the page being loaded;
- *   passed to APIs that need the page origin (xmlhttpRequest, cookie, etc.).
- * @param {IPCScript}        aScript      - The script descriptor object.
- * @param {string}           aRunAt       - The run-at phase ("document-start",
+ * Pre-Phase-4f-3 the first parameter was an nsIMessageSender
+ * (`aFrameScope`) plumbed in from content/frameScript.js so APIs
+ * could route IPC through it.  The framescript era is over; the
+ * single use of that parameter (`aFrameScope.content`) was just an
+ * indirection for the content window, which is now passed directly.
+ *
+ * @param {Window}    aContentWin - The content window the script runs in;
+ *   used as the sandbox prototype and principal.
+ * @param {string}    aUrl        - URL of the page being loaded; passed
+ *   to APIs that need the page origin (xmlhttpRequest, cookie, etc.).
+ * @param {IPCScript} aScript     - The script descriptor object.
+ * @param {string}    aRunAt      - The run-at phase ("document-start",
  *   "document-end", or "document-idle"); passed to GM_addStyle.
  * @returns {Cu.Sandbox} The populated sandbox ready for script execution.
  */
-function createSandbox(aFrameScope, aContentWin, aUrl, aScript, aRunAt) {
+function createSandbox(aContentWin, aUrl, aScript, aRunAt) {
   let _API1 = "";
   let _API2 = "";
   let unsafeWindowDefault = "const unsafeWindow = window;";
@@ -451,7 +455,7 @@ function createSandbox(aFrameScope, aContentWin, aUrl, aScript, aRunAt) {
     Cu.evalInSandbox(
         "this._MenuCommandSandbox = " + MenuCommandSandbox, sandbox);
     sandbox._MenuCommandSandbox(
-        aFrameScope.content,
+        aContentWin,
         aScript.uuid, aScript.localized.name, aScript.fileURL,
         MenuCommandRespond,
         GM_CONSTANTS.localeStringBundle.createBundle(
