@@ -74,6 +74,17 @@
       onclick="GM_backupExport();" />
     <label value="&backup.import;" class="text-link"
       onclick="GM_backupImport();" />
+    <!-- Recover Orphans link.  Hidden by default; init() in
+         addonsOverlay.js queries Config.getOrphans() at panel-load
+         time and unhides this with a count-suffixed label when
+         there's anything to recover.  Hardcoded English text on the
+         no-l10n path is deliberate — this is a rare admin action,
+         not worth a 34-locale DTD addition before the feature
+         settles. -->
+    <label id="gm-recover-orphans" hidden="true"
+      value="Recover orphans..." class="text-link"
+      tooltiptext="Reinstall script directories that exist in gm_scripts/ but have no entry in config.xml"
+      onclick="GM_recoverOrphans();" />
     <spacer flex="1"/>
     <!-- Live-search box (3.7.0).  Filters the visible richlistitems in
          #addon-list as the user types, against name + namespace +

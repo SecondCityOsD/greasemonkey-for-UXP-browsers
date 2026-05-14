@@ -417,6 +417,29 @@ function init() {
   document.getElementById("greasemonkey-sort-bar").addEventListener(
       "command", onSortersClicked, false);
   applySort();
+
+  // Orphan-recovery affordance.  The label is hidden in the XUL; reveal
+  // it (and dynamically set its text to include the count) iff the
+  // Config startup scan found any orphaned script directories under
+  // <profile>/gm_scripts/.  No expensive work here — getOrphans()
+  // returns a cached array populated once during service startup.
+  try {
+    let recoverLink = document.getElementById("gm-recover-orphans");
+    if (recoverLink) {
+      let config = GM_util.getService().config;
+      let orphans = config.getOrphans ? config.getOrphans() : [];
+      if (orphans.length > 0) {
+        recoverLink.setAttribute("value",
+            "Recover " + orphans.length + " orphan"
+            + (orphans.length == 1 ? "" : "s") + "...");
+        recoverLink.hidden = false;
+      }
+    }
+  } catch (e) {
+    // Non-fatal — log but don't block the User Scripts pane from rendering.
+    Components.utils.reportError(
+        "Greasemonkey: orphan-link init failed: " + e);
+  }
 };
 
 function getSortBy(aButtons) {
@@ -968,4 +991,129 @@ function GM_backupImport() {
     }
     alert(msg);
   });
+}
+
+/**
+ * "Recover Orphans..." link handler in the User Scripts pane.
+ *
+ * Walks the orphan list that Config._scanOrphans() built during
+ * service startup (each entry is a <profile>/gm_scripts/<basedir>/
+ * directory that contains a *.user.js file but has no <Script>
+ * entry in config.xml — the classic post-downgrade-and-back state).
+ * For each orphan we:
+ *
+ *   1. Read the .user.js source text off disk.
+ *   2. Pipe it through installScriptFromSource({skipEditor: true})
+ *      so the existing parseScript / RemoteScript install pipeline
+ *      builds a NEW <Script> entry with a freshly-allocated basedir.
+ *   3. Rename the original orphan directory to "<basedir>.recovered"
+ *      so the next startup's orphan scan doesn't flag it again.  The
+ *      rename preserves the user's data as a manual-recovery fallback
+ *      should the install have introduced a regression — they can
+ *      restore by renaming back and reverting GM to a working build.
+ *
+ * Installs are serialised (next starts after previous callback) so
+ * RemoteScript writes to config.xml don't race.  GM_setValue storage
+ * stored in the OLD <basedir>.db is left behind (the install creates
+ * a fresh DB under the new basedir); a future enhancement could
+ * migrate the rows over, but for now the user gets a fresh slate
+ * which is the expected behaviour for "reinstall".
+ */
+function GM_recoverOrphans() {
+  let config = GM_util.getService().config;
+  let orphans = config.getOrphans ? config.getOrphans() : [];
+  if (orphans.length == 0) {
+    alert("No orphaned scripts to recover.");
+    return;
+  }
+
+  let proceed = confirm(
+      "Found " + orphans.length + " orphaned script director"
+      + (orphans.length == 1 ? "y" : "ies")
+      + " under <profile>/gm_scripts/.\n\n"
+      + "Reinstalling will:\n"
+      + "  • Register each script anew in config.xml.\n"
+      + "  • Create a fresh GM_setValue storage for each.\n"
+      + "  • Rename each original folder to \"<basedir>.recovered\""
+      + "\n    as a backup so they aren't reported again.\n\n"
+      + "Proceed?");
+  if (!proceed) {
+    return;
+  }
+
+  // We need access to the chrome-side installer.  installScriptFromSource
+  // is exported from the modules/util/ lazy-getter set on GM_util, so a
+  // simple property reference grabs the bound implementation.
+  let installScriptFromSource = GM_util.installScriptFromSource;
+  if (typeof installScriptFromSource !== "function") {
+    alert("Internal error: installScriptFromSource is unavailable.");
+    return;
+  }
+
+  // Results accumulator for the summary alert at the end.
+  let recovered = 0;
+  let failed = 0;
+  let errors = [];
+
+  function next(i) {
+    if (i >= orphans.length) {
+      let msg = "Orphan recovery complete.\n"
+          + "  Recovered: " + recovered + "\n"
+          + "  Failed: " + failed;
+      if (errors.length > 0) {
+        msg += "\n\nErrors:\n" + errors.join("\n");
+      }
+      alert(msg);
+      // Hide the link until the next startup re-scans — once the
+      // session's orphan list is processed it shouldn't keep
+      // beckoning even if a few failed (the user can read the error
+      // details and decide whether to retry manually).
+      let link = document.getElementById("gm-recover-orphans");
+      if (link) {
+        link.hidden = true;
+      }
+      return;
+    }
+    let orphan = orphans[i];
+    let source;
+    try {
+      source = GM_util.getContents(orphan.userJsFile);
+    } catch (e) {
+      failed++;
+      errors.push(orphan.basedir + ": couldn't read .user.js: " + e);
+      next(i + 1);
+      return;
+    }
+    if (!source) {
+      failed++;
+      errors.push(orphan.basedir + ": .user.js was empty");
+      next(i + 1);
+      return;
+    }
+
+    installScriptFromSource(source, function (aErr) {
+      if (aErr) {
+        failed++;
+        errors.push(orphan.basedir + ": "
+            + (aErr.message || aErr.toString()));
+      } else {
+        recovered++;
+        // Rename the orphan dir to "<basedir>.recovered" so subsequent
+        // startup scans don't re-flag it.  Failures here are non-fatal
+        // — the install already succeeded; the worst case is the user
+        // sees this orphan again on next startup and can re-run.
+        try {
+          let oldDir = orphan.userJsFile.parent;
+          oldDir.moveTo(null, orphan.basedir + ".recovered");
+        } catch (e) {
+          Components.utils.reportError(
+              "Greasemonkey: post-recovery rename of "
+              + orphan.basedir + " failed: " + e);
+        }
+      }
+      next(i + 1);
+    }, { "skipEditor": true });
+  }
+
+  next(0);
 }
