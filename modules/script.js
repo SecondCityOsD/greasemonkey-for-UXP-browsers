@@ -121,6 +121,17 @@ function Script(aConfigNode) {
   this._supportURL = null;
   this._topLevelAwait = false;
   this._unwrap = false;
+  // Non-destructive "files are missing" marker.  Previously the
+  // Config._load path removed the entire <Script> node from
+  // config.xml when allFilesExist() returned false; the resulting
+  // permanent data loss after a downgrade-then-upgrade cycle
+  // (different versions tracking different file sets) was the
+  // single largest source of "I lost my userscripts after
+  // upgrading" reports.  Now we mark + disable + keep the entry,
+  // so the next time the missing file reappears (e.g. a partial
+  // backup restored, or a reinstall) the script auto-recovers.
+  this._broken = false;
+  this._brokenMissingFiles = [];
   this._tempFile = null;
   this._updateMetaStatus = "unknown";
   this._updateURL = null;
@@ -521,6 +532,53 @@ Object.defineProperty(Script.prototype, "unwrap", {
   "enumerable": true,
 });
 
+Object.defineProperty(Script.prototype, "broken", {
+  "get": function Script_getBroken() {
+    return this._broken;
+  },
+  "enumerable": true,
+});
+
+Object.defineProperty(Script.prototype, "brokenMissingFiles", {
+  "get": function Script_getBrokenMissingFiles() {
+    return this._brokenMissingFiles.concat();
+  },
+  "enumerable": true,
+});
+
+/**
+ * Flags this script as "broken" because its on-disk file set is
+ * incomplete (allFilesExistResult() returned a non-empty list).  The
+ * entry is RETAINED in config.xml — historically this state would
+ * trigger destructive removal, which after a version-downgrade-and-
+ * back round-trip left users with the majority of their scripts
+ * silently deleted.  Now we just disable + mark, and next startup
+ * the script auto-recovers if the missing files reappear.
+ *
+ * @param {string[]} aMissingFiles - Leaf names from allFilesExistResult.
+ */
+Script.prototype.markBroken = function (aMissingFiles) {
+  this._broken = true;
+  this._brokenMissingFiles = Array.isArray(aMissingFiles)
+      ? aMissingFiles.concat() : [];
+  // Auto-disable so the script doesn't try to inject with a broken
+  // file set (which would throw at the first @require URL fetch).
+  // The user can re-enable manually once they're sure files are back.
+  this._enabled = false;
+};
+
+/**
+ * Clears the broken flag.  Called when a previously-broken script's
+ * files reappear (the next startup's allFilesExist check passes).
+ * Does NOT auto-re-enable — the user must explicitly toggle the
+ * script back on, so a transient file-system state doesn't silently
+ * restart a script the user had walked away from.
+ */
+Script.prototype.clearBroken = function () {
+  this._broken = false;
+  this._brokenMissingFiles = [];
+};
+
 Object.defineProperty(Script.prototype, "previewURL", {
   "get": function Script_getPreviewURL() {
     return GM_CONSTANTS.ioService.newFileURI(this._tempFile).spec;
@@ -836,6 +894,15 @@ Script.prototype._fromConfigNode = function (aNode) {
   this._namespace = aNode.getAttribute("namespace");
   this._noframes = aNode.getAttribute("noframes") == "true";
   this._unwrap = aNode.getAttribute("unwrap") == "true";
+  this._broken = aNode.getAttribute("broken") == "true";
+  // brokenMissingFiles is space-separated leaf names; empty string
+  // when the attribute is absent (the common case for non-broken
+  // entries).  Filter empties from the split result so a missing
+  // attribute doesn't yield [""].
+  let _bmf = aNode.getAttribute("brokenMissingFiles") || "";
+  this._brokenMissingFiles = _bmf.split(/\s+/).filter(function (s) {
+    return s.length > 0;
+  });
   // Legacy default.
   this._runAt = aNode.getAttribute("runAt") || "document-end";
   this._updateMetaStatus = aNode.getAttribute("updateMetaStatus") || "unknown";
@@ -955,6 +1022,17 @@ Script.prototype.toConfigNode = function (aDoc) {
     // Only serialize when truthy — keeps existing config.xml files
     // diff-clean for the common case (no @unwrap).
     scriptNode.setAttribute("unwrap", "true");
+  }
+  if (this._broken) {
+    // Persisted only for broken scripts so a healthy script's config
+    // entry stays clean.  Surviving the round-trip lets the User
+    // Scripts panel render a "files missing" indicator without
+    // re-scanning the file system on every render.
+    scriptNode.setAttribute("broken", "true");
+    if (this._brokenMissingFiles.length > 0) {
+      scriptNode.setAttribute(
+          "brokenMissingFiles", this._brokenMissingFiles.join(" "));
+    }
   }
   scriptNode.setAttribute("runAt", this._runAt);
   scriptNode.setAttribute("updateMetaStatus", this._updateMetaStatus);

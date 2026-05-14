@@ -108,22 +108,47 @@ Config.prototype._load = function () {
       continue;
     }
     let _allFilesExist = script.allFilesExistResult();
-    // if (script.allFilesExist()) {
     if (_allFilesExist.length == 0) {
+      // Files are intact.  If the script was previously flagged
+      // broken (a transient file-system glitch or a partial backup
+      // restore that's since been completed), clear the flag so the
+      // User Scripts panel renders it normally.  Doesn't auto-
+      // re-enable — the user must explicitly toggle it back on.
+      if (script.broken) {
+        script.clearBroken();
+        this._changed(script, "modified", null);
+      }
       this._scripts.push(script);
     } else {
-      // Add a user prompt to restore the missing script here?
-      // Perhaps sometime after update works,
-      // and we know where to download the script from?
+      // Files are missing.  Historically (~3.6.x) the entry was
+      // removed from config.xml at this point and the script was
+      // permanently forgotten.  That was destructive: a version
+      // downgrade that wrote different file paths, or a backup that
+      // restored config.xml but not all the script directories,
+      // would silently delete the user's entire script collection.
+      //
+      // The non-destructive replacement:
+      //   - Mark the script broken + record which files are missing.
+      //   - Disable the script (so it doesn't try to inject with a
+      //     broken file set and throw at first @require fetch).
+      //   - KEEP the entry in config.xml.  Next startup will retry
+      //     allFilesExist; if the files came back, clearBroken()
+      //     above fires and the script recovers automatically.
+      //
+      // The user sees the script in the User Scripts panel marked
+      // as broken (rendered by addonsOverlay.js / the Recover-
+      // Orphans UI, separate commit).
       let _info = GM_CONSTANTS.localeStringBundle.createBundle(
           GM_CONSTANTS.localeGreasemonkeyProperties)
           .GetStringFromName("error.scriptIsNotComplete")
           .replace("%1", script.name)
           .replace("%2", _allFilesExist);
       GM_util.logError(_info, false, script.fileURL, null);
-      node.parentNode.removeChild(node);
-      // To save config file after change:
-      this._changed(script, "missing-removed", null);
+      script.markBroken(_allFilesExist);
+      this._scripts.push(script);
+      // Persist the broken flag so the panel renders correctly on
+      // next start without redoing the file-system probe.
+      this._changed(script, "modified", null);
     }
   }
 };
