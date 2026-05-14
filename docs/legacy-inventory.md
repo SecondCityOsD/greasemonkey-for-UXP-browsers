@@ -109,13 +109,13 @@ chrome on five topics. **Every one of these is unnecessary on UXP.**
 | Topic | Originator | Handler | UXP equivalent |
 |-------|-----------|---------|----------------|
 | `greasemonkey:scripts-update` | `components/greasemonkey.js:185,189` (`broadcastScriptUpdates`) | `modules/ipcScript.js:277,279,283-286` | Direct call to `scriptUpdateData()`; emit via `Services.obs` if multiple subscribers |
-| `greasemonkey:frame-urls` | `content/browser.js:483-490, 729-736` | `modules/processScript.js:55,88` | Walk the docshell tree directly from chrome |
-| `greasemonkey:inject-delayed-script` | various | `frameScript.js:559` | Direct function call |
-| `greasemonkey:menu-command-list` | `content/menuCommander.js` | `frameScript.js:560` → `modules/menuCommand.js` | Direct call |
-| `greasemonkey:menu-command-run` | `menuCommander.js` | `frameScript.js:563` | Direct call |
-| `greasemonkey:context-menu-start/end` | `frameScript.js:566` ↔ chrome | n/a | Direct DOM manipulation |
-| `greasemonkey:newscript-load-start/end` | `content/newScript.js:39-52` ↔ `frameScript.js:567/461-465` | n/a | Read `gBrowser.selectedBrowser.contentWindow.location.href` directly |
-| `greasemonkey:tab-closed` | `gBrowser` events | `frameScript.js:568` | Hook chrome-side tab close |
+| `greasemonkey:frame-urls` | (was: `content/browser.js`) | (was: `modules/processScript.js`) | **DONE (4f-3):** `urlsOfAllFrames` in `modules/scriptInjector.js`, called directly |
+| `greasemonkey:inject-delayed-script` | (was: `modules/script.js`) | (was: `frameScript.js`) | **DONE (4f-3):** `injectDelayedScript` in `modules/scriptInjector.js`, called directly |
+| `greasemonkey:menu-command-list` | (was: `content/menuCommander.js`) | (was: `frameScript.js` → `modules/menuCommand.js`) | **DONE (pre-Phase-4f-3):** chrome-side custom-event dispatch (`greasemonkey-menu-command-list-<suffix>`) |
+| `greasemonkey:menu-command-run` | (was: `content/menuCommander.js`) | (was: `frameScript.js`) | **DONE (pre-Phase-4f-3):** chrome-side custom-event dispatch |
+| `greasemonkey:context-menu-start/end` | (was: `frameScript.js` ↔ chrome) | n/a | **DONE (4f-3):** chrome walks `parentNode` directly in `getUserScriptUrlUnderPointer` |
+| `greasemonkey:newscript-load-start/end` | (was: `content/newScript.js` ↔ `frameScript.js`) | n/a | **DONE (pre-Phase-4f-3):** chrome reads `gBrowser.selectedBrowser.contentWindow.location.href` directly |
+| `greasemonkey:tab-closed` | (was: `gBrowser` events) | (was: `frameScript.js`) | **DONE (4f-3):** `TabClose` listener calls `GM_tabClosed(tabId)` directly |
 | `greasemonkey:url-is-temp-file` (sync) | `installPolicy.js → cpmm` | chrome service | Direct call |
 | `greasemonkey:script-install` | `installPolicy.js → cpmm` | chrome service | Direct call |
 | `greasemonkey:value-invalidate` | `storageBack` → cpmm broadcast | `storageFront.js` | `Services.obs.notifyObservers` |
@@ -300,7 +300,7 @@ These are **out of scope** for the fork.
 | content/browser.xul | LIVE | xpcom | overlay at chrome.manifest:8 onto browser.xul | keep |
 | content/closeWindow.xul | LIVE | xpcom | overlay at chrome.manifest:20-22 onto install/newScript/options dialogs; `GM_onClose` at install.js:223 | keep |
 | content/config.js | LIVE | xpcom | imported via `Cu.import` at components/greasemonkey.js:51; instantiated at :160 | keep |
-| content/frameScript.js | VESTIGIAL (entry), LIVE (logic) | framescript | loaded via `Services.mm.loadFrameScript` at components/greasemonkey.js:83-84 | inline into chrome-side observers, then delete (Phase 4) |
+| content/frameScript.js | REMOVED (Phase 4f-3) | framescript | logic migrated to `modules/scriptInjector.js`; no longer loaded by anything | — |
 | content/install.js | LIVE | XUL dialog | loaded by install.xul:32; opened from showInstallDialog.js:54 | keep |
 | content/install.xul | LIVE | XUL dialog | overlay at chrome.manifest:20 | keep |
 | content/menuCommander.js | LIVE-but-vestigial-shape | multi-process IPC | loaded by browser.xul:14; uses `Services.ppmm` + frame `messageManager` | keep file, flatten IPC in Phase 4 |
@@ -323,12 +323,12 @@ These are **out of scope** for the fork.
 | modules/addons.js | LIVE | core | EXPORTED_SYMBOLS consumed by addonsOverlay.js + script.js + remoteScript.js | keep |
 | modules/backup.js | LIVE | core | `GM_BackupExport` / `GM_BackupImport` consumed by addonsOverlay.js | keep |
 | modules/constants.js | LIVE | core | imported by 64 files | keep |
-| modules/documentObserver.js | LIVE (boundary VESTIGIAL) | framescript indirection | only consumer is frameScript.js:17,547 | keep file; redirect to chrome-side `Services.obs` after Phase 4 |
+| modules/documentObserver.js | REMOVED (Phase 4f-3) | framescript indirection | sole consumer was frameScript.js; chrome-side `Services.obs` observers now live directly in `modules/scriptInjector.js` | — |
 | modules/extractMeta.js | LIVE | core | `EXPORTED_SYMBOLS = ["extractMeta"]` consumed by parseScript.js + script.js + sandbox.js + frameScript.js + newScript.js | keep |
 | modules/installPolicy.js | LIVE-but-vestigial-shape | multi-process | imported by processScript.js:43; uses `Services.cpmm.sendSyncMessage`/`sendAsyncMessage` | keep nsIContentPolicy core, drop cpmm sites in Phase 4 |
 | modules/ipcScript.js | LIVE class, VESTIGIAL bootstrap | framescript / multi-process | imported by frameScript.js:21 + components/greasemonkey.js:20 + script.js:54 + scriptProtocol.js:46 | keep `IPCScript` class; drop IPC bootstrap lines 274-286 in Phase 4 |
-| modules/processScript.js | VESTIGIAL | framescript | only consumer frameScript.js:28; registers installPolicy + frame-urls handler | delete in Phase 4 (moves to chrome startup + browser.js) |
-| modules/sandbox.js | LIVE | jsm-singleton (current) | exports `createSandbox` + `runScriptInSandbox`; called from frameScript.js:352, 432 | keep; rework `aFrameScope` param after Phase 4 |
+| modules/processScript.js | REMOVED (Phase 4f-3) | framescript | installPolicy now imported directly by components/greasemonkey.js; `frame-urls` handler became `urlsOfAllFrames()` in scriptInjector.js called directly by content/browser.js | — |
+| modules/sandbox.js | LIVE | jsm-singleton | exports `createSandbox` (Phase-4f-3: `aFrameScope` param dropped — only consumer was the framescript) + `runScriptInSandbox`; called from `modules/scriptInjector.js` | keep |
 | modules/script.js | LIVE | jsm-singleton | canonical Script class; imported by config.js:15 + parseScript.js:52 + remoteScript.js:60 | keep |
 | modules/sync.js | VESTIGIAL on UXP, KEPT for niche Pale Moon Sync | xpcom Weave/Sync | imported only by components/greasemonkey.js:24; self-aborts on missing `resource://services-sync/*` | **keep** (maintainer Q&A point 1) — module no-ops on platforms without Sync; preserves the option for niche Pale Moon Sync builds |
 | modules/menuCommand.js | LIVE-but-vestigial-shape | UXP-adapted | imported by frameScript.js + sandbox.js + components/greasemonkey.js; uses `Services.cpmm.sendAsyncMessage` self-loopback | keep, collapse cpmm hop in Phase 4 |
@@ -396,7 +396,7 @@ Each helper is ~30-100 LOC; exported through `modules/util.js` lazy getters.
 | util/sniffGrants.js | LIVE | gm4 | auto-grant via source string scan | keep |
 | util/timeout.js | LIVE (vestigial paranoia) | gm2 | nsITimer + anti-GC observer (bug 647998 era) | keep or replace with `Timer.jsm` `setTimeout` (Phase 5, optional) |
 | util/uuid.js | LIVE | gm2 | brace-stripping wrapper around `nsIUUIDGenerator` | keep (optional inline) |
-| util/windowId.js | VESTIGIAL-LIVE | gm2 e10s | used by frameScript.js for IPC `outerWindowID` | **dies with frameScript.js** (Phase 4) |
+| util/windowId.js | LIVE | gm2 e10s | now used by `modules/scriptInjector.js` for `IPCScript.scriptsForUrl` (Phase 4f-3 took over from frameScript.js); `outerWindowID` lookup is still useful for delayed-injection windowId matching | keep |
 | util/windowIdForEvent.js | **DEAD candidate** | gm2 e10s | lazy-registered in util.js, **zero callers** | one final wider grep, then delete (Phase 5) |
 | util/windowIsClosed.js | LIVE | core | frameScript + notificationer + xhr | keep |
 | util/windowIsPrivate.js | LIVE | core | PrivateBrowsingUtils delegate | keep |

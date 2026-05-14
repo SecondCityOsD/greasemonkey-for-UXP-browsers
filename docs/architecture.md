@@ -168,8 +168,10 @@ everything else is invoked through it.
      a. Load config.js + thirdParty/mplUtils.js via jsSubScriptLoader
      b. ◯ Register storage-IPC listeners on Services.mm        [Phase 4: drop]
      c. ◯ Register script-update listeners on Services.ppmm    [Phase 4: drop]
-     d. ◯ loadFrameScript("chrome://greasemonkey/content/frameScript.js", true)
-                                                                [Phase 4: drop]
+     d. startScriptInjector() — registers Services.obs handlers
+        initScriptProtocol() — installs greasemonkey-script: URI handler
+        installPolicy.js     — auto-registers on import (nsIContentPolicy)
+                                                  [Phase 4f-3: done; framescript retired]
      e. service.broadcastScriptUpdates()  → ipcScripts to content
                                                                 [Phase 4: direct]
      f. AddonManager.getAddonByID → cache version, re-broadcast
@@ -298,10 +300,13 @@ modules/sandbox.js → createSandbox(script, contentWindow)
 Errors → GM_util.logError → nsIScriptError → Browser Console
 ```
 
-**[Phase 4 note]** Today, steps 2 and 3 (DOMWindowCreated → documentObserver)
-fire inside the content scope of `content/frameScript.js` rather than in
-chrome scope. On UXP single-process the two scopes are the same JS runtime,
-so Phase 4 inlines the observer chrome-side and deletes the framescript.
+**[Phase 4f-3 update]** Steps 2 and 3 now run chrome-side directly.
+`modules/scriptInjector.js` registers `Services.obs` observers for
+`content-document-global-created` and `document-element-inserted`,
+attaches per-window `DOMContentLoaded` / `load` listeners on demand,
+and dispatches to `createSandbox` + `runScriptInSandbox` (or the
+page-context `<script>`-element injector) without the
+`content/frameScript.js` indirection.
 
 ### 5.3 Storage round-trip — `GM_setValue` / `GM_getValue`
 
