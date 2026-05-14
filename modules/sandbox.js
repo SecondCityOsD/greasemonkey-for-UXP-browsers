@@ -720,8 +720,12 @@ function runScriptInSandbox(aSandbox, aScript) {
   }
 
   /**
-   * Wrapper around evalWithWrapper that catches all errors, logs them cleanly,
-   * and returns false so the caller can abort execution.
+   * Wrapper around evalWithWrapper that catches all errors and logs them
+   * cleanly.  Returns a boolean for callers who want to know whether the
+   * eval succeeded, but the script-body path (line 886 below) ignores it,
+   * and the @require loop now treats each failure as isolated — matching
+   * Violentmonkey's gm-api-wrapper semantics where one @require throwing
+   * does not abort the rest of the chain.
    *
    * @param {string} aUrl - URL to load.
    * @returns {boolean} True on success, false if an error was thrown.
@@ -730,9 +734,7 @@ function runScriptInSandbox(aSandbox, aScript) {
     try {
       evalWithWrapper(aUrl);
     } catch (e) {
-      // Log it properly.
       GM_util.logError(e, false, e.fileName, e.lineNumber);
-      // Stop the script, in the case of requires, as if it was one big script.
       return false;
     }
     return true;
@@ -863,11 +865,15 @@ function runScriptInSandbox(aSandbox, aScript) {
     }
   }
 
+  // @require evaluation: each library is independent.  A failure (404,
+  // parse error, uncaught throw) is logged but does NOT abort subsequent
+  // @requires or the script body.  This matches Violentmonkey's
+  // behaviour and avoids the surprise where a single broken or
+  // unreachable dependency would silently kill an otherwise-working
+  // userscript.  Shared sandbox state from earlier @requires that did
+  // succeed is preserved, so the script body still sees their globals.
   for (let i = 0, iLen = aScript.requires.length; i < iLen; i++) {
-    let require = aScript.requires[i];
-    if (!evalWithCatch(require.fileURL)) {
-      return undefined;
-    }
+    evalWithCatch(aScript.requires[i].fileURL);
   }
 
   if (aScript.topLevelAwait) {
