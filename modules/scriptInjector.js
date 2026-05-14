@@ -438,8 +438,50 @@ function injectScripts(aScripts, aRunAt, aContentWin) {
       continue;
     }
     try {
-      if ((script.grants.includes("none") || script.injectInto == "page")
-          && script.injectInto != "content"
+      // Routing:
+      //   @inject-into page (EXPLICIT)
+      //       → true DOM-<script> injection via injectScriptIntoPage.
+      //         The author opted into page-script semantics (visible
+      //         in DevTools, perfect instanceof against page-side
+      //         objects, page-style eval/Function) and accepts the
+      //         CSP risk that comes with it.  Built-in fallback in
+      //         injectScriptIntoPage drops down to the sandbox path
+      //         if the test-probe detects a CSP block.
+      //
+      //   everything else, INCLUDING @grant none
+      //       → sandbox-with-page-prototype via createSandbox.
+      //         Cu.Sandbox(contentWin, {sandboxPrototype: contentWin,
+      //         wantXrays: false}) gives @grant none scripts the
+      //         exact mechanism the pre-WebExtensions Greasemonkey
+      //         for Pale Moon used: chrome-privileged Cu.evalInSandbox
+      //         that BYPASSES the page's CSP (script-src, nonces,
+      //         'strict-dynamic', require-trusted-types-for) while
+      //         preserving the semantics polyfills depend on — writes
+      //         to `window.X` walk the prototype chain to contentWin
+      //         and become own properties on the real page window.
+      //
+      // Pre-fix: @grant none scripts ALWAYS took the injectScriptIntoPage
+      // path, so on Trusted-Types sites (ChatGPT, modern banking SPAs)
+      // even the post-Phase-B nonce attribute couldn't save them — the
+      // .textContent assignment is blocked unconditionally by TT.  The
+      // fallback to sandbox theoretically worked, but adding a layer
+      // of DOM-injection-then-detect-block-then-retry both slowed down
+      // document-start polyfills and made debugging confusing.
+      //
+      // The trade-offs of routing @grant none through the sandbox:
+      //   + CSP / Trusted Types / nonce-CSP all bypassed unconditionally
+      //   + script-start polyfills (WebStreams, fetch, etc.) work on
+      //     strict-CSP sites that previously silently failed
+      //   + sandbox compartment has fresh built-ins (page can't taint
+      //     Object.prototype etc. into the script's view)
+      //   + scriptSource / scriptMetaStr become lazy (memory win on
+      //     large polyfills)
+      //   - DevTools attributes the script as sandbox-evaluated rather
+      //     than a page-loaded <script>
+      //   - rare polyfills that need true page-script `eval()` realm
+      //     semantics (uncommon) should add @inject-into page to opt
+      //     back into the DOM-injection path
+      if (script.injectInto == "page"
           && aContentWin.document.documentElement) {
         injectScriptIntoPage(aContentWin, script, aRunAt);
       } else {
