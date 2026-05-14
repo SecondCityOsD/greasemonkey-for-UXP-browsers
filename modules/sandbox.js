@@ -605,6 +605,18 @@ function injectGMInfo(aSandbox, aContentWin, aScript) {
   scriptInfoRaw.isIncognito = GM_util.windowIsPrivate(aContentWin);
   scriptInfoRaw.isPrivate = scriptInfoRaw.isIncognito;
 
+  // userAgent: the navigator.userAgent of the page the script is
+  // running in.  Matches Tampermonkey / Violentmonkey's GM_info.userAgent
+  // field.  Reads from the content window so any per-domain UA spoof
+  // the user has configured is reflected accurately.  Falls back to an
+  // empty string if the page navigator isn't accessible (rare; happens
+  // on torn-down windows or before navigator is ready).
+  try {
+    scriptInfoRaw.userAgent = String(aContentWin.navigator.userAgent || "");
+  } catch (e) {
+    scriptInfoRaw.userAgent = "";
+  }
+
   // TODO:
   // Also delay top level clone via lazy getter (XPCOMUtils.defineLazyGetter)?
   Reflect.set({}, _API1, Cu.cloneInto(scriptInfoRaw, aSandbox), aSandbox);

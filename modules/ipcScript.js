@@ -210,6 +210,10 @@ IPCScript.prototype.info = function () {
           ? Services.appinfo.XPCOMABI.split("-")[0] : "",
       "os": Services.appinfo.OS || "",
     },
+    // The resolved injection mode for THIS script ("page" / "content" /
+    // "auto") — matches Tampermonkey / Violentmonkey's GM_info.injectInto
+    // so userscripts can branch on which context they're running in.
+    "injectInto": this.injectInto,
     "scriptHandler": GM_CONSTANTS.info.scriptHandler,
     "scriptWillUpdate": this.willUpdate,
     "uuid": this.uuid,
