@@ -93,6 +93,10 @@ function IPCScript(aScript, aAddonVersion) {
   this.pendingExec.length = aScript.pendingExec.length || 0;
   this.runAt = aScript.runAt;
   this.topLevelAwait = aScript._topLevelAwait || false;
+  // @unwrap (legacy GM1.x): when true, scriptInjector.js skips the
+  // IIFE wrapper for page-mode injection so the script's top-level
+  // var declarations leak into window scope as the directive intends.
+  this.unwrap = aScript.unwrap || false;
   this.userExcludes = aScript.userExcludes;
   this.userIncludes = aScript.userIncludes;
   this.userOverride = aScript.userOverride;

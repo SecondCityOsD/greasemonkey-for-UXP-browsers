@@ -159,6 +159,12 @@ var _GM_parseMetaLine = /*
         peg$c12 = peg$literalExpectation("noframes", false),
         peg$c12a = "topLevelAwait",
         peg$c12b = peg$literalExpectation("topLevelAwait", false),
+        // @unwrap — legacy GM1.x directive that disables the IIFE
+        // wrapper around the script body when injecting in page mode.
+        // Recognized here so the script body still parses on a fork
+        // that respects the directive; consumed by scriptInjector.js.
+        peg$c12c = "unwrap",
+        peg$c12d = peg$literalExpectation("unwrap", false),
         peg$c13 = function(keyword) { return {keyword:keyword}; },
         peg$c14 = "author",
         peg$c15 = peg$literalExpectation("author", false),
@@ -527,6 +533,15 @@ var _GM_parseMetaLine = /*
       } else {
         s1 = peg$FAILED;
         if (peg$silentFails === 0) { peg$fail(peg$c12); }
+      }
+      }
+      if (s1 === peg$FAILED) {
+      if (input.substr(peg$currPos, 6) === peg$c12c) {
+        s1 = peg$c12c;
+        peg$currPos += 6;
+      } else {
+        s1 = peg$FAILED;
+        if (peg$silentFails === 0) { peg$fail(peg$c12d); }
       }
       }
       if (s1 !== peg$FAILED) {

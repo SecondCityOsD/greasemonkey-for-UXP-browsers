@@ -308,15 +308,30 @@ function injectScriptIntoPage(aContentWin, aScript, aRunAt) {
         "Error loading GM_info:\n" + e, true, e.fileName, e.lineNumber);
   }
 
-  // 5) Inject the user script body wrapped in an IIFE so bare
-  //    var/let/const declarations stay local.  @topLevelAwait wraps
-  //    in `async ()` to match Violentmonkey's contract.
-  let wrappedCode = `
+  // 5) Inject the user script body.  Default wrapping is an IIFE so
+  //    bare var/let/const declarations stay local; @topLevelAwait
+  //    upgrades the wrapper to async IIFE (matches Violentmonkey).
+  //
+  //    @unwrap (legacy GM1.x) opts the script out of the IIFE so its
+  //    top-level declarations leak into the page's window scope —
+  //    that's the whole point of the directive.  When @unwrap is set,
+  //    GM_info and the unsafeWindow alias are still made available,
+  //    but as top-level `var` declarations rather than function-scoped
+  //    locals so they're visible to the unwrapped body below.
+  let wrappedCode;
+  if (aScript.unwrap) {
+    wrappedCode =
+        "var GM_info = " + gmInfoJson + ";\n"
+        + "var unsafeWindow = window;\n"
+        + scriptCode;
+  } else {
+    wrappedCode = `
       (${aScript.topLevelAwait ? "async " : ""}function() {
         var GM_info = ${gmInfoJson};
         const unsafeWindow = window;
         ${scriptCode}
       })();`;
+  }
   injectCode(wrappedCode, aScript.fileURL);
 }
 

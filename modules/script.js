@@ -120,6 +120,7 @@ function Script(aConfigNode) {
   this._runAt = null;
   this._supportURL = null;
   this._topLevelAwait = false;
+  this._unwrap = false;
   this._tempFile = null;
   this._updateMetaStatus = "unknown";
   this._updateURL = null;
@@ -513,6 +514,13 @@ Object.defineProperty(Script.prototype, "noframes", {
   "enumerable": true,
 });
 
+Object.defineProperty(Script.prototype, "unwrap", {
+  "get": function Script_getUnwrap() {
+    return this._unwrap;
+  },
+  "enumerable": true,
+});
+
 Object.defineProperty(Script.prototype, "previewURL", {
   "get": function Script_getPreviewURL() {
     return GM_CONSTANTS.ioService.newFileURI(this._tempFile).spec;
@@ -827,6 +835,7 @@ Script.prototype._fromConfigNode = function (aNode) {
   this._name = aNode.getAttribute("name");
   this._namespace = aNode.getAttribute("namespace");
   this._noframes = aNode.getAttribute("noframes") == "true";
+  this._unwrap = aNode.getAttribute("unwrap") == "true";
   // Legacy default.
   this._runAt = aNode.getAttribute("runAt") || "document-end";
   this._updateMetaStatus = aNode.getAttribute("updateMetaStatus") || "unknown";
@@ -942,6 +951,11 @@ Script.prototype.toConfigNode = function (aDoc) {
   scriptNode.setAttribute("name", this._name);
   scriptNode.setAttribute("namespace", this._namespace);
   scriptNode.setAttribute("noframes", this._noframes);
+  if (this._unwrap) {
+    // Only serialize when truthy — keeps existing config.xml files
+    // diff-clean for the common case (no @unwrap).
+    scriptNode.setAttribute("unwrap", "true");
+  }
   scriptNode.setAttribute("runAt", this._runAt);
   scriptNode.setAttribute("updateMetaStatus", this._updateMetaStatus);
   scriptNode.setAttribute("userOverride", this._userOverride);
@@ -1183,6 +1197,7 @@ Script.prototype.updateFromNewScript = function (
   this._noframes = newScript._noframes;
   this._runAt = newScript._runAt;
   this._supportURL = newScript._supportURL;
+  this._unwrap = newScript._unwrap;
   this._version = newScript._version;
   this.downloadURL = newScript.downloadURL;
   this.homepageURL = newScript.homepageURL;

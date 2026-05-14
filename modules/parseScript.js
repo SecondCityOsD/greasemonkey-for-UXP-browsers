@@ -147,6 +147,11 @@ function parse(aSource, aUri, aFailWhenMissing) {
 
       case "noframes":
       case "topLevelAwait":
+      case "unwrap":
+        // Boolean metadata flags: presence means true.  @unwrap is the
+        // legacy GM 1.x directive that suppresses the IIFE wrapper
+        // when injecting a script in page mode; consumed by
+        // modules/scriptInjector.js::injectScriptIntoPage.
         script["_" + data.keyword] = true;
         break;
 
