@@ -98,6 +98,13 @@ GM_notificationer.prototype.contentStart = function (
     "message": "",
     "onclick": _functionEmpty,
     "ondone": _functionEmpty,
+    // `silent` and `tag` mirror the W3C Notification API options.
+    // `silent: true` suppresses the alert sound.  `tag` is the
+    // replace-by-key the browser uses to coalesce repeated calls — a
+    // second notification with the same tag replaces the first instead
+    // of stacking, matching Tampermonkey / Violentmonkey behaviour.
+    "silent": false,
+    "tag": undefined,
     "timeout": 0,
     "timeoutWasReached": false,
     "title": this.scriptName,
@@ -115,6 +122,8 @@ GM_notificationer.prototype.contentStart = function (
       _details.message = aDetailsOrText.text;
       _details.onclick = Cu.waiveXrays(aDetailsOrText).onclick;
       _details.ondone = Cu.waiveXrays(aDetailsOrText).ondone;
+      _details.silent = aDetailsOrText.silent;
+      _details.tag = aDetailsOrText.tag;
       _details.timeout = aDetailsOrText.timeout;
       _details.title = aDetailsOrText.title;
     } else if (typeof aDetailsOrText == "string") {
@@ -137,6 +146,12 @@ GM_notificationer.prototype.contentStart = function (
   }
   if (_details.ondone) {
     details.ondone = _details.ondone;
+  }
+  if (typeof _details.silent != "undefined") {
+    details.silent = !!_details.silent;
+  }
+  if (typeof _details.tag == "string" && _details.tag) {
+    details.tag = _details.tag;
   }
   if (_details.timeout && Number.isInteger(_details.timeout)) {
     details.timeout = _details.timeout;
@@ -204,7 +219,18 @@ GM_notificationer.prototype.contentStart = function (
     "body": details.message,
     "icon": details.image,
     "requireInteraction": true,
+    "silent": details.silent,
   };
+  // `tag` is only added when the script explicitly supplied one — an
+  // empty / undefined tag must NOT be passed because the W3C spec
+  // treats two notifications with the same empty-string tag as
+  // "replace each other," which would collapse unrelated GM_notification
+  // calls into one.  The behaviour we want for unsupplied tags is "no
+  // coalescing" (each call independent), which matches the default
+  // empty-tag-as-no-coalescing rule when the field is simply absent.
+  if (typeof details.tag == "string" && details.tag) {
+    options.tag = details.tag;
+  }
 
   var notification = null;
   if (this.chromeWin) {
