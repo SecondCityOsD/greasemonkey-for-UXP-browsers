@@ -504,21 +504,60 @@ function (aSafeUrl, aDetails, aReq) {
     aReq.setRequestHeader(headersArr[i].prop, headersArr[i].value);
   }
   */
+  let body = aDetails.data ? aDetails.data : null;
+
+  // Identify the body shape once so both the header loop (below) and
+  // the send() switch (further down) can react to it.  The
+  // Object.prototype.toString @@toStringTag survives X-ray wrappers
+  // on DOM-defined types, so we can reliably distinguish FormData /
+  // URLSearchParams / Blob / ArrayBuffer / File from a plain string
+  // even when `body` is a sandbox-side reference passed in by the
+  // userscript.  Mirrors Violentmonkey's web/requests.js getFormData()
+  // detection, but done chrome-side so the platform XHR consumes the
+  // native object directly without any intermediate serialisation.
+  let bodyTag = (body !== null && typeof body === "object")
+      ? Object.prototype.toString.call(body)
+      : "";
+  let bodyIsNativeInit = (
+      bodyTag === "[object FormData]"
+      || bodyTag === "[object URLSearchParams]"
+      || bodyTag === "[object Blob]"
+      || bodyTag === "[object File]"
+      || bodyTag === "[object ArrayBuffer]");
+
   if (aDetails.headers) {
     let headers = aDetails.headers;
 
     for (let prop in headers) {
-      if (Object.prototype.hasOwnProperty.call(headers, prop)) {
-        aReq.setRequestHeader(prop, headers[prop]);
+      if (!Object.prototype.hasOwnProperty.call(headers, prop)) {
+        continue;
       }
+      // For FormData, skip a script-supplied Content-Type so the
+      // platform XHR can auto-generate the multipart boundary string
+      // (the boundary is part of the wire format, and a hand-set CT
+      // would lack it — server-side parsing then fails silently).
+      // URLSearchParams / Blob have unambiguous defaults; only
+      // FormData needs this protection.
+      if (bodyTag === "[object FormData]"
+          && prop.toLowerCase() === "content-type") {
+        continue;
+      }
+      aReq.setRequestHeader(prop, headers[prop]);
     }
   }
 
-  let body = aDetails.data ? aDetails.data : null;
   // See #2423.
   // http://bugzil.la/918751
   try {
-    if (aDetails.binary && (body !== null)) {
+    if (bodyIsNativeInit) {
+      // FormData / URLSearchParams / Blob / File / ArrayBuffer go
+      // straight to the platform XHR — it knows how to encode each
+      // shape, including the multipart boundary for FormData and the
+      // x-www-form-urlencoded encoding for URLSearchParams.  Bypass
+      // the binary-encoding path entirely so we don't try to read
+      // .charCodeAt on a non-string.
+      aReq.send(body);
+    } else if (aDetails.binary && (body !== null)) {
       let bodyLength = body.length;
       let bodyData = new Uint8Array(bodyLength);
       for (let i = 0; i < bodyLength; i++) {
