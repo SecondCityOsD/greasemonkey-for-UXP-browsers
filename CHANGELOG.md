@@ -1,5 +1,185 @@
 ## Changelog
 
+#### Rework branch — internal architecture cleanup (unreleased)
+
+This branch (`Rework`) is the multi-phase strip of the multi-process
+(Electrolysis / e10s) infrastructure that the Greasemonkey codebase still
+carried from its Firefox-mainline days.  UXP browsers (Pale Moon,
+Basilisk) run chrome and content in the **same** JS runtime, so every
+`messageManager` / `cpmm` / `ppmm` IPC hop the extension still performed
+was a no-op detour: the receiver and sender share a process.  The
+framescript file itself (`content/frameScript.js`) was an Era-2 artefact
+loaded into each tab — pure overhead on single-process UXP.
+
+The rework removes the entire framescript layer, collapses every
+self-loop IPC site into direct in-process calls, rewrites three GM_*
+third-party polyfills with native chrome-side implementations, and
+prunes seven dead-code polyfills and fallback branches.  **No
+user-visible behaviour changes** — every userscript that worked on
+master should continue to work identically.  The XPI ships with ~800
+fewer lines of code and 3 fewer files than master.
+
+The phase-by-phase docs in `docs/legacy-inventory.md` and
+`docs/architecture.md` are the canonical reference for what each step
+did and why.  The headline summary below mirrors the 27-commit history.
+
+**Pre-work**
+
+* **Phase 1** (`docs: legacy-cleanup inventory`) — comprehensive audit
+  of every LIVE / VESTIGIAL / DEAD file in the tree, grouped by era
+  (gm2 / Australis / multi-process / UXP-adapted).  The roadmap for
+  every later phase.
+* **Phase 2** (`docs: architecture map`) — sequence diagram of the
+  install → match → sandbox → API surface → execution pipeline.
+  Each `[Phase 4: …]` footnote called out a place where the runtime
+  detoured through framescript / IPC.
+* **Phase 3** (`test: smoke-test set`) — 13 userscripts under `tests/`
+  exercising every major API path (sandbox / page-context, run-at
+  phases, storage, xmlhttpRequest, addStyle, openInTab, etc.).
+  Regression net for Phases 4-7.
+* **`build-xpi.ps1`** — codified the XPI packager so every phase's
+  build is reproducible.
+
+**Phase 4 — Framescript and IPC removal**
+
+* **4a** — dead-fallback sweep across 5 files (Firefox-only branches,
+  unreachable since UXP-only support).
+* **4b** — stripped the WebExtensions fallback path from
+  `responseObserver.js` and the `mozAnon` XHR compat shim.
+* **4c** — flattened three trivial IPC self-loops to direct calls.
+* **4d** — collapsed `modules/storageFront.js` into
+  `modules/storageBack.js`.  The two had been a chrome/content IPC
+  pair; on UXP single-process the cross-compartment hop was a
+  function-call indirection.  Storage `GM_setValue` / `GM_getValue`
+  now executes in one module.
+* **4e** — collapsed the `ipcScript.js` IPC bootstrap (the `Object.-
+  freeze` / `serialise` / `cpmm` machinery at the bottom) and removed
+  the five `ppmm` listeners in `components/greasemonkey.js` whose
+  senders had been retired in 4c/4d.
+* **4f-1** — menu-command IPC restructured to a chrome-side custom-
+  event dispatch (`greasemonkey-menu-command-list-<suffix>`,
+  `…-run-<suffix>`).  No more `cpmm` self-loopback for menu
+  registration.
+* **regression fix** (`fix: regressions from Phase 4d + 4f-1`) —
+  storage `setValues` / `deleteValues` and the per-script Options
+  reorder both hit bugs uncovered by smoke; patched with explicit
+  fixes plus regression coverage in the smoke set.
+* **4f-2** — `GM_openInTab` and `GM_window` now call
+  `GM_BrowserUI.openInTab` / `.tabClose` / `.window` directly via
+  `getChromeWinForContentWin`.  The corresponding tab-MM listeners
+  in `content/browser.js` were unreachable code and were removed.
+* **4f-3 (mini)** — three dead listeners in `content/browser.js`
+  removed (open-in-tab / tab-close / window).
+* **4f-3a** (this branch's biggest single commit) — **chrome-side
+  `modules/scriptInjector.js` replaces `content/frameScript.js`**.
+  The full ~500-LOC injection pipeline (Services.obs observers for
+  `content-document-global-created` + `document-element-inserted`,
+  per-window DOMContentLoaded/load listeners, page-context
+  `<script>`-element injection, sandbox creation, body
+  MutationObserver for `@run-at document-body`) now runs in chrome
+  scope.  Six remaining mm-IPC sites in `content/browser.js`,
+  `modules/script.js`, and `content/newScript.js` collapsed into
+  direct calls.  `createSandbox()`'s `aFrameScope` first parameter
+  dropped (only consumer was the framescript).
+* **4f-3b** — `content/frameScript.js` (-573 LOC),
+  `modules/processScript.js` (-90), and
+  `modules/documentObserver.js` (-124) deleted.  Net diff: -787 LOC.
+  The framescript era is over.
+
+**Phase 5 — Polyfill sweep**
+
+* **5a-1 / 5a-2** — `util/hitch.js` retired.  GM 1.x-era
+  `Function.prototype.bind` polyfill; UXP's SpiderMonkey has had
+  native `Function.prototype.bind` since Gecko 4.  46 call sites
+  across 8 files rewritten to `.bind(…)`.
+* **5b** — `util/inArray.js` retired.  Pre-ES2016 `Array.prototype.-
+  includes` shim; UXP supports the native everywhere.  8 files
+  rewritten to `.includes(…)` / `.some(…)`.
+
+**Phase 6 — XBL audit**
+
+* **6** (`docs: XBL bindings audit complete (no code change)`) —
+  audit of the `cludes-editor` / `greasemonkey-tbb` XBL pair.
+  Conclusion: load-bearing — the binding's lazy-loading semantics
+  give a behaviour that imperative code would have to re-implement
+  by hand, and the bindings work natively on UXP.  Kept.
+
+**Phase 7 — Native chrome-side API surface**
+
+* **7a** — Native GM4 (`GM.*` Promise) surface in `modules/sandbox.js`.
+  Replaces `evalAPI2Polyfill`, which built a JS string for every
+  sandbox and ran it through `Cu.evalInSandbox`.  The new path uses
+  `Cu.createObjectIn` + `Cu.exportFunction` with a pre-computed
+  `GM_API_MAPPING` (one-time at module load).  Stack traces in
+  `await GM.X(...)` errors now point at chrome scope instead of an
+  eval'd string.
+* **7b** — Native `GM_cookie` (methods-object form: `.list / .set /
+  .delete`) built on `Services.cookies`.  Replaces the third-party
+  `modules/thirdParty/GM_cookie.js` dispatch-function polyfill.
+  Default-on via new `extensions.greasemonkey.api.GM_cookie` pref.
+  `buildGMObject` Promise-wraps the methods for the GM4 form
+  `await GM.cookie.list({…})`.
+* **7d** — Batched-SQL paths for `GM_getValues` / `GM_setValues` /
+  `GM_deleteValues` in `modules/storageBack.js`.  Pre-cleanup,
+  multi-key operations looped through the single-key API one SQL
+  round-trip per key; the new path issues one SQL with named
+  placeholders (`WHERE name IN (:n0, :n1, …)`) plus a single
+  BEGIN/COMMIT for batched writes.
+* **7c** — Native `GM_download` on `nsIWebBrowserPersist` +
+  `nsIFilePicker` + the platform transfer service (`nsITransfer`,
+  `@mozilla.org/transfer;1`).  Replaces the third-party polyfill
+  that fetched via `GM_xmlhttpRequest` and triggered the browser's
+  save dialog through a synthetic `<a download>` click in the page
+  DOM.  The native version streams to disk (no in-memory blob
+  buffering), honours `details.saveAs`, fires `onprogress` /
+  `onload` / `onerror` / `onabort` with TM/VM-compatible payload
+  shape, and registers each download with the platform transfer
+  service so it appears in Pale Moon's Downloads window with a
+  working Cancel button.  Diagnostic journey across four fixup
+  commits documented in-tree:
+  - X-ray wrappers were silently filtering script-supplied function
+    properties (`onload`, `onerror`, …) out of the details object
+    seen on the chrome side — fixed with `Cu.waiveXrays` matching
+    `xmlHttpRequester.js:569`.
+  - `nsIWebBrowserPersist.saveURI` has two shapes across UXP builds
+    (8-arg vs 9-arg with triggering principal); we try 8-arg first
+    because it's the canonical Pale Moon / Basilisk shape, falling
+    back to 9-arg on any platform that requires the principal.
+  - `STATE_STOP` fires multiple times per save (request stop +
+    network stop ± document stop on some builds) — gated terminal
+    callback dispatch on a single-shot `terminalFired` flag so
+    `onload` / `onabort` / `onerror` fire exactly once per
+    `GM_download` call.
+  - Initially used `nsIDownloadManager.addDownload`, which throws
+    `NS_ERROR_UNEXPECTED` on Pale Moon (the legacy pipeline is
+    stubbed; the surviving path is `nsITransfer`).  Switched to
+    `@mozilla.org/transfer;1` and downloads now populate the
+    Downloads window correctly.
+  - Default-on via new `extensions.greasemonkey.api.GM_download` pref.
+  - Removed the implicit `GM_xmlhttpRequest` auto-inject that the
+    polyfill needed; scripts that use `GM_xmlhttpRequest` must
+    `@grant` it explicitly now.
+
+**Misc**
+
+* `docs:` cleanup of an outdated retrospective comment in
+  `modules/util.js`.
+
+**Verifying the rework on your install**
+
+1. Take a backup of your profile directory before installing the XPI.
+2. Install the XPI built from this branch (`greasemonkey-3.7.0.xpi`).
+3. The `tests/` directory contains 13 smoke userscripts covering
+   sandbox / page-context injection, all `@run-at` phases, storage,
+   xmlhttpRequest, cookie, download, openInTab, addStyle, notifications,
+   and resources.  Install each and verify the documented behaviour.
+4. For day-to-day userscripts: install the new XPI alongside your
+   existing scripts and watch the Browser Console (Ctrl+Shift+J) for
+   anything noisy.  If a script behaves differently from master,
+   `git bisect` the 27-commit chain in this branch — every phase is a
+   single commit (Phase 7c is the only multi-commit phase, with three
+   in-tree-documented fixups).
+
 #### 3.7.0 (2026-04-30)
 
 Per-script preferences dialog redesign.  Right-click any user script in
