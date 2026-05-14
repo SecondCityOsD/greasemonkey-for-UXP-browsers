@@ -552,6 +552,37 @@ function contentLoad(aEvent) {
     runScripts("document-idle", aContentWin);
   }, 50);
 
+  // Back/forward-cache awareness: when the user navigates BACK to a
+  // page that's still resident in BFCache, the browser restores the
+  // existing window without firing DOMContentLoaded/load again (the
+  // listeners above also self-removed on the initial fire).  Result
+  // pre-fix: scripts never re-ran on bfcache, so userscripts that
+  // applied styling / replaced page elements would silently lose
+  // their work when the user came back.
+  //
+  // The pageshow event IS dispatched on bfcache restoration with
+  // event.persisted = true, so we hook it here once per page-load
+  // lifecycle.  Initial-load pageshow (persisted = false) is filtered
+  // out since the document-end / document-idle scripts just ran above.
+  //
+  // Re-runs document-end + document-idle but NOT document-start —
+  // the latter only makes sense before the DOM exists, and the DOM
+  // is already there on bfcache restore.  Matches the standard TM/VM
+  // bfcache behaviour (idempotent userscripts are the norm; those
+  // that aren't can guard with `if (!document.getElementById(...))`).
+  aContentWin.addEventListener("pageshow", function pageshowRerun(aPageshow) {
+    if (!aPageshow.persisted) {
+      return;
+    }
+    if (!GM_util.getEnabled()) {
+      return;
+    }
+    runScripts("document-end", aContentWin);
+    GM_util.timeout(function () {
+      runScripts("document-idle", aContentWin);
+    }, 50);
+  }, true);
+
   // Special-case for the "about:" URLs whose document lifecycle didn't
   // fire content-document-global-created / document-element-inserted
   // in the expected order (bug #1820, #2371, #2195).  If GM is
