@@ -62,6 +62,7 @@ if (typeof Cu === "undefined") {
 Cu.import("resource://gre/modules/Services.jsm");
 
 Cu.import("chrome://greasemonkey-modules/content/constants.js");
+Cu.import("chrome://greasemonkey-modules/content/cspNonce.js");
 Cu.import("chrome://greasemonkey-modules/content/extractMeta.js");
 Cu.import("chrome://greasemonkey-modules/content/GM_openInTab.js");
 Cu.import("chrome://greasemonkey-modules/content/ipcScript.js");
@@ -219,9 +220,19 @@ function injectScriptIntoPage(aContentWin, aScript, aRunAt) {
   // early load); appendChild still works.
   let parent = doc.documentElement || doc;
 
+  // Look up the page's CSP script-source nonce, if any, so injected
+  // <script> elements can carry a matching nonce attribute and slip
+  // past nonce-based CSPs (GitHub, Google search, modern news sites).
+  // null on pages without a nonce CSP — the element then just gets
+  // injected un-attributed, which is also fine on no-CSP pages.
+  let cspNonce = getNonceForWindow(aContentWin);
+
   function injectCode(aCode, aSourceHint) {
     try {
       let el = doc.createElement("script");
+      if (cspNonce) {
+        el.setAttribute("nonce", cspNonce);
+      }
       if (aSourceHint) {
         aCode += "\n//# sourceURL=" + aSourceHint;
       }
