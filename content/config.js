@@ -10,6 +10,8 @@ if (typeof Cu === "undefined") {
 
 Cu.import("chrome://greasemonkey-modules/content/constants.js");
 
+Cu.import("resource://gre/modules/Services.jsm");
+
 Cu.import("chrome://greasemonkey-modules/content/miscApis.js");
 Cu.import("chrome://greasemonkey-modules/content/prefManager.js");
 Cu.import("chrome://greasemonkey-modules/content/script.js");
@@ -26,6 +28,11 @@ function Config() {
   this._configFile.append("config.xml");
   this._globalExcludes = JSON.parse(GM_prefRoot.getValue("globalExcludes"));
   this._observers = [];
+  // Populated by _scanOrphans() during initialize(); each entry is
+  // { basedir, userJsFile, path } describing a <profile>/gm_scripts/
+  // subfolder that isn't referenced by any <Script> in config.xml
+  // but DOES contain a *.user.js file we could reinstall from.
+  this._orphans = [];
 }
 
 Config.prototype.GM_GUID = GM_CONSTANTS.addonGUID;
@@ -33,6 +40,127 @@ Config.prototype.GM_GUID = GM_CONSTANTS.addonGUID;
 Config.prototype.initialize = function () {
   this._updateVersion();
   this._load();
+  this._orphans = this._scanOrphans();
+  if (this._orphans.length > 0) {
+    let lines = ["Greasemonkey: found "
+        + this._orphans.length
+        + " orphaned script directory(ies) under <profile>/gm_scripts/"
+        + " — script files exist on disk but no <Script> entry in"
+        + " config.xml references them.  Open the User Scripts pane"
+        + " in about:addons and click \"Recover Orphans\" to reinstall."];
+    for (let i = 0; i < this._orphans.length; i++) {
+      lines.push("  - " + this._orphans[i].basedir
+          + " -> " + this._orphans[i].path);
+    }
+    try {
+      Services.console.logStringMessage(lines.join("\n"));
+    } catch (e) {
+      // logStringMessage can't fail in any realistic case, but be
+      // defensive — never let console-logging take down startup.
+    }
+  }
+};
+
+/**
+ * Returns a read-only snapshot of the orphan list discovered during
+ * initialize().  Consumed by the User Scripts pane (Recover Orphans
+ * button) and by future tooling that wants to inspect the state
+ * without re-walking the filesystem.
+ *
+ * @returns {Array<{basedir: string, userJsFile: nsIFile, path: string}>}
+ */
+Config.prototype.getOrphans = function () {
+  return this._orphans.concat();
+};
+
+/**
+ * Scans <profile>/gm_scripts/ for subdirectories that aren't claimed
+ * by any <Script> entry in config.xml.  An orphan is a directory
+ * that:
+ *   - is NOT named the same as any installed script's basedir, AND
+ *   - contains at least one *.user.js file
+ *
+ * The .user.js path is captured so the UI can call directly into
+ * the existing install pipeline (parseScript + installScriptFromSource)
+ * without re-walking the directory.
+ *
+ * Returns an empty array if gm_scripts/ doesn't exist or contains no
+ * orphans.  Defensive against directoryEntries throwing on weird
+ * permission / filesystem states (the catch logs but keeps going).
+ *
+ * @returns {Array<{basedir: string, userJsFile: nsIFile, path: string}>}
+ */
+Config.prototype._scanOrphans = function () {
+  let scriptDir = GM_util.scriptDir();
+  if (!scriptDir || !scriptDir.exists() || !scriptDir.isDirectory()) {
+    return [];
+  }
+
+  // Build the set of basedirs the loaded scripts already claim.
+  // O(n) once per startup; lookup is O(1) via Set.has.
+  let knownBasedirs = new Set();
+  for (let i = 0; i < this._scripts.length; i++) {
+    let s = this._scripts[i];
+    if (s._basedir) {
+      knownBasedirs.add(s._basedir);
+    }
+  }
+
+  let orphans = [];
+  let entries;
+  try {
+    entries = scriptDir.directoryEntries;
+  } catch (e) {
+    GM_util.logError(
+        "Greasemonkey orphan scan: enumerating gm_scripts/ failed: " + e,
+        true, e.fileName, e.lineNumber);
+    return [];
+  }
+
+  while (entries.hasMoreElements()) {
+    let entry;
+    try {
+      entry = entries.getNext().QueryInterface(Ci.nsIFile);
+    } catch (e) {
+      continue;
+    }
+    // Skip files at the gm_scripts/ root (config.xml, per-script
+    // *.db storage files).  Orphans are always directories.
+    if (!entry.isDirectory()) {
+      continue;
+    }
+    let leafName = entry.leafName;
+    if (knownBasedirs.has(leafName)) {
+      continue;
+    }
+
+    // Look for a *.user.js file directly inside this orphan dir.
+    // (We don't recurse — the GM layout puts the user.js at the
+    // top of the per-script dir.)
+    let userJsFile = null;
+    try {
+      let subEntries = entry.directoryEntries;
+      while (subEntries.hasMoreElements()) {
+        let f = subEntries.getNext().QueryInterface(Ci.nsIFile);
+        if (f.isFile() && /\.user\.js$/i.test(f.leafName)) {
+          userJsFile = f;
+          break;
+        }
+      }
+    } catch (e) {
+      continue;
+    }
+
+    if (userJsFile) {
+      orphans.push({
+        "basedir": leafName,
+        "userJsFile": userJsFile,
+        "path": userJsFile.path,
+      });
+    }
+  }
+
+  return orphans;
 };
 
 Config.prototype.addObserver = function (aObserver, aScript) {
