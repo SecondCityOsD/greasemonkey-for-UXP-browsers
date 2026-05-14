@@ -319,6 +319,65 @@ function injectScriptIntoPage(aContentWin, aScript, aRunAt) {
         "Error loading GM_info:\n" + e, true, e.fileName, e.lineNumber);
   }
 
+  // Safe-globals snapshot: captures clean references to a curated set
+  // of built-in constructors and globals AS THEY EXIST at the moment
+  // the user script's prelude runs.  Exposed to the script body as
+  // `GM_info.safeGlobals`, frozen with the just-captured `Object` so
+  // the snapshot object itself is defended against `Object.freeze`
+  // being later shadowed on the prototype.
+  //
+  // Most defensive when the script uses `@run-at document-start`
+  // (the page hasn't run inline scripts yet, so the captured
+  // references are the pristine platform builtins).  Captured later
+  // — document-end / document-idle — the references are whatever
+  // the page already saw / replaced; the snapshot then merely
+  // freezes the values at script-start, which still defends against
+  // FURTHER mutation but cannot un-do prior tainting.
+  //
+  // Curated list balances common-use coverage vs. surface area:
+  // sandbox scripts already get fresh prototypes via Cu.Sandbox so
+  // they don't need this; this snapshot is for @grant none /
+  // @inject-into page scripts that explicitly chose page context
+  // and so share globals with potentially-hostile page JS.
+  // The snapshot is itself wrapped in a `(function(){…})()` so its
+  // two `var` helpers (`__SO__` / `__SF__`) stay private even in the
+  // @unwrap path — without this, they'd leak to `window.__SO__` and
+  // pollute the page's global namespace.  GM_info is reachable from
+  // inside the IIFE via lexical scope (declared `var` in both
+  // wrappers below, so it's in the outer Activation Record).
+  let safeGlobalsSnapshot =
+      "(function () {\n"
+      + "  var __SO__ = window.Object;\n"
+      + "  var __SF__ = __SO__.freeze;\n"
+      + "  GM_info.safeGlobals = __SF__.call(__SO__, {\n"
+      + "    Object: window.Object, Array: window.Array,\n"
+      + "    Function: window.Function, Promise: window.Promise,\n"
+      + "    JSON: window.JSON, Map: window.Map, Set: window.Set,\n"
+      + "    WeakMap: window.WeakMap, WeakSet: window.WeakSet,\n"
+      + "    RegExp: window.RegExp, Date: window.Date,\n"
+      + "    String: window.String, Number: window.Number,\n"
+      + "    Boolean: window.Boolean, Symbol: window.Symbol,\n"
+      + "    Error: window.Error, TypeError: window.TypeError,\n"
+      + "    RangeError: window.RangeError,\n"
+      + "    SyntaxError: window.SyntaxError,\n"
+      + "    ReferenceError: window.ReferenceError,\n"
+      + "    URL: window.URL,\n"
+      + "    URLSearchParams: window.URLSearchParams,\n"
+      + "    FormData: window.FormData, Blob: window.Blob,\n"
+      + "    File: window.File, ArrayBuffer: window.ArrayBuffer,\n"
+      + "    Uint8Array: window.Uint8Array,\n"
+      + "    DataView: window.DataView,\n"
+      + "    Proxy: window.Proxy, Reflect: window.Reflect,\n"
+      + "    parseInt: window.parseInt,\n"
+      + "    parseFloat: window.parseFloat,\n"
+      + "    isNaN: window.isNaN, isFinite: window.isFinite,\n"
+      + "    encodeURIComponent: window.encodeURIComponent,\n"
+      + "    decodeURIComponent: window.decodeURIComponent,\n"
+      + "    encodeURI: window.encodeURI,\n"
+      + "    decodeURI: window.decodeURI,\n"
+      + "  });\n"
+      + "})();\n";
+
   // 5) Inject the user script body.  Default wrapping is an IIFE so
   //    bare var/let/const declarations stay local; @topLevelAwait
   //    upgrades the wrapper to async IIFE (matches Violentmonkey).
@@ -333,12 +392,14 @@ function injectScriptIntoPage(aContentWin, aScript, aRunAt) {
   if (aScript.unwrap) {
     wrappedCode =
         "var GM_info = " + gmInfoJson + ";\n"
+        + safeGlobalsSnapshot
         + "var unsafeWindow = window;\n"
         + scriptCode;
   } else {
     wrappedCode = `
       (${aScript.topLevelAwait ? "async " : ""}function() {
         var GM_info = ${gmInfoJson};
+${safeGlobalsSnapshot}
         const unsafeWindow = window;
         ${scriptCode}
       })();`;
