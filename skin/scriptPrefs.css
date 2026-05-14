@@ -61,6 +61,27 @@ cludes {
   user-select: text !important;
   -moz-user-focus: normal;
   cursor: text;
+
+  /* Layout stability fix.  XUL <grid> sizes a flex column to
+     max(flex-allocated space, intrinsic max cell width), NOT to
+     flex-allocated space alone.  That makes the value column wider
+     for scripts whose @updateURL / @downloadURL are long (e.g.
+     full file:/// paths) and narrower for scripts with short ones,
+     so the dialog visibly reshuffles between scripts and long URLs
+     leak past the dialog's right edge (clipped invisibly by
+     #settings-scroll's overflow-x:hidden — which is why it reads
+     as "cut out of the resolution").
+
+     Setting width:0 + min-width:0 makes each description's preferred
+     width 0; flex inheritance from the row then stretches the cell
+     to fill exactly the column's flex-allocated space — independent
+     of content length.  .prefs-meta-trunc's text-overflow:ellipsis
+     then does its job inside that stable width.  Multi-line
+     <description> rows (#meta-description, the permissions block)
+     use white-space:normal and just wrap inside the same stable
+     width, so this rule is safe for them too. */
+  width: 0;
+  min-width: 0;
 }
 
 /* Single-line metadata rows: emulate the old `crop="end"` ellipsis on
