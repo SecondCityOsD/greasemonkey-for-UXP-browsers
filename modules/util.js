@@ -52,10 +52,6 @@ XPCOMUtils.defineLazyModuleGetter(GM_util, "getTempFile", "chrome://greasemonkey
 XPCOMUtils.defineLazyModuleGetter(GM_util, "getUriFromFile", "chrome://greasemonkey-modules/content/util/getUriFromFile.js");
 XPCOMUtils.defineLazyModuleGetter(GM_util, "getUriFromUrl", "chrome://greasemonkey-modules/content/util/getUriFromUrl.js");
 XPCOMUtils.defineLazyModuleGetter(GM_util, "hash", "chrome://greasemonkey-modules/content/util/hash.js");
-// hitch.js (Function.prototype.bind polyfill, GM 1.x era) was retired
-// in Phase 5a; inArray.js (Array.prototype.includes polyfill, pre-ES2016)
-// was retired in Phase 5b.  UXP's SpiderMonkey has had both natives for
-// years; every caller now uses .bind() / .includes() / .some() directly.
 XPCOMUtils.defineLazyModuleGetter(GM_util, "installScriptFromSource", "chrome://greasemonkey-modules/content/util/installScriptFromSource.js");
 XPCOMUtils.defineLazyModuleGetter(GM_util, "isGreasemonkeyable", "chrome://greasemonkey-modules/content/util/isGreasemonkeyable.js");
 XPCOMUtils.defineLazyModuleGetter(GM_util, "logError", "chrome://greasemonkey-modules/content/util/logError.js");
