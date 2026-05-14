@@ -513,6 +513,72 @@ function cacheKey(aScript, aName) {
 }
 
 /**
+ * Returns true iff aOld and aNew are equivalent for value-change-listener
+ * deduplication purposes.  Mirrors Violentmonkey's gm-values.js:49
+ * "raw !== oldRaw" semantics: compares via JSON.stringify so structural
+ * equality of objects / arrays is honoured.  Property-order differences
+ * inside objects WILL register as a change — matching VM's behaviour and
+ * a deliberate trade-off (a deep-equal comparator would be heavier and
+ * still not perfectly catch Date / RegExp / Map edge cases).
+ *
+ * @param {*} aOld
+ * @param {*} aNew
+ * @returns {boolean}
+ */
+function valuesEqualForListener(aOld, aNew) {
+  if (aOld === aNew) {
+    return true;
+  }
+  if (typeof aOld !== typeof aNew) {
+    return false;
+  }
+  if (aOld === null || aNew === null) {
+    return aOld === aNew;
+  }
+  try {
+    return JSON.stringify(aOld) === JSON.stringify(aNew);
+  } catch (e) {
+    return false;
+  }
+}
+
+/**
+ * Resolves the current stored value for a key, preferring the in-memory
+ * cache when present and falling back to a single SQLite read when not.
+ * Returns undefined for absent keys (both cache miss and disk miss).
+ *
+ * Used by the change-listener deduplication path so we can decide
+ * "did this set actually change anything?" without firing the listener
+ * spuriously on identical re-sets.  The disk fallback adds one SQL
+ * SELECT per write on a cold cache, which is the price of correctness
+ * — VM pays the same cost via its storage-cache layer.
+ *
+ * @param {GM_ScriptStorageFront} aFront
+ * @param {string}                aName
+ * @param {string}                aKey  - Pre-computed cacheKey() value.
+ * @returns {*} The current value, or undefined if the key is absent.
+ */
+function readCurrentValue(aFront, aName, aKey) {
+  if (cache.has(aKey)) {
+    return cache.get(aKey);
+  }
+  let raw;
+  try {
+    raw = aFront._back.getValue(aName);
+  } catch (e) {
+    return undefined;
+  }
+  if (raw === null || typeof raw === "undefined") {
+    return undefined;
+  }
+  try {
+    return JSON.parse(raw);
+  } catch (e) {
+    return undefined;
+  }
+}
+
+/**
  * Removes a single entry from both the value cache and the hit-count map.
  * Called when a setValue / deleteValue is performed locally.
  *
@@ -631,8 +697,9 @@ GM_ScriptStorageFront.prototype.setValue = function (aName, aVal) {
 
   let key = cacheKey(this._script, aName);
 
-  // Capture old value for change listeners before invalidation.
-  let oldValue = cache.has(key) ? cache.get(key) : undefined;
+  // Capture old value (cache hit or single disk read) for change-listener
+  // deduplication.  Falls back to undefined if the key was absent.
+  let oldValue = readCurrentValue(this, aName, key);
 
   invalidateCache(key);
 
@@ -642,9 +709,14 @@ GM_ScriptStorageFront.prototype.setValue = function (aName, aVal) {
 
   this._back.setValue(aName, aVal);
 
-  // Listeners owned by this Front get aRemote=false; listeners owned
-  // by other Fronts watching the same key get aRemote=true.
-  fireValueChangeListeners(key, oldValue, aVal, this);
+  // Only fire listeners when the value actually changed — matches VM's
+  // gm-values.js:49 semantics so a script doing `setValue('x', 5)` when
+  // x is already 5 does not wake up other tabs' onValueChange handlers.
+  // Listeners owned by this Front get aRemote=false; listeners owned by
+  // other Fronts watching the same key get aRemote=true.
+  if (!valuesEqualForListener(oldValue, aVal)) {
+    fireValueChangeListeners(key, oldValue, aVal, this);
+  }
 };
 
 /**
@@ -728,14 +800,19 @@ GM_ScriptStorageFront.prototype.deleteValue = function (aName) {
 
   let key = cacheKey(this._script, aName);
 
-  // Capture old value for change listeners before invalidation.
-  let oldValue = cache.has(key) ? cache.get(key) : undefined;
+  // Capture old value (cache hit or single disk read) for change-listener
+  // deduplication.  Falls back to undefined if the key was already absent.
+  let oldValue = readCurrentValue(this, aName, key);
 
   invalidateCache(key);
 
   this._back.deleteValue(aName);
 
-  fireValueChangeListeners(key, oldValue, undefined, this);
+  // Skip the listener when the key was already absent — VM treats
+  // deleteValue('nokey') as a no-op for listeners.
+  if (typeof oldValue !== "undefined") {
+    fireValueChangeListeners(key, oldValue, undefined, this);
+  }
 };
 
 /**
@@ -858,14 +935,18 @@ GM_ScriptStorageFront.prototype.setValues = function (aObj) {
     return undefined;
   }
 
-  // Capture pre-write old values for change-listener notifications and
-  // invalidate the cache before the Back commits the new ones.
+  // Capture pre-write old values (cache hit or single disk read each)
+  // for change-listener deduplication and invalidate the cache before
+  // the Back commits the new ones.  A future optimisation could batch
+  // the disk reads via getValuesBatch when the cache misses every key,
+  // but per-key reads keep the dedup path simple and align with the
+  // single-key setValue() above.
   let oldValues = {};
   let normalized = {};
   for (let i = 0; i < keys.length; i++) {
     let name = String(keys[i]);
     let key = cacheKey(this._script, name);
-    oldValues[name] = cache.has(key) ? cache.get(key) : undefined;
+    oldValues[name] = readCurrentValue(this, name, key);
     invalidateCache(key);
     let val = aObj[keys[i]];
     normalized[name] = (typeof val == "undefined") ? null : val;
@@ -873,13 +954,17 @@ GM_ScriptStorageFront.prototype.setValues = function (aObj) {
 
   this._back.setValuesBatch(normalized);
 
-  // Fan out change-listener notifications per key.
+  // Fan out change-listener notifications per key, but skip keys whose
+  // value did not actually change (matches VM's gm-values.js:49
+  // dedup semantics, applied per-key for the batched path).
   let names = Object.keys(normalized);
   for (let i = 0; i < names.length; i++) {
     let name = names[i];
-    fireValueChangeListeners(
-        cacheKey(this._script, name), oldValues[name],
-        normalized[name], this);
+    if (!valuesEqualForListener(oldValues[name], normalized[name])) {
+      fireValueChangeListeners(
+          cacheKey(this._script, name), oldValues[name],
+          normalized[name], this);
+    }
   }
 };
 
@@ -900,17 +985,22 @@ GM_ScriptStorageFront.prototype.deleteValues = function (aKeys) {
     let name = String(aKeys[i]);
     names.push(name);
     let key = cacheKey(this._script, name);
-    oldValues[name] = cache.has(key) ? cache.get(key) : undefined;
+    oldValues[name] = readCurrentValue(this, name, key);
     invalidateCache(key);
   }
 
   this._back.deleteValuesBatch(names);
 
+  // Per-key listener dispatch with dedup: skip keys whose old value
+  // was already absent (matches deleteValue() above and VM's
+  // gm-values.js:51 "fires only if value changed" semantics).
   for (let i = 0; i < names.length; i++) {
     let name = names[i];
-    fireValueChangeListeners(
-        cacheKey(this._script, name), oldValues[name],
-        undefined, this);
+    if (typeof oldValues[name] !== "undefined") {
+      fireValueChangeListeners(
+          cacheKey(this._script, name), oldValues[name],
+          undefined, this);
+    }
   }
 };
 
