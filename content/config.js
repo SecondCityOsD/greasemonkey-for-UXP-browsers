@@ -133,6 +133,16 @@ Config.prototype._scanOrphans = function () {
     if (knownBasedirs.has(leafName)) {
       continue;
     }
+    // Skip post-recovery backup directories left behind by
+    // GM_recoverOrphans().  Without this guard, a successful
+    // recovery would immediately re-flag its own .recovered
+    // backups on the next startup, and the "Recover N orphans..."
+    // link would never go away.  The .recovered suffix is owned
+    // exclusively by the recovery flow (see addonsOverlay.js),
+    // so matching on it is unambiguous.
+    if (/\.recovered$/i.test(leafName)) {
+      continue;
+    }
 
     // Look for a *.user.js file directly inside this orphan dir.
     // (We don't recurse — the GM layout puts the user.js at the
