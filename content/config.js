@@ -74,6 +74,30 @@ Config.prototype.getOrphans = function () {
 };
 
 /**
+ * Re-runs _scanOrphans() and replaces the cached list with the fresh
+ * filesystem state.  Returns the new list (same shape as getOrphans).
+ *
+ * The cached _orphans list is populated once during initialize() and,
+ * before this method existed, was never refreshed.  That caused two
+ * symptoms after a successful Recover-Orphans run:
+ *   (a) The "Recover N orphans..." link kept reappearing in
+ *       about:addons → User Scripts whenever the pane re-rendered,
+ *       even though the orphan dirs had been renamed to .recovered
+ *       (which the scanner skips).
+ *   (b) Clicking that stale link tried to read .user.js from the
+ *       original (now non-existent) paths and produced a flood of
+ *       NS_ERROR_FILE_NOT_FOUND errors in the summary alert.
+ *
+ * The User Scripts pane's init() now calls this before reading the
+ * list, and GM_recoverOrphans() calls it after a recovery pass to
+ * keep the in-memory state honest.
+ */
+Config.prototype.refreshOrphans = function () {
+  this._orphans = this._scanOrphans();
+  return this._orphans.concat();
+};
+
+/**
  * Scans <profile>/gm_scripts/ for subdirectories that aren't claimed
  * by any <Script> entry in config.xml.  An orphan is a directory
  * that:
