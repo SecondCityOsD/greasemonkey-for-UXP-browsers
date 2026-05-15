@@ -48,7 +48,25 @@
           }
 
           for (let i = 0, page = null; page = aPages[i]; i++) {
-            this._box.insertItemAt(this._box.getRowCount(), page);
+            // crop="end" + tooltiptext on every inserted listitem.
+            // Without crop, a XUL listitem's intrinsic width equals its
+            // full label pixel width; the listbox sizes to its widest
+            // item, the cludes to the listbox, and the chain of -moz-box
+            // parents (vbox → hbox → groupbox) all grow with it.  In
+            // 3.7.0+ the dialog window is hard-capped at 720px (see
+            // scriptPrefs.js snapBackToPersistedSize), so without this
+            // crop the wider-than-720 content gets visually clipped at
+            // the dialog edge — exact symptom users reported as
+            // "buttons on the right are half-cut off" for scripts whose
+            // @match / @exclude lists contain a long pattern.  The
+            // tooltiptext attribute surfaces the full untruncated
+            // pattern on hover so cropping doesn't lose information.
+            let _item = this._box.insertItemAt(
+                this._box.getRowCount(), page);
+            if (_item) {
+              _item.setAttribute("crop", "end");
+              _item.setAttribute("tooltiptext", page);
+            }
           }
 
           let _count = this._box.getRowCount().toString();
