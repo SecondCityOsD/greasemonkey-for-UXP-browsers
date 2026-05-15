@@ -419,20 +419,39 @@ function init() {
   applySort();
 
   // Orphan-recovery affordance.  The label is hidden in the XUL; reveal
-  // it (and dynamically set its text to include the count) iff the
-  // Config startup scan found any orphaned script directories under
-  // <profile>/gm_scripts/.  No expensive work here — getOrphans()
-  // returns a cached array populated once during service startup.
+  // it (and dynamically set its text to include the count) iff a fresh
+  // scan of <profile>/gm_scripts/ finds any orphaned script directories.
+  //
+  // refreshOrphans() re-walks the filesystem instead of returning the
+  // cached snapshot from startup.  Without that, a successful
+  // Recover-Orphans run leaves the in-memory list stale: subsequent
+  // pane re-renders would re-show the link with the original count,
+  // and clicking it would try to read .user.js files from paths that
+  // were already renamed to ".recovered" — producing NS_ERROR_FILE_NOT_FOUND
+  // errors in the summary.  A directory walk on pane open is cheap
+  // (one stat per top-level entry under gm_scripts/) and keeps the
+  // displayed state honest.
   try {
     let recoverLink = document.getElementById("gm-recover-orphans");
     if (recoverLink) {
       let config = GM_util.getService().config;
-      let orphans = config.getOrphans ? config.getOrphans() : [];
+      let orphans;
+      if (config.refreshOrphans) {
+        orphans = config.refreshOrphans();
+      } else if (config.getOrphans) {
+        orphans = config.getOrphans();
+      } else {
+        orphans = [];
+      }
       if (orphans.length > 0) {
         recoverLink.setAttribute("value",
             "Recover " + orphans.length + " orphan"
             + (orphans.length == 1 ? "" : "s") + "...");
         recoverLink.hidden = false;
+      } else {
+        // Defensive: a prior pane open may have unhidden the link;
+        // if the fresh scan finds nothing, hide it again.
+        recoverLink.hidden = true;
       }
     }
   } catch (e) {
@@ -1034,8 +1053,10 @@ function GM_recoverOrphans() {
       + "Reinstalling will:\n"
       + "  • Register each script anew in config.xml.\n"
       + "  • Create a fresh GM_setValue storage for each.\n"
-      + "  • Rename each original folder to \"<basedir>.recovered\""
-      + "\n    as a backup so they aren't reported again.\n\n"
+      + "  • Permanently delete the original folder and its"
+      + "\n    associated <basedir>.db storage file.\n\n"
+      + "GM_setValue data is NOT migrated.  If a script's stored"
+      + "\nvalues matter to you, back them up before proceeding.\n\n"
       + "Proceed?");
   if (!proceed) {
     return;
@@ -1064,10 +1085,22 @@ function GM_recoverOrphans() {
         msg += "\n\nErrors:\n" + errors.join("\n");
       }
       alert(msg);
-      // Hide the link until the next startup re-scans — once the
-      // session's orphan list is processed it shouldn't keep
-      // beckoning even if a few failed (the user can read the error
-      // details and decide whether to retry manually).
+      // Re-scan now that every recovered directory has been renamed to
+      // ".recovered" (which the scanner skips).  Without this, the
+      // in-memory orphan list would still hold the original entries
+      // and a subsequent pane re-render would re-show the link with
+      // its original count — and clicking it would try to read from
+      // the now-renamed paths and fail with NS_ERROR_FILE_NOT_FOUND.
+      try {
+        if (config.refreshOrphans) {
+          config.refreshOrphans();
+        }
+      } catch (e) {
+        Components.utils.reportError(
+            "Greasemonkey: post-recovery orphan re-scan failed: " + e);
+      }
+      // Hide the link immediately — the next pane open will also call
+      // refreshOrphans() and confirm there's nothing left to recover.
       let link = document.getElementById("gm-recover-orphans");
       if (link) {
         link.hidden = true;
@@ -1098,16 +1131,39 @@ function GM_recoverOrphans() {
             + (aErr.message || aErr.toString()));
       } else {
         recovered++;
-        // Rename the orphan dir to "<basedir>.recovered" so subsequent
-        // startup scans don't re-flag it.  Failures here are non-fatal
-        // — the install already succeeded; the worst case is the user
-        // sees this orphan again on next startup and can re-run.
+        // Delete the orphan directory and its sibling .db storage
+        // file outright.  The install pipeline already copied the
+        // script source into a fresh gm_scripts/<id>-N/ subdir and
+        // initialised a new .db for it, so the originals are now
+        // dead weight.  GM_setValue data isn't migrated through
+        // recovery anyway, so the old .db has no live referent.
+        //
+        // Storage convention (see modules/storageBack.js:16):
+        //   <profile>/gm_scripts/<basedir>/   ← script directory
+        //   <profile>/gm_scripts/<basedir>.db ← sibling SQLite file
+        //
+        // Both go.  Failures here are logged but non-fatal — the
+        // install already succeeded; the worst case is a leftover
+        // folder the user can remove via file explorer.
         try {
           let oldDir = orphan.userJsFile.parent;
-          oldDir.moveTo(null, orphan.basedir + ".recovered");
+          let gmScriptsDir = oldDir.parent;
+          oldDir.remove(true); // deep=true (recursive directory removal)
+
+          try {
+            let dbFile = gmScriptsDir.clone();
+            dbFile.append(orphan.basedir + ".db");
+            if (dbFile.exists()) {
+              dbFile.remove(false); // file, not directory
+            }
+          } catch (e2) {
+            Components.utils.reportError(
+                "Greasemonkey: post-recovery .db cleanup of "
+                + orphan.basedir + " failed: " + e2);
+          }
         } catch (e) {
           Components.utils.reportError(
-              "Greasemonkey: post-recovery rename of "
+              "Greasemonkey: post-recovery dir cleanup of "
               + orphan.basedir + " failed: " + e);
         }
       }
