@@ -120,7 +120,25 @@ window.addEventListener("load", function () {
   // on the resize debounce alone meant a quick close-after-resize
   // dropped the new dimensions on the floor.
   applyPersistedSize();
-  window.addEventListener("resize", onWindowResize, false);
+
+  // XUL <window> auto-grows past the declared / programmatic-resize
+  // target when content's intrinsic min-content is wider — long
+  // no-wrap @updateURL / @downloadURL values in the metadata grid,
+  // long no-wrap @match patterns in cludes lists, etc.  The growth
+  // happens during the layout pass that runs *after* this listener
+  // returns, so the resizeTo() inside applyPersistedSize() is
+  // silently clobbered, and savePersistedSize() then captures the
+  // auto-grown width and writes it back to the pref — poisoning
+  // future opens.
+  //
+  // setTimeout(0) lets the layout pass complete, then we re-resize
+  // back to the persisted target.  The resize listener is attached
+  // *after* the snap-back so it doesn't record the intermediate
+  // auto-grown size as a "user resize".
+  setTimeout(function () {
+    snapBackToPersistedSize();
+    window.addEventListener("resize", onWindowResize, false);
+  }, 0);
 }, false);
 
 // Persist whatever size the window currently has when it is closed,
@@ -664,10 +682,40 @@ function bubbleWheelAtBoundary(aEvent, aListbox, aScroll) {
 
 const PREF_WIN_W = "scriptPrefs.windowWidth";
 const PREF_WIN_H = "scriptPrefs.windowHeight";
-const DEFAULT_WIN_W = 720;
+// Bumped from 720→840 in 3.7.0 patch.  720 left no room for the
+// script-declared section's three side-by-side cludes (Included /
+// Matched / Excluded), each of which has a wide "Add as user
+// exclude/include/match" button (~150px natural width) that won't
+// shrink below its label width — making the cludes column ~250px
+// minimum, ×3 = ~750px just for the row, before groupbox margins.
+// 840 gives the row + groupbox padding enough room to fit cleanly
+// regardless of the script's @match / @exclude pattern lengths.
+// Height stays at 720 — vertical content fits fine.
+const DEFAULT_WIN_W = 840;
 const DEFAULT_WIN_H = 720;
+// Pre-3.7.0-patch default; used for the one-shot migration that
+// upgrades any persisted-720 value to the new 840 baseline.  Anything
+// other than 720 is assumed to be a deliberate user resize and left
+// alone.
+const LEGACY_DEFAULT_WIN_W = 720;
 
-function applyPersistedSize() {
+/**
+ * Reads the persisted target window size, clamps to sane bounds, and
+ * returns {w, h}.  Centralised so the load handler's initial resize
+ * and the deferred snap-back both agree on what "the right size" is.
+ *
+ * Cap at DEFAULT_WIN_* upper bound: prior builds let savePersistedSize
+ * write the auto-grown outerWidth back to the pref on close, which
+ * "poisoned" the value (next open used the wider auto-grown size as
+ * the new baseline, indefinitely).  Capping on read auto-recovers
+ * those poisoned prefs without needing a one-time migration pref.
+ * Users who deliberately resize to a width > 720 will see that on the
+ * same session; the cap only fires once on the next open if they had
+ * shrunk back below 720 before close.  Net effect: the dialog always
+ * opens at ≤ 720×720, matching the user's expectation that "every
+ * script opens at the same size" really means "the declared size".
+ */
+function readPersistedSize() {
   let w = DEFAULT_WIN_W;
   let h = DEFAULT_WIN_H;
   try { w = parseInt(GM_prefRoot.getValue(PREF_WIN_W, DEFAULT_WIN_W), 10); }
@@ -676,7 +724,34 @@ function applyPersistedSize() {
   catch (e) {}
   if (!w || isNaN(w) || w < 400) w = DEFAULT_WIN_W;
   if (!h || isNaN(h) || h < 400) h = DEFAULT_WIN_H;
-  try { window.resizeTo(w, h); } catch (e) {}
+  // One-shot migration: pre-patch default was 720.  Treat a still-
+  // persisted 720 as "never deliberately resized" and upgrade to the
+  // new 840 baseline.  Any other value is honoured as a user choice.
+  if (w === LEGACY_DEFAULT_WIN_W) w = DEFAULT_WIN_W;
+  if (w > DEFAULT_WIN_W) w = DEFAULT_WIN_W;
+  if (h > DEFAULT_WIN_H) h = DEFAULT_WIN_H;
+  return {"w": w, "h": h};
+}
+
+function applyPersistedSize() {
+  let s = readPersistedSize();
+  try { window.resizeTo(s.w, s.h); } catch (e) {}
+}
+
+/**
+ * Resize the window back to the persisted target if XUL's layout pass
+ * auto-grew it past that target during initial paint.  See the
+ * setTimeout block in the load handler for the full rationale.
+ * 4-pixel tolerance absorbs OS chrome adjustments that aren't really
+ * "auto-grow".
+ */
+function snapBackToPersistedSize() {
+  let s = readPersistedSize();
+  try {
+    if (window.outerWidth > s.w + 4 || window.outerHeight > s.h + 4) {
+      window.resizeTo(s.w, s.h);
+    }
+  } catch (e) {}
 }
 
 /**
