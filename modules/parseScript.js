@@ -205,7 +205,12 @@ function parse(aSource, aUri, aFailWhenMissing) {
         data.keyword = "homepageURL";
         // fallthrough
       case "installURL":
+        // Rewrite @installURL → @downloadURL and fall through to the
+        // shared URL-parsing block.  Without this `break`-less case
+        // we'd duplicate the entire downloadURL/updateURL/homepageURL
+        // handler.  DO NOT add a `break` here.
         if (data.keyword == "installURL") data.keyword = "downloadURL";
+        // fallthrough
       case "downloadURL":
       case "homepageURL":
       case "updateURL":

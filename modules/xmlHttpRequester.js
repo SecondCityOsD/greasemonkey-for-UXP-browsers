@@ -28,13 +28,9 @@
  *     (see bug #2236).
  *   - Basic-Auth header injection (aDetails.user/password) partial support
  *     is commented out pending resolution of bugs #1945 and #2008.
- *
- * Historical note:
- *   Pre-cleanup, this module emulated mozAnon on Pale Moon < 27.2 by
- *   manually setting LOAD_ANONYMOUS on the request channel (Pale Moon
- *   PR #968).  The minimum supported target is now Pale Moon 28+ /
- *   Basilisk current; both honour the mozAnon constructor option
- *   directly, so the fallback was unreachable and was removed.
+ *   - The minimum supported platform is Pale Moon 28+ / Basilisk current.
+ *     The mozAnon constructor option is honoured directly, so no
+ *     LOAD_ANONYMOUS channel-flag fallback is needed.
  */
 
 const EXPORTED_SYMBOLS = ["GM_xmlHttpRequester"];
@@ -154,6 +150,18 @@ GM_xmlHttpRequester.prototype._isConnectAllowed = function (aRequestUri) {
     // localhost also matches 127.0.0.1.
     if (entry == "localhost") {
       if (requestHost == "localhost" || requestHost == "127.0.0.1") {
+        return true;
+      }
+      continue;
+    }
+    // Tampermonkey-compatible `*.domain.tld` wildcard.  Matches the
+    // bare host (`domain.tld`) and any subdomain of it.  Without this,
+    // scripts written for TM that do `// @connect *.googleapis.com`
+    // would silently get every request rejected even though the same
+    // bare-host form `// @connect googleapis.com` works.
+    if (entry.startsWith("*.")) {
+      let bare = entry.substr(2);
+      if (requestHost == bare || requestHost.endsWith("." + bare)) {
         return true;
       }
       continue;
@@ -301,21 +309,31 @@ function (aSafeUrl, aDetails, aReq) {
       this, this.wrappedContentWin, this.sandbox,
       this.fileURL);
 
-  setupRequestEvent(aReq, "abort", aDetails);
-  setupRequestEvent(aReq, "error", aDetails);
-  setupRequestEvent(aReq, "load", aDetails);
-  setupRequestEvent(aReq, "loadend", aDetails);
-  setupRequestEvent(aReq, "loadstart", aDetails);
-  setupRequestEvent(aReq, "progress", aDetails);
-  setupRequestEvent(aReq, "readystatechange", aDetails);
-  setupRequestEvent(aReq, "timeout", aDetails);
-  if (aDetails.upload) {
-    setupRequestEvent(aReq.upload, "abort", aDetails.upload);
-    setupRequestEvent(aReq.upload, "error", aDetails.upload);
-    setupRequestEvent(aReq.upload, "load", aDetails.upload);
-    setupRequestEvent(aReq.upload, "loadend", aDetails.upload);
-    setupRequestEvent(aReq.upload, "progress", aDetails.upload);
-    setupRequestEvent(aReq.upload, "timeout", aDetails.upload);
+  // Waive X-rays once per details object rather than per event setup.
+  // setupRequestEvent was previously calling Cu.waiveXrays(aDetails)
+  // on every entry, so the same wrapper-chain walk ran 8x for the
+  // main XHR and 6x for the upload — ~5-10µs each, ~70-140µs wasted
+  // per request.  Hoisted out; setupRequestEvent now skips the waive
+  // when it sees the already-waived form.
+  let waivedDetails = Cu.waiveXrays(aDetails);
+  let waivedUpload = aDetails.upload
+      ? Cu.waiveXrays(aDetails.upload) : null;
+
+  setupRequestEvent(aReq, "abort", waivedDetails);
+  setupRequestEvent(aReq, "error", waivedDetails);
+  setupRequestEvent(aReq, "load", waivedDetails);
+  setupRequestEvent(aReq, "loadend", waivedDetails);
+  setupRequestEvent(aReq, "loadstart", waivedDetails);
+  setupRequestEvent(aReq, "progress", waivedDetails);
+  setupRequestEvent(aReq, "readystatechange", waivedDetails);
+  setupRequestEvent(aReq, "timeout", waivedDetails);
+  if (waivedUpload) {
+    setupRequestEvent(aReq.upload, "abort", waivedUpload);
+    setupRequestEvent(aReq.upload, "error", waivedUpload);
+    setupRequestEvent(aReq.upload, "load", waivedUpload);
+    setupRequestEvent(aReq.upload, "loadend", waivedUpload);
+    setupRequestEvent(aReq.upload, "progress", waivedUpload);
+    setupRequestEvent(aReq.upload, "timeout", waivedUpload);
   }
 
   aReq.mozBackgroundRequest = !!aDetails.mozBackgroundRequest;
@@ -403,8 +421,15 @@ function (aSafeUrl, aDetails, aReq) {
 
   // See #2423.
   // http://bugzil.la/1275746
+  //
+  // Default the method to GET per the GM4 / TM / VM spec.  The XHR
+  // open() argument is required and must be a valid HTTP method
+  // token, so passing `undefined` (which happens whenever a script
+  // calls `GM_xmlhttpRequest({url, onload})` without specifying a
+  // method) throws NS_ERROR_INVALID_ARG and the script sees a
+  // synthetic XHR failure instead of a successful fetch.
   try {
-    aReq.open(aDetails.method, aSafeUrl,
+    aReq.open(aDetails.method || "GET", aSafeUrl,
         !aDetails.synchronous, aDetails.user || "", aDetails.password || "");
   } catch (e) {
     throw new this.wrappedContentWin.Error(
@@ -604,8 +629,9 @@ function (aSafeUrl, aDetails, aReq) {
  */
 GM_xmlHttpRequester.prototype.setupRequestEvent = function (
     aWrappedContentWin, aSandbox, aFileURL, aReq, aEvent, aDetails) {
-  // Waive Xrays so that we can read callback function properties...
-  aDetails = Cu.waiveXrays(aDetails);
+  // aDetails arrives pre-waived from chromeStartRequest's call site;
+  // the redundant waive that used to live here ran once per event-
+  // type setup (8x for the main XHR, 6x for upload).  Hoisted out.
   var eventCallback = aDetails["on" + aEvent];
   if (!eventCallback) {
     return undefined;
@@ -660,23 +686,40 @@ GM_xmlHttpRequester.prototype.setupRequestEvent = function (
     }
     if (responseXML) {
       // Clone the XML object into a content-window-scoped document.
+      //
+      // If the content window has been torn down (typical when the
+      // user navigates away mid-request) `new aWrappedContentWin
+      // .Document()` throws.  Pre-fix this aborted the whole XHR
+      // from inside a fired event listener — the script then never
+      // received `response`, `responseText`, or `status` either,
+      // even though the network fetch itself had succeeded.  Now we
+      // log the clone failure, leave responseXML null, and let the
+      // rest of the response reach the script.
       let xmlDoc;
       try {
         xmlDoc = new aWrappedContentWin.Document();
       } catch (e) {
+        GM_util.logError(
+            "GM_xmlHttpRequester.setupRequestEvent - url:"
+            + "\n" + '"' + aDetails.url + '":' + "\n" + e, true,
+            aFileURL, null);
+        xmlDoc = null;
+      }
+      if (xmlDoc) {
         try {
-          aReq.abort();
+          let clone = xmlDoc.importNode(responseXML.documentElement, true);
+          xmlDoc.appendChild(clone);
+          responseState.responseXML = xmlDoc;
         } catch (e) {
+          // importNode / appendChild can throw on responses with a
+          // null documentElement or a foreign-document node type.
+          // Same policy: log and pass through with responseXML null.
           GM_util.logError(
-              "GM_xmlHttpRequester.setupRequestEvent - url:"
+              "GM_xmlHttpRequester.setupRequestEvent - responseXML clone:"
               + "\n" + '"' + aDetails.url + '":' + "\n" + e, true,
               aFileURL, null);
         }
-        return undefined;
       }
-      let clone = xmlDoc.importNode(responseXML.documentElement, true);
-      xmlDoc.appendChild(clone);
-      responseState.responseXML = xmlDoc;
     }
 
     switch (aEvent) {

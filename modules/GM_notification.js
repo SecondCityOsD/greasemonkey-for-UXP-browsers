@@ -15,15 +15,11 @@
  * All other topics support per-topic muting via:
  *   "notification.muted.<topic>" preference (boolean).
  *
- * Historical note:
- *   Pre-cleanup, this module fabricated a "Learn More" secondary action
- *   manually for Pale Moon ≤27.5, where PopupNotifications.show() did
- *   not yet understand the "learnMoreURL" option natively (added in
- *   Pale Moon 27.6, see Moonchild PR #1355 — September 2017).  The
- *   minimum supported target is now Pale Moon 28+ / Basilisk current,
- *   both of which honour learnMoreURL natively, so the fallback was
- *   removed.  Basilisk is unaffected either way: it inherits PopupNoti-
- *   fications from Firefox 52 ESR which has had learnMoreURL since Fx41.
+ * Platform invariant:
+ *   The supported targets (Pale Moon 28+ and Basilisk) both honour the
+ *   "learnMoreURL" option of PopupNotifications.show() natively, so the
+ *   popup can pass it straight through without fabricating a secondary
+ *   "Learn More" action.
  */
 
 const EXPORTED_SYMBOLS = ["GM_notification"];
@@ -71,8 +67,7 @@ function mute(aTopic) {
  *
  * The popup always has an "OK" button and a "Never show again" secondary
  * action.  When aOptions.learnMoreURL is set, the platform's
- * PopupNotifications.show() renders a native "Learn More" link inline
- * (supported on Pale Moon 27.6+ and on Basilisk).
+ * PopupNotifications.show() renders a native "Learn More" link inline.
  *
  * Returns without showing anything if the notification topic has been muted.
  *

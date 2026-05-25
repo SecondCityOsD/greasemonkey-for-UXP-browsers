@@ -43,7 +43,13 @@ function fileXhr(aUrl, aMimetype, aResponseType) {
     throw new Error("fileXhr - used for non-file URL:" + "\n" + aUrl);
   }
   let xhr = new XMLHttpRequest();
-  xhr.open("open", aUrl, false);
+  // Method must be a valid HTTP verb.  This previously read "open"
+  // (the verb of the *call* immediately above) which UXP's XHR
+  // tolerated by silently treating it as GET — but any future
+  // tightening of method validation in the platform would brick
+  // every @require / @resource load and every lazy GM_info source
+  // fetch.  Spell it out so we don't depend on lenient behaviour.
+  xhr.open("GET", aUrl, false);
   if (aResponseType) {
     xhr.responseType = aResponseType;
   } else {

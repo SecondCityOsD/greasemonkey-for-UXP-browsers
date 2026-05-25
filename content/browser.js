@@ -45,19 +45,12 @@ GM_BrowserUI.init = function () {
   window.addEventListener("load", GM_BrowserUI.chromeLoad, false);
   window.addEventListener("unload", GM_BrowserUI.chromeUnload, false);
 
-  // Phase 4f-3 removed the last mm listener that lived here, the
-  // "greasemonkey:DOMContentLoaded" handler.  Its only sender was
-  // content/frameScript.js's browserLoadEnd at the GM-disabled
-  // branch — the framescript is gone, and modules/scriptInjector.js's
-  // contentLoad now calls GM_BrowserUI.checkDisabledScriptNavigation
-  // directly via getChromeWinForContentWin.
-  //
-  // Earlier phases retired the other listeners that used to live
-  // here: open-in-tab / tab-close / window (Phase 4f-2), is-window-
-  // visible (commented dead since multi-process days).  No tab-
-  // message-manager listeners remain.  The handler functions on
-  // GM_BrowserUI are still here as plain methods used by chrome-side
-  // callers (modules/GM_openInTab.js, modules/miscApis.js GM_window).
+  // No tab-message-manager listeners are registered here.  The
+  // openInTab / tabClose / window / checkDisabledScriptNavigation
+  // handlers below remain as plain methods on GM_BrowserUI, invoked
+  // directly by chrome-side callers (modules/scriptInjector.js's
+  // contentLoad via getChromeWinForContentWin, modules/GM_openInTab.js,
+  // modules/miscApis.js GM_window).
 };
 
 /**
@@ -143,11 +136,10 @@ GM_BrowserUI.openInTab = function (aMessage) {
       }
       GM_BrowserUI._openedTabs[tabId] = newTab;
 
-      // Listen for tab close and notify the GM_openInTab bookkeeping
-      // so the script's tab handle fires .onclose.  Pre-cleanup this
-      // bounced through browser.messageManager.sendAsyncMessage(
-      //   "greasemonkey:tab-closed", {tabId}) → frameScript.js handler
-      //   → GM_tabClosed(tabId).  UXP single-process — direct call.
+      // Listen for tab close and notify the GM_openInTab bookkeeping so
+      // the script's tab handle fires .onclose.  UXP is single-process,
+      // so we call GM_tabClosed(tabId) directly from the TabClose
+      // listener.
       let container = tabBrowser.tabContainer;
       function onTabClose(aEvent) {
         if (aEvent.target == newTab) {
@@ -254,12 +246,9 @@ GM_BrowserUI.getUserScriptUrlUnderPointer = function (aCallback) {
     return undefined;
   }
 
-  // Phase 4f-3: walk the DOM in chrome scope.  Pre-cleanup this round-
-  // tripped through "greasemonkey:context-menu-start" / -end mm
-  // messages so a framescript could traverse parentNode in the content
-  // compartment, but chrome and content share a JS runtime on UXP and
-  // parentNode access works fine from here (gContextMenu.target /
-  // document.popupNode are already Xrayed DOM nodes).
+  // Walk the DOM in chrome scope.  Chrome and content share a JS runtime
+  // on UXP, so parentNode traversal works fine on gContextMenu.target /
+  // document.popupNode (already Xrayed DOM nodes).
   let node = culprit;
   while (node && node.tagName && node.tagName.toLowerCase() != "a") {
     node = node.parentNode;
@@ -429,11 +418,9 @@ function GM_popupClicked(aEvent) {
     } else {
       if ((button == _buttons.middle)
           || ((button == _buttons.right) && modifier)) {
-        // Open the script's folder.  Pre-cleanup, this round-tripped
-        // through Services.cpmm.sendAsyncMessage("greasemonkey:script-
-        // open-folder", { scriptId }).  UXP is single-process, so we
-        // call the service directly.  Argument shape preserves the
-        // method signature shared with the legacy ppmm message handler.
+        // Open the script's folder.  UXP is single-process, so we call
+        // the service method directly; the { data: { scriptId } } shape
+        // matches the scriptOpenFolder signature.
         GM_util.getService().scriptOpenFolder({
           "data": { "scriptId": script.id },
         });
@@ -462,13 +449,9 @@ function GM_showPopup(aEvent) {
   // See #2276.
   var aEventTarget = aEvent.target;
 
-  // See below.
-  // Phase 4f-3: walk the docshell tree directly in chrome scope.
-  // Pre-cleanup this fired "greasemonkey:frame-urls" through the
-  // selected browser's frame message manager and waited for the
-  // modules/processScript.js handler to enumerate frames inside the
-  // content compartment.  UXP single-process — direct walk via
-  // modules/scriptInjector.js's urlsOfAllFrames().
+  // Walk the docshell tree directly in chrome scope via
+  // modules/scriptInjector.js's urlsOfAllFrames().  See GM_showTooltip
+  // below for the matching tooltip-side path.
   let topWin = getBrowser().mCurrentBrowser.contentWindow;
   let urls = urlsOfAllFrames(topWin);
   asyncShowPopup(aEventTarget, urls);
@@ -701,11 +684,9 @@ function GM_showTooltip(aEvent) {
     }
   }
 
-  // See above.
-  // Phase 4f-3: walk the docshell tree directly in chrome scope.
-  // Same migration as the toolbar-popup path above; the tooltip
-  // handler used to round-trip through "greasemonkey:frame-urls" /
-  // modules/processScript.js.
+  // Walk the docshell tree directly in chrome scope via
+  // modules/scriptInjector.js's urlsOfAllFrames(), mirroring
+  // GM_showPopup above.
   let topWin = aEvent.target.ownerDocument.defaultView
       .gBrowser.mCurrentBrowser.contentWindow;
   let urls = urlsOfAllFrames(topWin);

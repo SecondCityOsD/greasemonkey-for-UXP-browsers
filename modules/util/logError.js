@@ -17,6 +17,12 @@ if (typeof Cu === "undefined") {
 }
 
 
+// Cache the console service at module load.  Userscripts that throw
+// in event handlers can drop dozens of errors per second; pre-fix
+// every logError call did a fresh `Cc[..].getService(Ci..)` lookup.
+const CONSOLE_SERVICE = Cc["@mozilla.org/consoleservice;1"]
+    .getService(Ci.nsIConsoleService);
+
 /**
  * Logs an error or warning to the browser's JavaScript error console.
  * @param {Error|string} e - The error object or message string to log.
@@ -40,6 +46,5 @@ function logError(e, aWarning, aFileName, aLineNumber) {
       (aWarning ? Ci.nsIScriptError.warningFlag : Ci.nsIScriptError.errorFlag),
       null);
 
-  Cc["@mozilla.org/consoleservice;1"].getService(Ci.nsIConsoleService)
-      .logMessage(consoleError);
+  CONSOLE_SERVICE.logMessage(consoleError);
 }

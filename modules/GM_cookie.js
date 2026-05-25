@@ -16,15 +16,11 @@
  * The factory createGMCookieAPI() returns a sandbox-side object with the
  * three methods, each chrome-implemented and exported via Cu.exportFunction.
  *
- * Historical note:
- *   Pre-cleanup, this lived at modules/thirdParty/GM_cookie.js as a single
- *   dispatch function — scripts called it as GM_cookie('list', filter).
- *   That call shape is non-standard; Tampermonkey, Violentmonkey, and
- *   modern Greasemonkey 4 all expose GM_cookie as an object with .list /
- *   .set / .delete methods.  The native rewrite matches the standard
- *   shape and lets buildGMObject's GM4 wrapping work uniformly.  The
- *   Pale Moon < 49 try/catch fallback for getCookiesFromHost / add was
- *   removed (UXP browsers ≥28 always support the modern signatures).
+ * The .list / .set / .delete object shape matches Tampermonkey, Violent-
+ * monkey, and modern Greasemonkey 4, and lets buildGMObject's GM4 wrapping
+ * apply uniformly.  UXP browsers (Pale Moon ≥28, Basilisk) always support
+ * the modern nsICookieManager2.getCookiesFromHost / add signatures used
+ * below, so no version-fallback path is required.
  */
 
 const EXPORTED_SYMBOLS = ["createGMCookieAPI"];
@@ -57,8 +53,7 @@ const CURRENT_HOST_ONLY = true;
 
 /**
  * Default expiration for set() when no `expirationDate` / `expiration` is
- * supplied.  2038-01-17 is just before the Unix-time-2^31 cliff, matching
- * the previous third-party impl's choice.
+ * supplied.  2038-01-17 is just before the Unix-time-2^31 cliff.
  */
 const DEFAULT_EXPIRATION_SEC = Date.parse("Jan 17, 2038") / 1000;
 

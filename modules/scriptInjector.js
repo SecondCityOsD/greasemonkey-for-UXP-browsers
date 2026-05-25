@@ -2,9 +2,8 @@
  * @file scriptInjector.js
  * @overview Chrome-side script-injection driver.
  *
- * This module is the Phase 4f-3 replacement for content/frameScript.js.
- * It owns every step of the path from "new document seen" to "user script
- * running in its sandbox":
+ * This module owns every step of the path from "new document seen" to
+ * "user script running in its sandbox":
  *
  *   1. Subscribes to Services.obs topics
  *      "content-document-global-created" and
@@ -21,10 +20,9 @@
  *      (@grant none, @inject-into page) via a <script> element, or
  *      into a sandbox via Cu.Sandbox + runScriptInSandbox().
  *
- * On UXP single-process this all runs in chrome scope; the framescript
- * indirection (loadFrameScript + sendAsyncMessage) that the Era-2
- * multi-process design required is gone — the IPC was a no-op detour
- * since chrome and content share a JS runtime.
+ * UXP is single-process — chrome and content share a JS runtime — so
+ * everything in this driver runs in chrome scope with no message-manager
+ * indirection.
  *
  * Exports:
  *   startScriptInjector()
@@ -39,8 +37,7 @@
  *
  *   urlsOfAllFrames(aContentWin)
  *     Recursive frame-URL collector, called by content/browser.js for
- *     the toolbar popup and tooltip (formerly the "greasemonkey:frame-
- *     urls" IPC round-trip handled by modules/processScript.js).
+ *     the toolbar popup and tooltip.
  */
 
 const EXPORTED_SYMBOLS = [
@@ -96,13 +93,62 @@ var gEarlyStartWindows = new WeakSet();
  */
 var gStarted = false;
 
+/**
+ * Safe-globals snapshot prelude, evaluated once per page-mode script
+ * to capture clean references to a curated set of platform builtins
+ * AS THEY EXIST when the script's prelude runs.
+ *
+ * Held at module scope because the string is literally identical for
+ * every script and every page — its tokens reference `window.X` which
+ * is resolved at script-eval time, not at string-build time, so
+ * memoisation is safe.
+ *
+ * Wrapped in `(function(){…})()` so its two `var` helpers
+ * (`__SO__` / `__SF__`) stay private even in the @unwrap path —
+ * without this, they'd leak to `window.__SO__` and pollute the page's
+ * global namespace.  GM_info is reachable from inside the IIFE via
+ * lexical scope (declared `var`/`const` in both wrappers below, so
+ * it's in the outer Activation Record).
+ */
+const GM_SAFE_GLOBALS_SNAPSHOT_PRELUDE =
+    "(function () {\n"
+    + "  var __SO__ = window.Object;\n"
+    + "  var __SF__ = __SO__.freeze;\n"
+    + "  GM_info.safeGlobals = __SF__.call(__SO__, {\n"
+    + "    Object: window.Object, Array: window.Array,\n"
+    + "    Function: window.Function, Promise: window.Promise,\n"
+    + "    JSON: window.JSON, Map: window.Map, Set: window.Set,\n"
+    + "    WeakMap: window.WeakMap, WeakSet: window.WeakSet,\n"
+    + "    RegExp: window.RegExp, Date: window.Date,\n"
+    + "    String: window.String, Number: window.Number,\n"
+    + "    Boolean: window.Boolean, Symbol: window.Symbol,\n"
+    + "    Error: window.Error, TypeError: window.TypeError,\n"
+    + "    RangeError: window.RangeError,\n"
+    + "    SyntaxError: window.SyntaxError,\n"
+    + "    ReferenceError: window.ReferenceError,\n"
+    + "    URL: window.URL,\n"
+    + "    URLSearchParams: window.URLSearchParams,\n"
+    + "    FormData: window.FormData, Blob: window.Blob,\n"
+    + "    File: window.File, ArrayBuffer: window.ArrayBuffer,\n"
+    + "    Uint8Array: window.Uint8Array,\n"
+    + "    DataView: window.DataView,\n"
+    + "    Proxy: window.Proxy, Reflect: window.Reflect,\n"
+    + "    parseInt: window.parseInt,\n"
+    + "    parseFloat: window.parseFloat,\n"
+    + "    isNaN: window.isNaN, isFinite: window.isFinite,\n"
+    + "    encodeURIComponent: window.encodeURIComponent,\n"
+    + "    decodeURIComponent: window.decodeURIComponent,\n"
+    + "    encodeURI: window.encodeURI,\n"
+    + "    decodeURI: window.decodeURI,\n"
+    + "  });\n"
+    + "})();\n";
+
 
 /**
  * Determines whether a content window is visible enough that scripts
- * should run in it.  The pre-Phase-4f check was specific to multi-
- * process e10s; on UXP single-process the same nsIDOMWindowUtils
- * fallback still serves the rare "tab-being-restored" case where the
- * parent widget is not yet attached.
+ * should run in it.  Uses nsIDOMWindowUtils.isParentWindowMainWidgetVisible
+ * to skip the rare "tab-being-restored" case where the parent widget is
+ * not yet attached.
  *
  * @param {Window} aContentWin
  * @returns {boolean}
@@ -125,9 +171,8 @@ function isWindowVisible(aContentWin) {
 }
 
 /**
- * Returns true iff aContentWin is the top of its frame tree.  Mirrors
- * the frameScript implementation; a non-DOM window (rare) is treated
- * as "top" defensively.
+ * Returns true iff aContentWin is the top of its frame tree.  A non-DOM
+ * window (rare) is treated as "top" defensively.
  *
  * @param {Window} aContentWin
  * @returns {boolean}
@@ -174,9 +219,8 @@ function urlForWin(aContentWin) {
 
 /**
  * Recursively collects the href of every frame nested inside
- * aContentWin.  Replaces the "greasemonkey:frame-urls" IPC round-trip
- * that used to bounce through modules/processScript.js for the
- * toolbar-popup and tooltip code in content/browser.js.
+ * aContentWin.  Called by the toolbar-popup and tooltip code in
+ * content/browser.js.
  *
  * @param {Window} aContentWin
  * @returns {string[]} Flat array of URL strings.
@@ -194,7 +238,10 @@ function urlsOfAllFrames(aContentWin) {
   try {
     let frames = aContentWin.frames;
     for (let i = 0; i < frames.length; i++) {
-      urls = urls.concat(urlsOfAllFrames(frames[i]));
+      // `Array.prototype.push(...sub)` mutates in place; pre-fix
+      // `urls = urls.concat(...)` allocated a fresh array per iframe,
+      // making this O(N²) in deep frame trees.  Spread-push is O(N).
+      urls.push.apply(urls, urlsOfAllFrames(frames[i]));
     }
   } catch (e) {
     // Cross-origin frame access denied — skip silently.
@@ -345,38 +392,10 @@ function injectScriptIntoPage(aContentWin, aScript, aRunAt) {
   // pollute the page's global namespace.  GM_info is reachable from
   // inside the IIFE via lexical scope (declared `var` in both
   // wrappers below, so it's in the outer Activation Record).
-  let safeGlobalsSnapshot =
-      "(function () {\n"
-      + "  var __SO__ = window.Object;\n"
-      + "  var __SF__ = __SO__.freeze;\n"
-      + "  GM_info.safeGlobals = __SF__.call(__SO__, {\n"
-      + "    Object: window.Object, Array: window.Array,\n"
-      + "    Function: window.Function, Promise: window.Promise,\n"
-      + "    JSON: window.JSON, Map: window.Map, Set: window.Set,\n"
-      + "    WeakMap: window.WeakMap, WeakSet: window.WeakSet,\n"
-      + "    RegExp: window.RegExp, Date: window.Date,\n"
-      + "    String: window.String, Number: window.Number,\n"
-      + "    Boolean: window.Boolean, Symbol: window.Symbol,\n"
-      + "    Error: window.Error, TypeError: window.TypeError,\n"
-      + "    RangeError: window.RangeError,\n"
-      + "    SyntaxError: window.SyntaxError,\n"
-      + "    ReferenceError: window.ReferenceError,\n"
-      + "    URL: window.URL,\n"
-      + "    URLSearchParams: window.URLSearchParams,\n"
-      + "    FormData: window.FormData, Blob: window.Blob,\n"
-      + "    File: window.File, ArrayBuffer: window.ArrayBuffer,\n"
-      + "    Uint8Array: window.Uint8Array,\n"
-      + "    DataView: window.DataView,\n"
-      + "    Proxy: window.Proxy, Reflect: window.Reflect,\n"
-      + "    parseInt: window.parseInt,\n"
-      + "    parseFloat: window.parseFloat,\n"
-      + "    isNaN: window.isNaN, isFinite: window.isFinite,\n"
-      + "    encodeURIComponent: window.encodeURIComponent,\n"
-      + "    decodeURIComponent: window.decodeURIComponent,\n"
-      + "    encodeURI: window.encodeURI,\n"
-      + "    decodeURI: window.decodeURI,\n"
-      + "  });\n"
-      + "})();\n";
+  // Hoisted to GM_SAFE_GLOBALS_SNAPSHOT_PRELUDE at module scope — the
+  // string is identical for every script + every page and was being
+  // rebuilt fresh on every injection.  See comment at the constant.
+  let safeGlobalsSnapshot = GM_SAFE_GLOBALS_SNAPSHOT_PRELUDE;
 
   // 5) Inject the user script body.  Default wrapping is an IIFE so
   //    bare var/let/const declarations stay local; @topLevelAwait
@@ -642,8 +661,8 @@ function contentObserver(aContentWin, aTopic) {
 /**
  * Per-window DOMContentLoaded / load handler.  Self-removes so each
  * fires exactly once.  Runs document-end immediately and queues
- * document-idle for 50 ms later, matching the original framescript
- * semantics that scripts in the wild depend on.
+ * document-idle for 50 ms later — the 50 ms gap matches the timing
+ * that userscripts in the wild depend on.
  */
 function contentLoad(aEvent) {
   let aContentWin = aEvent.target.defaultView;
@@ -696,10 +715,9 @@ function contentLoad(aEvent) {
     if ((href == GM_CONSTANTS.urlAboutPart1)
         || (href && href.match(URL_ABOUT_PART2_REGEXP))) {
       if (!GM_util.getEnabled()) {
-        // Was: framescript's gScope.sendAsyncMessage(
-        //   "greasemonkey:DOMContentLoaded", { contentType, href });
-        // which the chrome browser.js listened for and routed to
-        // GM_BrowserUI.checkDisabledScriptNavigation.  Direct call.
+        // UXP runs chrome and content in the same JS runtime, so this
+        // routes straight to GM_BrowserUI.checkDisabledScriptNavigation
+        // on the chrome window — no message-manager hop needed.
         try {
           let chromeWin = getChromeWinForContentWin(aContentWin);
           if (chromeWin && chromeWin.GM_BrowserUI
@@ -778,15 +796,14 @@ function startScriptInjector() {
 
 /**
  * Injects a script that just finished updating mid-page-load.  Called
- * directly from modules/script.js (formerly via the
- * "greasemonkey:inject-delayed-script" mm message to the framescript).
+ * directly from modules/script.js.
  *
  * The browser element is used as the primary content-window source;
  * if a specific frame is targeted we look it up via nsIWindowMediator
  * by outer-window ID.  Falls back to the browser's top contentWindow.
  *
  * @param {IPCScript|object} aScript    - Script descriptor.  May be a
- *   bare object if it came over what used to be IPC; we lift it onto
+ *   bare object whose prototype is not IPCScript; we lift it onto
  *   IPCScript.prototype so info() / matchesURL() are callable.
  * @param {string}           aRunAt
  * @param {number|null}      aWindowId  - Outer window ID, or null.

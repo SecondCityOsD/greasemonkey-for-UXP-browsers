@@ -21,6 +21,10 @@ Cu.import("chrome://greasemonkey-modules/content/constants.js");
 Cu.import("chrome://greasemonkey-modules/content/util.js");
 
 
+// Cache the prompt service at module load.
+const PROMPT_SERVICE = Cc["@mozilla.org/embedcomp/prompt-service;1"]
+    .getService(Ci.nsIPromptService);
+
 // Because alert is not defined in component/module scope.
 /**
  * Displays a modal alert dialog with the Greasemonkey handler name as title.
@@ -28,7 +32,6 @@ Cu.import("chrome://greasemonkey-modules/content/util.js");
  * @returns {void}
  */
 function alert(aMsg) {
-  Cc["@mozilla.org/embedcomp/prompt-service;1"]
-      .getService(Ci.nsIPromptService)
-      .alert(null, GM_CONSTANTS.info.scriptHandler + " alert", aMsg);
+  PROMPT_SERVICE.alert(
+      null, GM_CONSTANTS.info.scriptHandler + " alert", aMsg);
 }

@@ -43,6 +43,39 @@ Cu.import("chrome://greasemonkey-modules/content/util.js");
 
 const ABOUT_BLANK_REGEXP = new RegExp(GM_CONSTANTS.urlAboutPart1Regexp, "");
 
+// URL-test result memos.
+//
+// gCludeResultCache: keyed on "<url>|<glob>" — used by testClude's
+//   GM_convertToRegexp(...).test(aUrl) call.  Many scripts share
+//   common @include / @exclude globs (e.g. literal "*", or
+//   "http*:" + "/" + "/" + "*/*"); without this memo every
+//   script's matchesURL would re-run the same regex.
+//
+// gMatchResultCache: keyed on "<url>|<pattern>" — used by testMatch's
+//   MatchPattern.doMatch(_url) call.  Same rationale.
+//
+// Both are bounded; FIFO eviction on overflow.  Both are cleared by
+// AbstractScript.clearUrlMatchCaches() whenever the script list or
+// globalExcludes changes (called by IPCScript.update).
+//
+// For a power-user profile (200 scripts, lots of shared rules) this
+// cuts per-navigation regex evaluations by roughly the number of
+// scripts that share each popular pattern.
+const URL_MATCH_CACHE_SIZE = 1024;
+var gCludeResultCache = new Map();
+var gMatchResultCache = new Map();
+
+function bumpCache(aCache, aKey, aValue) {
+  if (aCache.size >= URL_MATCH_CACHE_SIZE) {
+    let firstKey = aCache.keys().next().value;
+    if (firstKey !== undefined) {
+      aCache.delete(firstKey);
+    }
+  }
+  aCache.set(aKey, aValue);
+  return aValue;
+}
+
 /**
  * Abstract base class for script objects.
  * Do not instantiate directly — use Script or IPCScript.
@@ -50,6 +83,17 @@ const ABOUT_BLANK_REGEXP = new RegExp(GM_CONSTANTS.urlAboutPart1Regexp, "");
  * @constructor
  */
 function AbstractScript() { }
+
+/**
+ * Drops every entry from the URL-test result caches.  Invoked by
+ * IPCScript.update whenever the installed-script list, per-script
+ * @match patterns, or site-wide globalExcludes changes — any of
+ * which can flip a cached test from true to false (or vice versa).
+ */
+AbstractScript.clearUrlMatchCaches = function () {
+  gCludeResultCache.clear();
+  gMatchResultCache.clear();
+};
 
 /**
  * Site-wide global excludes sourced from Greasemonkey preferences.
@@ -95,9 +139,22 @@ AbstractScript.prototype.matchesURL = function (aUrl) {
       return false;
     }
 
-    return GM_convertToRegexp(aGlob, uri).test(aUrl);
+    // Memoise (url, glob) → bool.  Shared @include / @exclude globs
+    // across many scripts (e.g. `*`, `http*://*/*`) compile + test
+    // exactly once per URL instead of once per script per URL.
+    let key = aUrl + "|" + aGlob;
+    let cached = gCludeResultCache.get(key);
+    if (cached !== undefined) {
+      return cached;
+    }
+    return bumpCache(gCludeResultCache, key,
+        GM_convertToRegexp(aGlob, uri).test(aUrl));
   }
   function testMatch(aMatchPattern) {
+    // Tolerate string entries.  Live MatchPattern instances are the
+    // common case (the compiled form avoids recompiling the same
+    // regex per URL test) but a defensively-stored string still
+    // works.
     if (typeof aMatchPattern == "string") {
       aMatchPattern = new MatchPattern(aMatchPattern);
     }
@@ -117,7 +174,17 @@ AbstractScript.prototype.matchesURL = function (aUrl) {
       }
     }
 
-    return aMatchPattern.doMatch(_url);
+    // Memoise (url, pattern) → bool.  Popular @match patterns (e.g.
+    // `*://*.github.com/*`, `*://www.google.com/search*`) hit dozens
+    // of scripts on a power-user profile.  doMatch + the regex-test
+    // it routes through are the single largest CPU cost per
+    // navigation — caching turns them into a hash lookup.
+    let key = _url + "|" + aMatchPattern.pattern;
+    let cached = gMatchResultCache.get(key);
+    if (cached !== undefined) {
+      return cached;
+    }
+    return bumpCache(gMatchResultCache, key, aMatchPattern.doMatch(_url));
   }
 
   // Flat deny if URL is not greaseable, or matches global excludes.

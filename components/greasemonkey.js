@@ -26,11 +26,9 @@ Cu.import("chrome://greasemonkey-modules/content/storageBack.js");
 Cu.import("chrome://greasemonkey-modules/content/sync.js");
 Cu.import("chrome://greasemonkey-modules/content/util.js");
 
-// Phase 4f-3: installPolicy used to be imported indirectly by
-// modules/processScript.js; with the framescript / processScript pair
-// retired, we import it here so its nsIContentPolicy registration runs
-// at chrome startup.  The module is side-effecting on import (it calls
-// InstallPolicy.init() once at the bottom).
+// Import installPolicy here so its nsIContentPolicy registration runs at
+// chrome startup.  The module is side-effecting on import — it calls
+// InstallPolicy.init() once at the bottom.
 Cu.import("chrome://greasemonkey-modules/content/installPolicy.js");
 
 
@@ -43,10 +41,9 @@ var gStartupHasRun = false;
 /////////////////////// Component-global Helper Functions //////////////////////
 
 function shutdown(aService) {
-  // Closes every per-script SQLite Back this session opened.  Pre-cleanup
-  // this was a method on the service backed by service.scriptValStores;
-  // ownership of that registry moved into modules/storageBack.js so the
-  // shutdown is now a one-line module call.
+  // Closes every per-script SQLite Back this session opened.  The
+  // per-script registry lives inside modules/storageBack.js, so shutdown
+  // is a single module call.
   closeAllStorageBacks();
 }
 
@@ -64,28 +61,15 @@ function startup(aService) {
   GM_CONSTANTS.jsSubScriptLoader.loadSubScript(
       "chrome://greasemonkey/content/thirdParty/mplUtils.js");
 
-  // The four greasemonkey:scriptVal-* mm listeners that used to live
-  // here were the parent-process handlers for storageFront's RPCs.
-  // After Phase 4d collapsed the front/back into a single module
-  // (modules/storageBack.js), no script ever sends those messages, so
-  // the listeners were unreachable code and were removed.
+  // UXP is single-process: storage RPCs (modules/storageBack.js) and
+  // service RPCs (script-install, script-open-folder, url-is-temp-file,
+  // scripts-update, broadcast-script-updates) are dispatched as direct
+  // method calls into this service or into IPCScript, so no parent-side
+  // mm/ppmm listeners are registered here.
 
-  // The five greasemonkey:* ppmm listeners that used to live here
-  // (scripts-update, broadcast-script-updates, script-install,
-  // script-open-folder, url-is-temp-file) were the parent-side
-  // handlers for cpmm.sendAsyncMessage / sendSyncMessage calls in
-  // installPolicy.js, options.js, content/newScript.js,
-  // content/browser.js, and modules/ipcScript.js.  Phases 4c, 4d,
-  // and 4e replaced every one of those senders with direct calls
-  // into the service or into IPCScript, so the listeners are
-  // unreachable code and were removed.
-
-  // Phase 4f-3: register the chrome-side script-injection observers
-  // and the greasemonkey-script: protocol handler.  Pre-cleanup these
-  // were bootstrapped from inside content/frameScript.js (loaded into
-  // every tab via Services.mm.loadFrameScript) — on UXP single-process
-  // the framescript indirection was a no-op detour since chrome and
-  // content share a JS runtime.  Both startup calls are idempotent.
+  // Register the chrome-side script-injection observers and the
+  // greasemonkey-script: protocol handler.  Both startup calls are
+  // idempotent.
   startScriptInjector();
   initScriptProtocol();
 
@@ -183,28 +167,15 @@ service.prototype.scriptUpdateData = function () {
 };
 
 service.prototype.broadcastScriptUpdates = function () {
-  // UXP single-process: the only consumer of the script list is the
-  // module-private gScripts inside ipcScript.js, which lives in the
-  // same JS runtime as this service.  Push the fresh snapshot directly
-  // — no cpmm round-trip, no initialProcessData write.  Pre-cleanup
-  // this method also did Services.ppmm.broadcastAsyncMessage; that
-  // hop existed only because the parent process couldn't reach
-  // content-process module state without IPC.
+  // UXP is single-process: the only consumer of the script list is the
+  // module-private gScripts inside ipcScript.js, which lives in the same
+  // JS runtime as this service.  Push the fresh snapshot directly — no
+  // cpmm round-trip, no initialProcessData write.
   IPCScript.update(this.scriptUpdateData());
 };
 
-// Pre-cleanup, this file maintained service.scriptValStores (a registry
-// of per-script SQLite Back instances) along with closeAllScriptValStores,
-// getStoreByScriptId, handleScriptValMsg (the cpmm RPC dispatch) and the
-// gRemoteCacheTracker / remoteCached / invalidateRemoteValueCaches helpers
-// used to broadcast value-invalidate messages to other processes.
-//
-// All of that machinery lived in service of the storageFront ↔ storageBack
-// IPC bus.  Phase 4d collapsed front + back into a single module
-// (modules/storageBack.js) that owns its own registry; the cpmm bus is no
-// longer needed on UXP single-process.  The ~85 lines of code that lived
-// here are gone.  Shutdown delegates to closeAllStorageBacks() (see top of
-// this file).
+// Per-script SQLite Back registries live inside modules/storageBack.js;
+// shutdown drains them via closeAllStorageBacks() (see top of this file).
 
 service.prototype.scriptRefresh = function (aUrl, aWindowId, aBrowser) {
   if (!GM_util.getEnabled()) {

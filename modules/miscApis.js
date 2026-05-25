@@ -24,9 +24,8 @@
  *   GM_window(aContentWin, aFileURL, aWhat)
  *     Implements GM_windowClose() and GM_windowFocus() by calling
  *     GM_BrowserUI.window directly on the chrome window that owns
- *     aContentWin.  Pre-cleanup, this round-tripped through
- *     aFrame.sendAsyncMessage("greasemonkey:window", …); UXP is
- *     single-process, so the IPC was a self-loop and was removed.
+ *     aContentWin.  Direct invocation (rather than a frame-message
+ *     round-trip) is correct here because UXP is single-process.
  */
 
 const EXPORTED_SYMBOLS = [
@@ -47,9 +46,18 @@ Cu.import("chrome://greasemonkey-modules/content/constants.js");
 
 Cu.import("resource://gre/modules/Services.jsm");
 
+Cu.import("chrome://greasemonkey-modules/content/cspNonce.js");
 Cu.import("chrome://greasemonkey-modules/content/prefManager.js");
 Cu.import("chrome://greasemonkey-modules/content/thirdParty/getChromeWinForContentWin.js");
 Cu.import("chrome://greasemonkey-modules/content/util.js");
+
+
+// Element tag names that carry executable content on the page and are
+// therefore subject to CSP `script-src` / `style-src` enforcement.
+// `GM_addElement` attaches the page's nonce attribute when injecting
+// these, so the inline content slips past nonce-based CSPs that ship
+// with strict directives on GitHub, Google search, news sites, etc.
+const CSP_GUARDED_TAGS = { "script": "script", "style": "style" };
 
 
 // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ //
@@ -79,6 +87,15 @@ function GM_addStyle(aWrappedContentWin, aFileURL, aRunAt, aCss) {
 
     style.textContent = aCss;
     style.type = "text/css";
+    // Pages with a `style-src 'nonce-…'` CSP block any <style>
+    // element without a matching nonce.  Attach the page's nonce so
+    // GM_addStyle works on those pages — same reasoning as the nonce
+    // attachment in GM_addElement above.  No-op on pages without a
+    // nonce CSP.
+    let cspNonce = getNonceForWindow(aWrappedContentWin);
+    if (cspNonce) {
+      style.setAttribute("nonce", cspNonce);
+    }
     aHead.appendChild(style);
 
     return style;
@@ -170,9 +187,26 @@ function GM_addElement(
   function createElement(aDoc, aParent) {
     let elem = aDoc.createElement(tagName);
 
-    // Apply attributes.
+    // If the script is injecting a <script> or <style> into a page
+    // protected by a nonce-based CSP, attach the page's nonce so the
+    // injected element passes the script-src / style-src check.  No-op
+    // on pages without a nonce CSP — the element is then injected
+    // un-attributed, which is also fine on no-CSP pages.  The script
+    // author can still override via `attrs.nonce` (handled below by
+    // the normal attribute application loop).
+    let tagLower = (tagName || "").toLowerCase();
+    if (Object.prototype.hasOwnProperty.call(CSP_GUARDED_TAGS, tagLower)) {
+      let cspNonce = getNonceForWindow(aWrappedContentWin);
+      if (cspNonce) {
+        elem.setAttribute("nonce", cspNonce);
+      }
+    }
+
+    // Apply attributes.  Call hasOwnProperty via Object.prototype so a
+    // script that passes `Object.create(null)` (or any object whose own
+    // `hasOwnProperty` has been shadowed) doesn't crash the API here.
     for (let key in attrs) {
-      if (!attrs.hasOwnProperty(key)) {
+      if (!Object.prototype.hasOwnProperty.call(attrs, key)) {
         continue;
       }
       let val = attrs[key];

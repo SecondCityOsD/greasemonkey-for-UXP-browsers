@@ -110,7 +110,19 @@ const SCHEMES_VALID = ["file", "ftp", "http", "https"];
 const SCHEMES_ALL_VALID = ["http", "https"];
 // const SCHEMES_ALL_VALID_REGEXP = SCHEMES_ALL_VALID.join("|");
 
-const HOST_REGEXP = /^(?:\*\.)?[^*\/]+$|^\*$|^$/;
+// Host portion of a match pattern.  Accepts:
+//   ""                 (empty host — used by file:// patterns)
+//   "*"                (any host)
+//   "*.domain.tld"     (any subdomain of domain.tld, plus domain.tld itself)
+//   "host[:port]"      (literal host, optionally with a port number)
+//
+// Adding ":port" support unblocks dev-mode patterns like
+// "http://localhost:3000/*" that previously threw at install time —
+// matches Tampermonkey / Violentmonkey behaviour.  doMatch() below
+// already routes the parsed URI's `host` (which preserves the port)
+// through this._hostRegexp, so the only change required here is the
+// validation regex plus a `:` → `\:` escape down in the regex builder.
+const HOST_REGEXP = /^(?:\*\.)?[^*\/:]+(?::\d+)?$|^\*$|^$/;
 
 var gPartsRegexp = null;
 if (GM_prefRoot.getValue("api.@match.better")) {
@@ -210,6 +222,23 @@ function MatchPattern(aPattern) {
   // let pathMatch = globToRegexp(path, false);
   // this._pathMatch = pathMatch.test.bind(pathMatch);
 
+  // Split an optional `:port` suffix off the host token so the host
+  // regex below stays unchanged for the common no-port case.  Patterns
+  // without a port are port-agnostic (they match URLs on any port);
+  // patterns with a port match only URLs whose explicit port matches.
+  // Matches TM behaviour where a developer writing
+  //   `http://localhost:3000/*`
+  // expects port-3000 traffic only, not port-80 traffic on the same
+  // hostname.
+  this._hostPort = null;
+  if (host) {
+    let portSplit = host.match(/^(.*?)(?::(\d+))?$/);
+    if (portSplit && portSplit[2]) {
+      host = portSplit[1];
+      this._hostPort = parseInt(portSplit[2], 10);
+    }
+  }
+
   if (host) {
     // We have to manually create the hostname regexp (instead of using
     // GM_convertToRegexp) to properly handle *.example.tld, which should match
@@ -245,14 +274,18 @@ Object.defineProperty(MatchPattern.prototype, "pattern", {
  * @returns {boolean} True if the URL matches the pattern's scheme, host, and path.
  */
 MatchPattern.prototype.doMatch = function (aUriSpec) {
+  // `<all_urls>` fast path: skip URL parsing entirely when the pattern
+  // is the always-match sentinel.  Returns the same result as the
+  // explicit parse + scheme check below for every supported scheme.
+  if (this._all) {
+    let _scheme = aUriSpec.substring(0, aUriSpec.indexOf(":"));
+    return SCHEMES_VALID.indexOf(_scheme) !== -1;
+  }
+
   let matchURI = GM_util.getUriFromUrl(aUriSpec);
 
   if (SCHEMES_VALID.indexOf(matchURI.scheme) == -1) {
     return false;
-  }
-
-  if (this._all) {
-    return true;
   }
 
   if ((this._scheme == "*")
@@ -270,6 +303,16 @@ MatchPattern.prototype.doMatch = function (aUriSpec) {
   // [or]
   // return this.getHostMatcher(matchURI, this._host)
   //     && this._pathMatch(matchURI.cloneIgnoringRef().path);
+
+  // If the pattern specified an explicit port, require the URL's
+  // explicit port to match.  nsIURI.port returns -1 when the URL
+  // omits the port (i.e. the scheme's default port is implied), so a
+  // pattern of `http://localhost:80/*` does NOT match `http://localhost/`
+  // — that's the simpler, more predictable semantic.  Users who want
+  // either-or behaviour should write two @match lines.
+  if (this._hostPort !== null && matchURI.port !== this._hostPort) {
+    return false;
+  }
 
   return this._hostRegexp.test(matchURI.host)
       && this._pathRegexp.test(matchURI.path);

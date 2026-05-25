@@ -20,19 +20,9 @@
  * reflect the current site-wide exclude list.
  *
  * Population on UXP:
- *   The service calls IPCScript.update(data) directly with the result
- *   of GreasemonkeyService.scriptUpdateData() — no IPC.
- *
- * Historical note:
- *   Pre-cleanup, this module bootstrapped via Services.cpmm:
- *     - Firefox 41+ would read initialProcessData["greasemonkey:scripts-update"]
- *     - Older builds would sendSyncMessage to fetch an initial copy
- *     - Subsequent updates arrived via cpmm.addMessageListener
- *   The matching parent-side broadcasts lived in
- *   GreasemonkeyService.broadcastScriptUpdates (ppmm.broadcastAsyncMessage
- *   plus a write to ppmm.initialProcessData).  UXP is single-process; the
- *   IPC bus was a self-loop with no benefit and was replaced by a direct
- *   call to IPCScript.update from the service.
+ *   The service calls IPCScript.update(data) directly with the result of
+ *   GreasemonkeyService.scriptUpdateData() — no IPC.  UXP is single-process,
+ *   so a Services.cpmm broadcast would be a self-loop with no benefit.
  */
 
 const EXPORTED_SYMBOLS = ["IPCScript"];
@@ -105,15 +95,16 @@ function IPCScript(aScript, aAddonVersion) {
   this.willUpdate = aScript.isRemoteUpdateAllowed(false)
       && aScript.shouldAutoUpdate();
 
-  this.excludeMatches = aScript.excludeMatches.map(function (aMatch) {
-    return aMatch.pattern;
-  });
-  this.matches = aScript.matches.map(function (aMatch) {
-    return aMatch.pattern;
-  });
-  this.userMatches = aScript.userMatches.map(function (aMatch) {
-    return aMatch.pattern;
-  });
+  // Pass live MatchPattern instances through unchanged.  UXP is
+  // single-process and the receiver lives in the same JS realm, so
+  // there is no IPC marshalling to satisfy.  Keeping the compiled
+  // forms avoids re-compiling the same regex roughly
+  //   (#scripts × avg @match rules × #run-at phases) times per page
+  // load — see abstractScript.testMatch.  AbstractScript.matchesURL
+  // still tolerates string entries for safety.
+  this.excludeMatches = aScript.excludeMatches;
+  this.matches = aScript.matches;
+  this.userMatches = aScript.userMatches;
 
   this.requires = aScript.requires.map(function (aReq) {
     return {
@@ -152,6 +143,25 @@ IPCScript.prototype = Object.create(AbstractScript.prototype, {
  * @returns {IPCScript[]} Scripts that match the URL and run-at phase.
  */
 IPCScript.scriptsForUrl = function (aUrl, aWhen, aWindowId /* ignore */) {
+  // Fast deny for non-greaseable URLs (chrome:, about:, …) — saves
+  // the per-script matchesURL pass that would all return false anyway.
+  // Was previously checked inside each script's matchesURL via
+  // AbstractScript.matchesURL → isGreasemonkeyable; hoisting it here
+  // skips the per-script loop entirely for the deny case.
+  if (!GM_util.isGreasemonkeyable(aUrl)) {
+    return [];
+  }
+
+  // Per-(url, when) memo — see gScriptsForUrlCache comment.  Saves the
+  // gScripts.filter scan when the same URL is queried again, which
+  // happens 3-5 times per page-load (one per @run-at phase) plus
+  // every SPA route-change for the same URL.
+  let cacheKey = aUrl + "|" + aWhen;
+  let cached = gScriptsForUrlCache.get(cacheKey);
+  if (cached) {
+    return cached;
+  }
+
   let result = gScripts.filter(function (aScript) {
     try {
       return GM_util.scriptMatchesUrlAndRuns(aScript, aUrl, aWhen);
@@ -162,6 +172,16 @@ IPCScript.scriptsForUrl = function (aUrl, aWhen, aWindowId /* ignore */) {
       return false;
     }
   });
+
+  // Bounded FIFO insert — drop oldest entry when at cap so the cache
+  // can't grow unboundedly on a tab visiting many distinct URLs.
+  if (gScriptsForUrlCache.size >= SCRIPTS_FOR_URL_CACHE_SIZE) {
+    let firstKey = gScriptsForUrlCache.keys().next().value;
+    if (firstKey !== undefined) {
+      gScriptsForUrlCache.delete(firstKey);
+    }
+  }
+  gScriptsForUrlCache.set(cacheKey, result);
 
   return result;
 };
@@ -212,6 +232,16 @@ IPCScript.prototype.info = function () {
     "platform": {
       "arch": Services.appinfo.XPCOMABI
           ? Services.appinfo.XPCOMABI.split("-")[0] : "",
+      // browserName / browserVersion mirror VM's GM_info.platform
+      // shape (gm-api-wrapper.js:92-109 in VM 2.35.1) so portable
+      // userscripts that branch on
+      //   `GM_info.platform.browserName === "firefox"`
+      // (and friends) can detect Pale Moon / Basilisk explicitly
+      // rather than mis-detecting based on UA spoofing.  Falls back
+      // to empty strings if the platform's appinfo accessor is
+      // unavailable (extremely rare on UXP; defensive only).
+      "browserName": (Services.appinfo.name || "").toLowerCase(),
+      "browserVersion": Services.appinfo.version || "",
       "os": Services.appinfo.OS || "",
     },
     // The resolved injection mode for THIS script ("page" / "content" /
@@ -232,6 +262,23 @@ IPCScript.prototype.info = function () {
  * @type {IPCScript[]}
  */
 var gScripts = [];
+
+/**
+ * URL-keyed cache for scriptsForUrl() results.  Skips the full
+ * `gScripts.filter(scriptMatchesUrlAndRuns)` scan when the same URL
+ * is queried again (same SPA route navigated to multiple times, or
+ * the three back-to-back run-at-phase calls scriptInjector makes).
+ *
+ * Key format: `<url>|<when>`.  Invalidated wholesale on every
+ * IPCScript.update — scripts-update is the only event that can
+ * change the result, and it's broadcast through a single funnel.
+ *
+ * Bounded to SCRIPTS_FOR_URL_CACHE_SIZE entries (FIFO eviction on
+ * overflow); above-cap navigations just fall back to the filter
+ * scan.  Memory bound at ~tens of KB for typical workloads.
+ */
+const SCRIPTS_FOR_URL_CACHE_SIZE = 256;
+var gScriptsForUrlCache = new Map();
 
 /**
  * Promotes a plain deserialized object to an IPCScript prototype chain so
@@ -287,6 +334,14 @@ function updateData(aData) {
     "configurable": true,
     "enumerable": true,
   });
+  // Invalidate all caches that depended on the previous script list /
+  // globalExcludes.  Single funnel for every install / uninstall /
+  // enable / disable / @match-edit / globalExcludes-edit — see
+  // scriptUpdateData() in components/greasemonkey.js.
+  gScriptsForUrlCache.clear();
+  if (typeof AbstractScript.clearUrlMatchCaches == "function") {
+    AbstractScript.clearUrlMatchCaches();
+  }
 }
 
 /**

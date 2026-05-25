@@ -16,12 +16,17 @@ if (typeof Cu === "undefined") {
 }
 
 
+// Cache the window mediator at module load — it's called from
+// menu paths, popups, GM_windowFocus, GM_openInTab, the notification
+// flow, and the install dialog, so a fresh getService per call adds
+// up across a session.
+const WINDOW_MEDIATOR = Cc["@mozilla.org/appshell/window-mediator;1"]
+    .getService(Ci.nsIWindowMediator);
+
 /**
  * Returns the most recently focused navigator:browser chrome window.
  * @returns {nsIDOMWindow|null} The most recent browser window, or null if none is open.
  */
 function getBrowserWindow() {
-  return Cc["@mozilla.org/appshell/window-mediator;1"]
-      .getService(Ci.nsIWindowMediator)
-      .getMostRecentWindow("navigator:browser");
+  return WINDOW_MEDIATOR.getMostRecentWindow("navigator:browser");
 }

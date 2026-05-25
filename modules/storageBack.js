@@ -33,17 +33,9 @@
  *   closeAllStorageBacks()
  *     Closes every Back this module has opened.  Called on quit-application.
  *
- * Historical note:
- *   Pre-cleanup, the front-end and back-end lived in separate modules
- *   (storageFront.js + storageBack.js) and communicated through Services.
- *   cpmm RPC messages (greasemonkey:scriptVal-{get,set,delete,list}) plus
- *   a value-invalidate broadcast.  UXP is single-process — chrome and
- *   content share the same JS runtime — so the IPC was a self-loop with
- *   no benefit.  Both classes now live in this single module; sandbox.js
- *   constructs the Front directly with no message-manager argument, and
- *   the GreasemonkeyService no longer maintains its own scriptValStores
- *   registry (the registry is now module-private and accessed via the
- *   getStorageBackForScript / closeAllStorageBacks exports).
+ * UXP runs chrome and content in the same JS runtime, so the Front talks
+ * to the Back via direct method calls.  The Back registry is module-private
+ * and accessed through getStorageBackForScript / closeAllStorageBacks.
  *
  * SQLite PRAGMA notes (see bug #1879):
  *   auto_vacuum=INCREMENTAL — reclaims free pages gradually rather than on VACUUM.
@@ -264,10 +256,8 @@ GM_ScriptStorageBack.prototype.deleteValue = function (aName) {
  * Returns a plain object mapping each requested name to its raw JSON
  * string (the value as stored), or omits names that don't exist.
  *
- * Phase 7d: replaces N round-trips through getValue() with one
- * SELECT … WHERE name IN (…) statement.  For scripts that read a
- * dozen GM_*Values at once, this drops the SQL chatter from N calls
- * to 1 — measurable on slow disks even with synchronous=OFF.
+ * Issues one SELECT … WHERE name IN (…) instead of N separate getValue()
+ * calls, which is measurable on slow disks even with synchronous=OFF.
  *
  * @param {string[]} aNames - Storage keys to fetch.
  * @returns {object} Map of name → raw JSON string for each found row.
@@ -309,9 +299,8 @@ GM_ScriptStorageBack.prototype.getValuesBatch = function (aNames) {
  * REPLACE in a single SQLite transaction so the writes either all
  * commit or all roll back — atomic from the script's perspective.
  *
- * Phase 7d: replaces N independent INSERTs (each its own implicit
- * transaction) with one BEGIN … COMMIT, plus statement-reuse across
- * the loop.
+ * One BEGIN … COMMIT covers the whole batch, with statement reuse across
+ * the loop, instead of N implicit transactions.
  *
  * @param {object} aMap - { name: value } map.  Values are JSON-
  *                        serialised here.
@@ -593,8 +582,8 @@ function invalidateCache(aKey) {
  * Fires every listener registered for the given key.  Listeners whose
  * owning Front matches aSetterFront receive aRemote=false; listeners
  * owned by other Fronts (other sandboxes watching the same key) receive
- * aRemote=true.  This preserves the pre-cleanup contract where "remote"
- * meant "the change came from a different document context".
+ * aRemote=true.  Here "remote" means "the change came from a different
+ * document context", not from a different process.
  *
  * @param {string}  aKey          - Cache key in "<scriptId>:<name>" format.
  * @param {*}       aOldValue     - Previous value (may be undefined).
@@ -639,14 +628,44 @@ function GM_ScriptStorageFront(aWrappedContentWin, aSandbox, aScript) {
 }
 
 /**
+ * Throws an Error constructed in the SCRIPT's JS realm so that the
+ * script's own `catch (e) { e instanceof Error }` check matches.
+ *
+ * A script @granted into a sandbox runs in a `Cu.Sandbox` with
+ * `wantXrays: true` — its own realm with its own `Error` constructor,
+ * distinct from both chrome and the content window.  Pre-fix, the
+ * Front's throws used a mix of `new Error(...)` (chrome realm) and
+ * `new this._wrappedContentWin.Error(...)` (content-window realm),
+ * neither of which the script's identifier `Error` resolves to.  A
+ * try-catch in the script that branched on `e instanceof Error`
+ * silently took the false branch every time, masking failures.
+ *
+ * Falls back through Error sources in order of preference so the
+ * helper is safe to call even from the db/dbFile getters that run
+ * before sandbox attachment is fully wired (defensive only —
+ * `_sandbox` is set in the Front constructor and shouldn't be missing
+ * during normal operation).
+ *
+ * @private
+ * @param {string} aMessage - Localised error message text.
+ */
+GM_ScriptStorageFront.prototype._throwSandboxError = function (aMessage) {
+  let ErrorCtor = (this._sandbox && this._sandbox.Error)
+      || (this._wrappedContentWin && this._wrappedContentWin.Error)
+      || Error;
+  let fileURL = this._script ? this._script.fileURL : null;
+  throw new ErrorCtor(aMessage, fileURL, null);
+};
+
+/**
  * The db / dbFile / close members are intentionally non-functional from
  * the Front — direct database access is the Back's responsibility.  These
- * remain as thin throws to preserve the pre-cleanup interface contract
- * (a Front "looks like" a Back to anything that imported one historically).
+ * are kept as thin throws so a Front exposes the same shape as a Back to
+ * any importer that pokes at those names.
  */
 Object.defineProperty(GM_ScriptStorageFront.prototype, "db", {
   "get": function GM_ScriptStorageFront_getDb() {
-    throw new Error(
+    this._throwSandboxError(
         MESSAGE_ERROR_PREFIX_FRONT
         + GM_CONSTANTS.localeStringBundle.createBundle(
             GM_CONSTANTS.localeGreasemonkeyProperties)
@@ -657,7 +676,7 @@ Object.defineProperty(GM_ScriptStorageFront.prototype, "db", {
 
 Object.defineProperty(GM_ScriptStorageFront.prototype, "dbFile", {
   "get": function GM_ScriptStorageFront_getDbFile() {
-    throw new Error(
+    this._throwSandboxError(
         MESSAGE_ERROR_PREFIX_FRONT
         + GM_CONSTANTS.localeStringBundle.createBundle(
             GM_CONSTANTS.localeGreasemonkeyProperties)
@@ -667,12 +686,11 @@ Object.defineProperty(GM_ScriptStorageFront.prototype, "dbFile", {
 });
 
 GM_ScriptStorageFront.prototype.close = function () {
-  throw new this._wrappedContentWin.Error(
+  this._throwSandboxError(
       MESSAGE_ERROR_PREFIX_FRONT
       + GM_CONSTANTS.localeStringBundle.createBundle(
           GM_CONSTANTS.localeGreasemonkeyProperties)
-          .GetStringFromName("error.storage.db.noConnection"),
-      this._script.fileURL, null);
+          .GetStringFromName("error.storage.db.noConnection"));
 };
 
 /**
@@ -686,26 +704,64 @@ GM_ScriptStorageFront.prototype.close = function () {
  */
 GM_ScriptStorageFront.prototype.setValue = function (aName, aVal) {
   if (arguments.length !== 2) {
-    throw new this._wrappedContentWin.Error(
+    this._throwSandboxError(
         GM_CONSTANTS.localeStringBundle.createBundle(
             GM_CONSTANTS.localeGreasemonkeyProperties)
-            .GetStringFromName("error.setValue.arguments"),
-            this._script.fileURL, null);
+            .GetStringFromName("error.setValue.arguments"));
   }
 
   aName = String(aName);
 
   let key = cacheKey(this._script, aName);
 
-  // Capture old value (cache hit or single disk read) for change-listener
-  // deduplication.  Falls back to undefined if the key was absent.
-  let oldValue = readCurrentValue(this, aName, key);
-
-  invalidateCache(key);
-
   if (typeof aVal == "undefined") {
     aVal = null;
   }
+
+  // Reject non-JSON-serialisable values up front (circular structures,
+  // BigInt, etc.) so the script gets a sandbox-realm Error it can
+  // recognise via `instanceof Error`.  Pre-fix, JSON.stringify threw a
+  // chrome-realm TypeError from inside _back.setValue, which the
+  // script's catch block couldn't match against its own Error type.
+  //
+  // Use the SANDBOX's Error constructor — not the content window's —
+  // because a script @granted into a sandbox runs in its own JS realm
+  // (`Cu.Sandbox` with `wantXrays: true`) whose `Error` global is
+  // distinct from the content window's.  `new sandbox.Error(...)`
+  // produces an object the script's `e instanceof Error` check
+  // matches; `new wrappedContentWin.Error(...)` does not.
+  try {
+    JSON.stringify(aVal);
+  } catch (e) {
+    this._throwSandboxError(
+        "GM_setValue: value is not JSON-serialisable: " + e.message);
+  }
+
+  // No-op identical-write fast path: if the value held in the cache
+  // is structurally equal to the new value, skip the SQL write and
+  // the listener fire entirely.  Matches VM's deepCopyDiff behaviour
+  // (src/common/object.js:114-172) — scripts that defensively re-
+  // setValue the same config on every page navigation pay zero cost.
+  //
+  // Only safe to check against the cache, not against disk: a cache
+  // miss could mean the disk has a different value, so falling
+  // through to the normal path is correct in that case.
+  if (cache.has(key) && valuesEqualForListener(cache.get(key), aVal)) {
+    return;
+  }
+
+  // Capture old value (cache hit or single disk read) for change-listener
+  // deduplication.  Falls back to undefined if the key was absent.  Only
+  // pay the read+JSON.stringify cost when a listener for this key is
+  // actually registered — saves a stringify pass on every write to a
+  // key nobody listens to, which is the common case.
+  let oldValue;
+  let hasListener = gListenersByKey.has(key);
+  if (hasListener) {
+    oldValue = readCurrentValue(this, aName, key);
+  }
+
+  invalidateCache(key);
 
   this._back.setValue(aName, aVal);
 
@@ -714,7 +770,7 @@ GM_ScriptStorageFront.prototype.setValue = function (aName, aVal) {
   // x is already 5 does not wake up other tabs' onValueChange handlers.
   // Listeners owned by this Front get aRemote=false; listeners owned by
   // other Fronts watching the same key get aRemote=true.
-  if (!valuesEqualForListener(oldValue, aVal)) {
+  if (hasListener && !valuesEqualForListener(oldValue, aVal)) {
     fireValueChangeListeners(key, oldValue, aVal, this);
   }
 };
@@ -785,6 +841,18 @@ GM_ScriptStorageFront.prototype.getValue = function (aName, aDefVal) {
     return aDefVal;
   }
 
+  // Skip the cross-compartment clone for primitives.  SpiderMonkey
+  // passes strings / numbers / booleans across compartments by value
+  // already — primitives are immutable, so there's no aliasing risk
+  // a clone would defend against, and Cu.cloneInto's compartment
+  // round-trip costs ~10-50µs per call even for a single short string.
+  // For object / array values the clone is still required so the
+  // script can't mutate the cached entry held by the Back.
+  let t = typeof value;
+  if (t === "string" || t === "number" || t === "boolean") {
+    return value;
+  }
+
   return Cu.cloneInto(value, this._sandbox, {
     "wrapReflectors": true,
   });
@@ -824,9 +892,10 @@ GM_ScriptStorageFront.prototype.listValues = function () {
   let value;
   try {
     value = this._back.listValues() || [];
-    // Round-trip through JSON to detach from any chrome-side references
-    // before cloning into the sandbox.
-    value = JSON.parse(JSON.stringify(value));
+    // `_back.listValues()` returns a fresh chrome-side array of
+    // primitive strings; Cu.cloneInto already deep-copies it into the
+    // sandbox, so no JSON.parse(JSON.stringify(...)) round-trip is
+    // needed.
     return Cu.cloneInto(value, this._sandbox, {
       "wrapReflectors": true,
     });
@@ -858,8 +927,8 @@ GM_ScriptStorageFront.prototype.getValues = function (aWhat) {
     keys = [];
   }
 
-  // Phase 7d: cache hits served from the module-level Map; only the
-  // cache MISSES go to the Back, in a single batched SELECT.
+  // Cache hits are served from the module-level Map; only the cache
+  // MISSES go to the Back, in a single batched SELECT.
   let result = {};
   let toFetch = [];
   for (let i = 0; i < keys.length; i++) {

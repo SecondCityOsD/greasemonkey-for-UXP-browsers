@@ -18,14 +18,9 @@ if (typeof Cu === "undefined") {
 
 Cu.import("chrome://greasemonkey-modules/content/constants.js");
 
-// Pale Moon and Basilisk both ship Scratchpad at this resource path
-// (downstream of the Firefox-44 reorganisation that landed it under
-// resource://devtools/client/...).  Pre-cleanup, this module wrapped
-// the import in three additional try/catch fallbacks for older
-// Firefox versions; on UXP those fallback paths don't exist, so the
-// nesting was unreachable and was removed.  The single try/catch
-// remains because Scratchpad is in DevTools, and a user with
-// DevTools disabled would otherwise fail the module load.
+// Pale Moon and Basilisk both ship Scratchpad at this resource path.
+// The try/catch is required because Scratchpad lives in DevTools, and a
+// user with DevTools disabled would otherwise fail the module load.
 try {
   Cu.import("resource://devtools/client/scratchpad/scratchpad-manager.jsm");
 } catch (e) {

@@ -37,13 +37,10 @@ window.addEventListener("load", function window_load() {
 
   // Default the includes with the current page's url.
   //
-  // Pre-cleanup, this round-tripped through messageManager:
-  //   chrome → content frame ("greasemonkey:newscript-load-start")
-  //   content frame → chrome ("greasemonkey:newscript-load-end" with .href)
-  // just to read content.location.href from the active tab.  UXP runs
-  // chrome and content in the same process, so the active tab's content
-  // window is reachable from chrome scope directly via
-  // gBrowser.selectedBrowser.contentWindow.  No IPC needed.
+  // UXP runs chrome and content in the same process, so the active tab's
+  // content window is reachable directly via
+  // gBrowser.selectedBrowser.contentWindow — no IPC needed to read
+  // content.location.href.
   let content = window.opener.gBrowser;
   if (content) {
     try {

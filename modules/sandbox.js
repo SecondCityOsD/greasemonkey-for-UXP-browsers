@@ -44,10 +44,9 @@
  *     3. Copies GM_info directly (not a function — no Promise needed).
  *     4. aSandbox.Object.freeze(GM) prevents script tampering.
  *
- *   Pre-cleanup, this was a runtime string-build (evalAPI2Polyfill) that ran
- *   Cu.evalInSandbox on a freshly-built JS string per script.  The native
- *   build removes the per-sandbox string-construction cost, gives errors
- *   real chrome stack traces, and shrinks the eval-attack surface.
+ *   Errors carry real chrome stack traces and there is no eval-attack
+ *   surface, because the object is built natively rather than from a
+ *   constructed-at-runtime JS string.
  *
  * ── GM_info injection (injectGMInfo) ──────────────────────────────────────
  *
@@ -63,9 +62,8 @@
  *
  *   GM_download is a native chrome-side callable built on
  *   nsIWebBrowserPersist + nsIFilePicker (modules/GM_download.js).
- *   It does not require GM_xmlhttpRequest — the pre-cleanup polyfill
- *   used XHR + an <a download> click and so triggered an auto-inject
- *   of GM_xmlhttpRequest; the native rewrite drops that side-effect.
+ *   It has no dependency on GM_xmlhttpRequest; scripts that need XHR
+ *   must @grant it explicitly.
  */
 
 const EXPORTED_SYMBOLS = ["createSandbox", "runScriptInSandbox"];
@@ -116,9 +114,6 @@ const API_PREFIX_REGEXP = new RegExp(
  * Pre-computed [legacyName, modernName] pairs for every GM3 API that has a
  * GM4 (Promise-based) counterpart.  Built once at module load (not once per
  * sandbox) so buildGMObject() runs in linear time without any string-build.
- *
- * Pre-cleanup, this mapping was reconstructed inside the eval'd
- * evalAPI2Polyfill string for every script, every time.
  */
 const GM_API_MAPPING = (function () {
   let pairs = [];
@@ -139,12 +134,6 @@ const GM_API_MAPPING = (function () {
 /**
  * Creates and returns the JavaScript sandbox for a userscript.
  *
- * Pre-Phase-4f-3 the first parameter was an nsIMessageSender
- * (`aFrameScope`) plumbed in from content/frameScript.js so APIs
- * could route IPC through it.  The framescript era is over; the
- * single use of that parameter (`aFrameScope.content`) was just an
- * indirection for the content window, which is now passed directly.
- *
  * @param {Window}    aContentWin - The content window the script runs in;
  *   used as the sandbox prototype and principal.
  * @param {string}    aUrl        - URL of the page being loaded; passed
@@ -158,6 +147,26 @@ function createSandbox(aContentWin, aUrl, aScript, aRunAt) {
   let _API1 = "";
   let _API2 = "";
   let unsafeWindowDefault = "const unsafeWindow = window;";
+
+  // Pre-compute a lowercased Set of @grant entries once per sandbox
+  // construction.  Pre-fix, every API-grant check did:
+  //   aScript.grants.some(i => String(i).toLowerCase() ===
+  //                            String(_API2).toLowerCase())
+  // — `.toLowerCase()` was called per @grant per API per sandbox, so
+  // an 18-API loop on a 10-grant script burned ~200 µs of pure
+  // string-allocation per sandbox creation.  Multi-iframe pages
+  // create dozens of sandboxes per navigation, so this added up.
+  // The Set is consulted via `grantsLC.has(_API2.toLowerCase())`
+  // alongside the original `.includes(_API1)` check; semantically
+  // identical, O(1) per lookup.
+  let grantsLC = new Set();
+  for (let i = 0, iLen = aScript.grants.length; i < iLen; i++) {
+    grantsLC.add(String(aScript.grants[i]).toLowerCase());
+  }
+  function hasGrant(legacyName, modernName) {
+    return aScript.grants.includes(legacyName)
+        || grantsLC.has(String(modernName).toLowerCase());
+  }
 
   if (aScript.grants.includes("none")) {
     // If there is an explicit none grant, use a plain unwrapped sandbox
@@ -209,10 +218,7 @@ function createSandbox(aContentWin, aUrl, aScript, aRunAt) {
   _API1 = "GM_addElement";
   _API2 = _API1.replace(
       API_PREFIX_REGEXP, GM_CONSTANTS.addonAPIPrefix2 + "$2");
-  if (aScript.grants.includes(_API1)
-      || aScript.grants.some(function (aItem) {
-           return String(aItem).toLowerCase() === String(_API2).toLowerCase();
-         })) {
+  if (hasGrant(_API1, _API2)) {
     sandbox[_API1] = GM_addElement.bind(
         null, aContentWin, aScript.fileURL, aRunAt);
   }
@@ -220,10 +226,7 @@ function createSandbox(aContentWin, aUrl, aScript, aRunAt) {
   _API1 = "GM_addStyle";
   _API2 = _API1.replace(
       API_PREFIX_REGEXP, GM_CONSTANTS.addonAPIPrefix2 + "$2");
-  if (aScript.grants.includes(_API1)
-      || aScript.grants.some(function (aItem) {
-           return String(aItem).toLowerCase() === String(_API2).toLowerCase();
-         })) {
+  if (hasGrant(_API1, _API2)) {
     sandbox[_API1] = GM_addStyle.bind(
         null, aContentWin, aScript.fileURL, aRunAt);
   }
@@ -232,107 +235,75 @@ function createSandbox(aContentWin, aUrl, aScript, aRunAt) {
     _API1 = "GM_cookie";
     _API2 = _API1.replace(
         API_PREFIX_REGEXP, GM_CONSTANTS.addonAPIPrefix2 + "$2");
-    if (aScript.grants.includes(_API1)
-        || aScript.grants.some(function (aItem) {
-             return String(aItem).toLowerCase() === String(_API2).toLowerCase();
-           })) {
-      // Phase 7b: GM_cookie is now a methods-object (.list/.set/.delete)
-      // built natively on top of Services.cookies, replacing the
-      // third-party dispatch-function polyfill.  buildGMObject's
-      // special-case picks up the object shape and mirrors it as
-      // GM.cookie (Promise-wrapped methods).
+    if (hasGrant(_API1, _API2)) {
+      // GM_cookie is a methods-object (.list/.set/.delete) built natively
+      // on top of Services.cookies.  buildGMObject's special-case picks
+      // up the object shape and mirrors it as GM.cookie (Promise-wrapped
+      // methods).
       sandbox[_API1] = createGMCookieAPI(
           aContentWin, sandbox, aScript.fileURL, aUrl);
     }
   }
 
-  // Pre-cleanup, the Front took aFrameScope as its first arg so it could
-  // route scriptVal-* RPCs to the parent process via cpmm.  UXP single-
-  // process collapsed the front/back IPC into a same-module direct call,
-  // so the message-manager handle is no longer needed.
+  // GM_ScriptStorageFront proxies scriptVal-* operations directly to the
+  // back-end in the same JS runtime; UXP is single-process so no message
+  // manager handle is needed.
   let scriptStorage = new GM_ScriptStorageFront(
       aContentWin, sandbox, aScript);
   _API1 = "GM_deleteValue";
   _API2 = _API1.replace(
       API_PREFIX_REGEXP, GM_CONSTANTS.addonAPIPrefix2 + "$2");
-  if (aScript.grants.includes(_API1)
-      || aScript.grants.some(function (aItem) {
-           return String(aItem).toLowerCase() === String(_API2).toLowerCase();
-         })) {
+  if (hasGrant(_API1, _API2)) {
     sandbox[_API1] = scriptStorage.deleteValue.bind(scriptStorage);
   }
   _API1 = "GM_deleteValues";
   _API2 = _API1.replace(
       API_PREFIX_REGEXP, GM_CONSTANTS.addonAPIPrefix2 + "$2");
-  if (aScript.grants.includes(_API1)
-      || aScript.grants.some(function (aItem) {
-           return String(aItem).toLowerCase() === String(_API2).toLowerCase();
-         })) {
+  if (hasGrant(_API1, _API2)) {
     sandbox[_API1] = scriptStorage.deleteValues.bind(scriptStorage);
   }
   _API1 = "GM_getValue";
   _API2 = _API1.replace(
       API_PREFIX_REGEXP, GM_CONSTANTS.addonAPIPrefix2 + "$2");
-  if (aScript.grants.includes(_API1)
-      || aScript.grants.some(function (aItem) {
-           return String(aItem).toLowerCase() === String(_API2).toLowerCase();
-         })) {
+  if (hasGrant(_API1, _API2)) {
     sandbox[_API1] = scriptStorage.getValue.bind(scriptStorage);
   }
   _API1 = "GM_getValues";
   _API2 = _API1.replace(
       API_PREFIX_REGEXP, GM_CONSTANTS.addonAPIPrefix2 + "$2");
-  if (aScript.grants.includes(_API1)
-      || aScript.grants.some(function (aItem) {
-           return String(aItem).toLowerCase() === String(_API2).toLowerCase();
-         })) {
+  if (hasGrant(_API1, _API2)) {
     sandbox[_API1] = scriptStorage.getValues.bind(scriptStorage);
   }
   _API1 = "GM_setValue";
   _API2 = _API1.replace(
       API_PREFIX_REGEXP, GM_CONSTANTS.addonAPIPrefix2 + "$2");
-  if (aScript.grants.includes(_API1)
-      || aScript.grants.some(function (aItem) {
-           return String(aItem).toLowerCase() === String(_API2).toLowerCase();
-         })) {
+  if (hasGrant(_API1, _API2)) {
     sandbox[_API1] = scriptStorage.setValue.bind(scriptStorage);
   }
   _API1 = "GM_setValues";
   _API2 = _API1.replace(
       API_PREFIX_REGEXP, GM_CONSTANTS.addonAPIPrefix2 + "$2");
-  if (aScript.grants.includes(_API1)
-      || aScript.grants.some(function (aItem) {
-           return String(aItem).toLowerCase() === String(_API2).toLowerCase();
-         })) {
+  if (hasGrant(_API1, _API2)) {
     sandbox[_API1] = scriptStorage.setValues.bind(scriptStorage);
   }
 
   _API1 = "GM_listValues";
   _API2 = _API1.replace(
       API_PREFIX_REGEXP, GM_CONSTANTS.addonAPIPrefix2 + "$2");
-  if (aScript.grants.includes(_API1)
-      || aScript.grants.some(function (aItem) {
-           return String(aItem).toLowerCase() === String(_API2).toLowerCase();
-         })) {
+  if (hasGrant(_API1, _API2)) {
     sandbox[_API1] = scriptStorage.listValues.bind(scriptStorage);
   }
 
   _API1 = "GM_addValueChangeListener";
   _API2 = _API1.replace(
       API_PREFIX_REGEXP, GM_CONSTANTS.addonAPIPrefix2 + "$2");
-  if (aScript.grants.includes(_API1)
-      || aScript.grants.some(function (aItem) {
-           return String(aItem).toLowerCase() === String(_API2).toLowerCase();
-         })) {
+  if (hasGrant(_API1, _API2)) {
     sandbox[_API1] = scriptStorage.addValueChangeListener.bind(scriptStorage);
   }
   _API1 = "GM_removeValueChangeListener";
   _API2 = _API1.replace(
       API_PREFIX_REGEXP, GM_CONSTANTS.addonAPIPrefix2 + "$2");
-  if (aScript.grants.includes(_API1)
-      || aScript.grants.some(function (aItem) {
-           return String(aItem).toLowerCase() === String(_API2).toLowerCase();
-         })) {
+  if (hasGrant(_API1, _API2)) {
     sandbox[_API1] = scriptStorage.removeValueChangeListener.bind(scriptStorage);
   }
 
@@ -340,10 +311,7 @@ function createSandbox(aContentWin, aUrl, aScript, aRunAt) {
   _API1 = "GM_getResourceText";
   _API2 = _API1.replace(
       API_PREFIX_REGEXP, GM_CONSTANTS.addonAPIPrefix2 + "$2");
-  if (aScript.grants.includes(_API1)
-      || aScript.grants.some(function (aItem) {
-           return String(aItem).toLowerCase() === String(_API2).toLowerCase();
-         })) {
+  if (hasGrant(_API1, _API2)) {
     sandbox[_API1] = scriptResources.getResourceText.bind(
         scriptResources,
         aContentWin, sandbox, aScript.fileURL);
@@ -351,10 +319,7 @@ function createSandbox(aContentWin, aUrl, aScript, aRunAt) {
   _API1 = "GM_getResourceURL";
   _API2 = _API1.replace(
       API_PREFIX_REGEXP, GM_CONSTANTS.addonAPIPrefix2 + "$2");
-  if (aScript.grants.includes(_API1)
-      || aScript.grants.some(function (aItem) {
-           return String(aItem).toLowerCase() === String(_API2).toLowerCase();
-         })) {
+  if (hasGrant(_API1, _API2)) {
     sandbox[_API1] = scriptResources.getResourceURL.bind(
         scriptResources,
         aContentWin, sandbox, aScript);
@@ -363,10 +328,7 @@ function createSandbox(aContentWin, aUrl, aScript, aRunAt) {
   _API1 = "GM_log";
   _API2 = _API1.replace(
       API_PREFIX_REGEXP, GM_CONSTANTS.addonAPIPrefix2 + "$2");
-  if (aScript.grants.includes(_API1)
-      || aScript.grants.some(function (aItem) {
-           return String(aItem).toLowerCase() === String(_API2).toLowerCase();
-         })) {
+  if (hasGrant(_API1, _API2)) {
     {
       let _logger = new GM_ScriptLogger(aScript);
       sandbox[_API1] = _logger.log.bind(_logger);
@@ -376,10 +338,7 @@ function createSandbox(aContentWin, aUrl, aScript, aRunAt) {
   _API1 = "GM_notification";
   _API2 = _API1.replace(
       API_PREFIX_REGEXP, GM_CONSTANTS.addonAPIPrefix2 + "$2");
-  if (aScript.grants.includes(_API1)
-      || aScript.grants.some(function (aItem) {
-           return String(aItem).toLowerCase() === String(_API2).toLowerCase();
-         })) {
+  if (hasGrant(_API1, _API2)) {
     {
       let _notifier = new GM_notificationer(
           getChromeWinForContentWin(aContentWin), aContentWin, sandbox,
@@ -391,14 +350,10 @@ function createSandbox(aContentWin, aUrl, aScript, aRunAt) {
   _API1 = "GM_openInTab";
   _API2 = _API1.replace(
       API_PREFIX_REGEXP, GM_CONSTANTS.addonAPIPrefix2 + "$2");
-  if (aScript.grants.includes(_API1)
-      || aScript.grants.some(function (aItem) {
-           return String(aItem).toLowerCase() === String(_API2).toLowerCase();
-         })) {
+  if (hasGrant(_API1, _API2)) {
     // Wrap GM_openInTab to clone the returned tab handle into the sandbox.
     // Without this, Xray wrappers block access to .close()/.onclose.
-    // Phase 4f-2: pass aContentWin instead of the frame message manager.
-    // GM_openInTab now finds the chrome window via getChromeWinForContentWin
+    // GM_openInTab finds the chrome window via getChromeWinForContentWin
     // and calls GM_BrowserUI.openInTab / .tabClose directly.
     let _openInTabFn = GM_openInTab.bind(null, aContentWin, aUrl);
     sandbox[_API1] = function (aTabUrl, aTabOptions) {
@@ -431,14 +386,7 @@ function createSandbox(aContentWin, aUrl, aScript, aRunAt) {
   let _unreg1 = "GM_unregisterMenuCommand";
   let _unreg2 = _unreg1.replace(
       API_PREFIX_REGEXP, GM_CONSTANTS.addonAPIPrefix2 + "$2");
-  if (aScript.grants.includes(_API1)
-      || aScript.grants.some(function (aItem) {
-           return String(aItem).toLowerCase() === String(_API2).toLowerCase();
-         })
-      || aScript.grants.includes(_unreg1)
-      || aScript.grants.some(function (aItem) {
-           return String(aItem).toLowerCase() === String(_unreg2).toLowerCase();
-         })) {
+  if (hasGrant(_API1, _API2) || hasGrant(_unreg1, _unreg2)) {
     // Inject MenuCommandSandbox into the sandbox by source.  The function's
     // body — including its two event listeners and its closure-scoped
     // { commands, commandFuncs } maps — ends up running in sandbox
@@ -477,10 +425,7 @@ function createSandbox(aContentWin, aUrl, aScript, aRunAt) {
   _API1 = "GM_setClipboard";
   _API2 = _API1.replace(
       API_PREFIX_REGEXP, GM_CONSTANTS.addonAPIPrefix2 + "$2");
-  if (aScript.grants.includes(_API1)
-      || aScript.grants.some(function (aItem) {
-           return String(aItem).toLowerCase() === String(_API2).toLowerCase();
-         })) {
+  if (hasGrant(_API1, _API2)) {
     sandbox[_API1] = GM_setClipboard.bind(
         null, aContentWin, aScript.fileURL);
   }
@@ -491,10 +436,7 @@ function createSandbox(aContentWin, aUrl, aScript, aRunAt) {
   _API1 = "GM_windowClose";
   _API2 = _API1.replace(
       API_PREFIX_REGEXP, GM_CONSTANTS.addonAPIPrefix2 + "$2");
-  if (aScript.grants.includes(_API1)
-      || aScript.grants.some(function (aItem) {
-           return String(aItem).toLowerCase() === String(_API2).toLowerCase();
-         })
+  if (hasGrant(_API1, _API2)
       || aScript.grants.includes("window.close")) {
     sandbox[_API1] = GM_window.bind(
         null, aContentWin, aScript.fileURL, "close");
@@ -502,10 +444,7 @@ function createSandbox(aContentWin, aUrl, aScript, aRunAt) {
   _API1 = "GM_windowFocus";
   _API2 = _API1.replace(
       API_PREFIX_REGEXP, GM_CONSTANTS.addonAPIPrefix2 + "$2");
-  if (aScript.grants.includes(_API1)
-      || aScript.grants.some(function (aItem) {
-           return String(aItem).toLowerCase() === String(_API2).toLowerCase();
-         })
+  if (hasGrant(_API1, _API2)
       || aScript.grants.includes("window.focus")) {
     sandbox[_API1] = GM_window.bind(
         null, aContentWin, aScript.fileURL, "focus");
@@ -514,10 +453,7 @@ function createSandbox(aContentWin, aUrl, aScript, aRunAt) {
   _API1 = "GM_xmlhttpRequest";
   _API2 = _API1.replace(
       API_PREFIX_REGEXP, GM_CONSTANTS.addonAPIPrefix2 + "$2");
-  if (aScript.grants.includes(_API1)
-      || aScript.grants.some(function (aItem) {
-           return String(aItem).toLowerCase() === String(_API2).toLowerCase();
-         })) {
+  if (hasGrant(_API1, _API2)) {
     {
       let _xhr = new GM_xmlHttpRequester(
           aContentWin, sandbox, aScript.fileURL, aUrl, aScript.connects);
@@ -536,15 +472,10 @@ function createSandbox(aContentWin, aUrl, aScript, aRunAt) {
     }
   });
 
-  // Phase 7c: GM_download is now a native chrome-side callable built on
-  // nsIWebBrowserPersist + nsIFilePicker (modules/GM_download.js),
-  // replacing the script-side polyfill (modules/thirdParty/GM_download.js)
-  // that fetched via GM_xmlhttpRequest + <a download> click.
-  //
-  // The polyfill required GM_xmlhttpRequest to be present in the sandbox,
-  // so this branch used to auto-inject xmlhttpRequest whenever GM_download
-  // was granted.  The native implementation has no such dependency;
-  // scripts that need xmlhttpRequest must @grant it explicitly.
+  // GM_download is a native chrome-side callable built on
+  // nsIWebBrowserPersist + nsIFilePicker (modules/GM_download.js) and has
+  // no dependency on GM_xmlhttpRequest; scripts that need XHR must @grant
+  // it explicitly.
   //
   // No special-case is needed in buildGMObject — GM_download is a callable
   // (typeof === "function"), so the main loop's Promise wrapping picks it
@@ -553,10 +484,7 @@ function createSandbox(aContentWin, aUrl, aScript, aRunAt) {
     _API1 = "GM_download";
     _API2 = _API1.replace(
         API_PREFIX_REGEXP, GM_CONSTANTS.addonAPIPrefix2 + "$2");
-    if (aScript.grants.includes(_API1)
-        || aScript.grants.some(function (aItem) {
-             return String(aItem).toLowerCase() === String(_API2).toLowerCase();
-           })) {
+    if (hasGrant(_API1, _API2)) {
       sandbox[_API1] = createGMDownloadAPI(
           aContentWin, sandbox, aScript.fileURL, aUrl);
     }
@@ -757,9 +685,6 @@ function runScriptInSandbox(aSandbox, aScript) {
    * GM.getValue / GM.setValue / GM.xmlHttpRequest / etc. as Promise-
    * returning methods) for the given sandbox.
    *
-   * Replaces the historical evalAPI2Polyfill, which ran a runtime-built
-   * JS string through Cu.evalInSandbox per script.  This implementation:
-   *
    *   - Uses Cu.createObjectIn + Cu.exportFunction (native chrome →
    *     sandbox object construction; no eval).
    *   - Iterates the pre-computed module-level GM_API_MAPPING instead
@@ -776,9 +701,31 @@ function runScriptInSandbox(aSandbox, aScript) {
    * @param {Cu.Sandbox} aSandbox - Target sandbox (created by createSandbox()).
    * @param {IPCScript}  aScript  - Script descriptor (for error attribution).
    * @returns {boolean} True on success; false if construction failed (the
-   *                    caller aborts the script in that case, matching the
-   *                    pre-cleanup polyfill contract).
+   *                    caller aborts the script in that case).
    */
+  // APIs whose return value is a DOM Element that scripts chain method
+  // calls on immediately (.appendChild, .style.X = Y, .setAttribute, ...).
+  // Wrapping these in a Promise breaks the call site even if the script
+  // later `await`s, because by the time the script gets the Element it
+  // has already passed the Promise to the next call as a parent.
+  //
+  // TM, VM, and the upstream Greasemonkey 4.11+ reference implementation
+  // all return these synchronously; the original gm4-polyfill on
+  // greasemonkey.github.io omits addElement entirely and only Promise-
+  // wraps addStyle (which never matched TM/VM behaviour either — a
+  // polyfill quirk).  We follow the TM/VM/upstream-GM convention here.
+  //
+  // Side effects for existing scripts:
+  //   - `await GM.addElement(...)` continues to work — `await` on a non-
+  //     Promise resolves to the value directly.
+  //   - `GM.addElement(...).then(el => ...)` breaks — Element has no
+  //     `.then`.  This pattern only worked because of our pre-fix
+  //     Promise-wrap bug; the same code on TM/VM/upstream GM has never
+  //     worked, so portable userscripts wouldn't use it.
+  //   - GM3 `GM_addElement(...)` and `GM_addStyle(...)` (underscore form
+  //     bound at sandbox.js:209-228) are unaffected — they're sync.
+  const SYNC_RETURN_GM_APIS = new Set(["GM_addElement", "GM_addStyle"]);
+
   function buildGMObject(aSandbox, aScript) {
     try {
       let gmObj = Cu.createObjectIn(aSandbox, { "defineAs": "GM" });
@@ -790,6 +737,23 @@ function runScriptInSandbox(aSandbox, aScript) {
         let legacyFn = aSandbox[legacyName];
         if (typeof legacyFn !== "function") {
           // Script didn't @grant this API; skip.
+          continue;
+        }
+
+        if (SYNC_RETURN_GM_APIS.has(legacyName)) {
+          // Pass the bound chrome function through unchanged — the script
+          // gets the raw Element synchronously.  See SYNC_RETURN_GM_APIS
+          // comment above for the rationale + behaviour guarantees.
+          //
+          // We do NOT attach a one-shot `.then` à la VM's
+          // injected/web/gm-api.js:219 trick, because the Element
+          // crosses the chrome→content X-ray boundary and any expando
+          // defined from chrome would not be visible to the script
+          // through the X-ray view.  Scripts that want thenable
+          // semantics should write `await GM.addElement(...)` — `await`
+          // on a non-Promise resolves to the value directly and works
+          // identically across TM / VM / this fork.
+          Cu.exportFunction(legacyFn, gmObj, { "defineAs": modernName });
           continue;
         }
 
@@ -848,7 +812,7 @@ function runScriptInSandbox(aSandbox, aScript) {
       }
 
       // Freeze through the sandbox's own Object so the operation happens
-      // in sandbox scope (consistent with the pre-cleanup polyfill).
+      // in sandbox scope (the GM object lives in the sandbox compartment).
       try {
         aSandbox.Object.freeze(gmObj);
       } catch (e) {

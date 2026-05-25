@@ -27,14 +27,9 @@
  * Override rules are fully configurable via preferences; see _corsOverride()
  * and _cspOverride() for the per-header rule lookup logic.
  *
- * Historical note:
- *   Pre-cleanup, this module also supported a WebExtension
- *   webRequest.onHeadersReceived fallback for builds where the XPCOM
- *   observer registration failed.  UXP browsers (Pale Moon 28+,
- *   Basilisk current) do not expose chrome.webRequest at all, so the
- *   fallback was unreachable and was removed along with the WebExt-
- *   specific branches inside corsCspOverride() and the no-longer-needed
- *   helpers (gCorsCspListener, gCorsCspMessages, _corsCspRulesEmpty).
+ * UXP browsers (Pale Moon 28+, Basilisk current) do not expose
+ * chrome.webRequest, so this module relies exclusively on the XPCOM
+ * http-on-examine-response observer pathway.
  */
 
 "use strict";

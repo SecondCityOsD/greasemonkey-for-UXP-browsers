@@ -22,18 +22,16 @@ var GM_MenuCommander = {
   "popup": null,
 };
 
-// Pre-cleanup, the chrome ↔ sandbox menu-command IPC went through:
-//   chrome → mm.sendAsync → frameScript.js → CustomEvent into sandbox
-//   sandbox → MenuCommandRespond → cpmm.sendAsync → ppmm listener (here)
-// On UXP single-process, both legs were self-loops with no benefit.
-// We now dispatch CustomEvents directly onto the active tab's
-// content window, and listen for the response via Services.obs.
+// Chrome ↔ sandbox menu-command transport on UXP single-process:
+//   chrome → CustomEvent dispatched onto the active tab's content window
+//   sandbox → Services.obs.notifyObservers("greasemonkey:menu-command-
+//             response", …) → _observer below → messageMenuCommandResponse
+// Both legs stay in-process and avoid any messageManager indirection.
 
 /**
  * Bridge object passed to Services.obs.addObserver.  The platform calls
- * .observe(subject, topic, data); we re-shape the payload to match the
- * pre-cleanup messageManager listener signature so the existing
- * messageMenuCommandResponse handler runs unchanged.
+ * .observe(subject, topic, data); we re-shape the payload into the
+ * { data: payload } shape expected by messageMenuCommandResponse.
  */
 GM_MenuCommander._observer = {
   "observe": function (aSubject, aTopic, aData) {
@@ -62,11 +60,9 @@ GM_MenuCommander.uninitialize = function () {
 
 GM_MenuCommander.commandClicked = function (aCommand) {
   // Dispatch the run-command CustomEvent directly onto the active tab's
-  // content window.  Pre-cleanup, this went through
-  //   gBrowser.selectedBrowser.messageManager.sendAsyncMessage(
-  //       "greasemonkey:menu-command-run", { … })
-  // which frameScript.js (MenuCommandRun) translated into the same
-  // CustomEvent we now create inline.
+  // content window.  The sandbox listens for
+  // "greasemonkey-menu-command-run-<suffix>" and invokes the registered
+  // callback for the matching {cookie, scriptUuid}.
   let win = gBrowser.selectedBrowser.contentWindow;
   if (!win) {
     return undefined;
@@ -144,11 +140,9 @@ GM_MenuCommander.onPopupShowing = function (aEventTarget) {
 
   // ...ask each sandbox running on the active tab for its registered
   // commands by dispatching a CustomEvent directly onto the content
-  // window.  Pre-cleanup, this used
-  //   gBrowser.selectedBrowser.messageManager.sendAsyncMessage(
-  //       "greasemonkey:menu-command-list", { cookie })
-  // which frameScript.js (MenuCommandListRequest) translated into the
-  // same CustomEvent we now create inline.
+  // window.  Each sandbox replies via the
+  // "greasemonkey:menu-command-response" observer notification, which
+  // _observer above feeds into messageMenuCommandResponse.
   let win = gBrowser.selectedBrowser.contentWindow;
   if (!win) {
     return undefined;

@@ -23,14 +23,9 @@
  * (gHaveDoneInit) prevents double-registration when the module is imported
  * in multiple processes.
  *
- * Historical note:
- *   Pre-cleanup, both the temp-file probe and the install request were
- *   sent through Services.cpmm IPC messages ("greasemonkey:url-is-temp-file"
- *   and "greasemonkey:script-install").  UXP is single-process, so the
- *   messages were a self-loop with no benefit.  They were replaced with
- *   direct service-method invocations here.  The matching ppmm listeners
- *   in components/greasemonkey.js are unreachable after this change and
- *   are removed in Phase 4e.
+ * The temp-file probe and install request invoke GM_util.getService() methods
+ * directly rather than going through Services.cpmm IPC, because UXP is
+ * single-process: an IPC round-trip would be a self-loop with no benefit.
  */
 
 // This module is responsible for detecting user scripts

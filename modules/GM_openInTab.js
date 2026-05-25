@@ -6,14 +6,9 @@
  * script's content window, then GM_BrowserUI.openInTab on the chrome
  * window that owns that content window is invoked directly.
  *
- * Historical note:
- *   Pre-cleanup, this module sent two IPC messages
- *   ("greasemonkey:open-in-tab" and "greasemonkey:tab-close") via the
- *   sandbox's frame message manager, which content/browser.js consumed
- *   through window.messageManager.addMessageListener.  UXP is single-
- *   process; both legs were self-loops with no benefit.  We now find
- *   the chrome window via getChromeWinForContentWin() and call
- *   GM_BrowserUI.openInTab / .tabClose directly.
+ * UXP is single-process, so the chrome window is resolved synchronously
+ * via getChromeWinForContentWin() and GM_BrowserUI.openInTab / .tabClose
+ * are called in-process — no message manager round-trip is required.
  *
  * Supported option forms (mirrors the GM4 specification):
  *   GM_openInTab(url)                        — opens in background
@@ -98,10 +93,9 @@ function GM_openInTab(aContentWin, aBaseUrl, aUrl, aOptions) {
     return null;
   }
 
-  // Build the synthetic { target, data } argument shape that
-  // GM_BrowserUI.openInTab / .tabClose still accept.  Pre-cleanup that
-  // shape was the IPC message envelope; on UXP single-process we just
-  // pass the same structure to the same method directly.
+  // Build the { target, data } argument shape that GM_BrowserUI.openInTab
+  // and .tabClose expect.  target is the chrome event handler (browser
+  // element) for the script's docshell; data carries the per-call payload.
   let scriptBrowser;
   try {
     scriptBrowser = aContentWin
