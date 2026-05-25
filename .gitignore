@@ -2,6 +2,8 @@
 .project
 .settings
 
-# Smoke-test per-run log — chronological record of pass/fail across phases.
-# Local-only; not part of the smoke set itself.  See tests/smoke/README.md.
-tests/smoke/results.log
+# Internal dev-only directories — kept in the local working tree for
+# development reference (parked drafts, smoke userscripts, run logs)
+# but not shipped in the public repo.
+_attic/
+tests/smoke/
