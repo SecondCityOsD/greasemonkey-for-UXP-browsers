@@ -234,6 +234,248 @@ Engineering
   English placeholders for non-translated locales; translators can
   localise later without breaking the dialog.
 
+Compatibility & edge-case fixes (Violentmonkey-parity audit)
+
+A focused audit of Violentmonkey 2.35.1 against this fork's source
+turned up a small set of real bugs where VM handles an edge case the
+GM-UXP code did not, plus a few defensive issues independent of VM.
+Every item below has been verified against the current source before
+the fix landed.  None of these are behavioural regressions — each is
+either a strictly-permissive change or a defensive hardening with no
+observable effect on existing scripts.
+
+* **`util/fileXhr` no longer passes the literal string `"open"` as the
+  HTTP method.** The sync helper that loads `@require`, `@resource`,
+  and `GM_info.scriptSource` / `scriptMetaStr` was passing `"open"` as
+  the first argument to `xhr.open()`.  UXP's XHR silently treated the
+  unknown verb as GET so the bug was invisible, but any future
+  tightening of method validation in the platform would brick every
+  script load.  Now passes a proper `"GET"`.
+* **`GM_xmlhttpRequest({url, onload})` without a `method` field now
+  defaults to GET.** Per the GM4 / TM / VM spec, `method` is optional
+  and defaults to GET; the previous code passed `undefined` straight
+  into `XMLHttpRequest.open()` which threw `NS_ERROR_INVALID_ARG` and
+  surfaced as a synthetic XHR error.  Now matches every other userscript
+  engine's behaviour.
+* **`GM_xmlhttpRequest` with `responseXML` clone failure no longer
+  aborts the request.** If the content window was torn down during the
+  response, `new aWrappedContentWin.Document()` threw and the listener
+  called `aReq.abort()` from inside a fired event — the script then
+  never received `response`, `responseText`, or `status` either.  Now
+  the clone failure is logged, `responseXML` stays `null`, and the
+  rest of the response reaches the script intact.
+* **`GM_addElement` and `GM_addStyle` carry the page's CSP nonce.**
+  Inline `<script>` and `<style>` elements injected by these APIs now
+  pick up the page's `script-src` / `style-src` nonce automatically,
+  so they execute on nonce-CSP pages (GitHub, Google search, modern
+  news sites) where the previous unconditional `appendChild` was
+  silently blocked.  No-op on pages without a nonce CSP.  Scripts can
+  still override via `attrs.nonce` if needed.
+* **`@match` patterns now support `:port`.** Patterns like
+  `http://localhost:3000/*` previously threw `error.matchPattern.host`
+  at install time because the host regex disallowed colons.  Ports are
+  now optional in the pattern grammar; when present, only URLs with a
+  matching explicit port are matched (matches TM behaviour).  Patterns
+  written without a port continue to be port-agnostic, so existing
+  patterns are unaffected.
+* **`@connect *.domain.tld` is now recognised.** TM-style wildcard
+  `@connect` entries (e.g. `// @connect *.googleapis.com`) match both
+  the bare host (`googleapis.com`) and any subdomain.  Previously the
+  literal `*.googleapis.com` was treated as a hostname and never
+  matched anything, so `GM_xmlhttpRequest` calls against
+  `cdn.googleapis.com` got rejected even when the script explicitly
+  declared the wildcard.
+* **`GM_info.platform` now includes `browserName` and `browserVersion`.**
+  Mirrors VM's `GM_info.platform` shape so portable userscripts that
+  branch on
+  `GM_info.platform.browserName === "firefox"` (and friends) can
+  detect Pale Moon / Basilisk explicitly rather than mis-detecting
+  based on UA spoofing.
+* **`GM_setValue` of a non-JSON-serialisable value now throws a
+  sandbox-realm `Error`.** Circular structures, `BigInt`, and similar
+  used to surface a chrome-realm `TypeError` that didn't match the
+  script's own `e instanceof Error` check, so scripts couldn't
+  recognise the failure.  The error now comes from the script's own
+  realm with a clear "value is not JSON-serialisable" message.
+* **`GM_addElement` no longer crashes if `attrs` has a null prototype.**
+  Scripts passing `Object.create(null)` (or any object whose own
+  `hasOwnProperty` has been shadowed) previously threw inside the
+  attribute-application loop.  Now uses `Object.prototype.hasOwnProperty
+  .call(…)` so all object shapes work.
+* **`@installURL` fallthrough in the parser is now documented.** The
+  metadata parser intentionally falls through from `case "installURL"`
+  to `case "downloadURL"` to share the URL-validation block; the
+  missing `break` looked accidental and a maintainer "fixing" it would
+  silently strip `@installURL` support.  Added a `// fallthrough`
+  comment so the intent is unambiguous.
+
+Items considered and not changed (audit closeout — informational)
+
+* **CRLF line endings in `==UserScript==` metadata blocks** are
+  already handled correctly: `parseScript.js:109` strips trailing
+  whitespace (`\s+$`, which includes `\r`) before invoking the PEG
+  grammar.  No grammar change needed.
+* **`GM.addElement(...).then(el => …)` thenable Element** (VM's
+  one-shot self-deleting `.then` trick) was investigated but not
+  shipped: cross-compartment X-ray wrappers on UXP filter expandos
+  defined from chrome scope, so the property would not be visible to
+  the script.  Users wanting future-style chaining should write
+  `await GM.addElement(...)` — that already works on TM, VM, and this
+  fork.
+* **VM-style "VAULT" Object.prototype-poisoning defense** for
+  page-mode (`@grant none` / `@inject-into page`) scripts: our
+  injected prelude template uses object literals and `var`
+  declarations exclusively, both of which use `[[DefineOwnProperty]]`
+  semantics that bypass prototype-chain setters.  VM's `setOwnProp`
+  pattern shields VM's own polyfill code from a poisoned page; that
+  isn't an analogue of any code GM-UXP injects.  User scripts that
+  use `obj.foo = …` against a hostile page remain the user's
+  responsibility to harden, exactly as on every userscript engine.
+
+Performance improvements (Violentmonkey-parity audit, round 2)
+
+A second audit pass against Violentmonkey 2.35.1's hot paths turned
+up a set of architectural choices that compound on power-user
+profiles (200+ installed scripts).  None of these changes alter
+script-observable behaviour — each is an internal optimisation that
+either short-circuits redundant work or eliminates wasted clones.
+
+Match-pattern / scripts-for-URL pipeline (the bulk of the win):
+
+* **`MatchPattern` instances are no longer flattened to strings in
+  `IPCScript`.**  Pre-cleanup the constructor mapped
+  `excludeMatches`/`matches`/`userMatches` down to their `.pattern`
+  string form, and `AbstractScript.matchesURL` re-instantiated
+  `new MatchPattern(string)` on every URL test — compiling 2-3
+  regexes per pattern per call.  On a 200-script profile that's
+  ~1800 regex re-compilations per page load (200 × 3 rules × 3
+  run-at phases) thrown away after each match.  The flatten was
+  there for IPC marshalling against multi-process Firefox; UXP is
+  single-process so the live compiled objects flow through
+  unchanged.
+* **`(url, pattern) → boolean` result memoisation in `AbstractScript`.**
+  Popular `@match` rules (e.g. `*://*.github.com/*`,
+  `*://www.google.com/search*`) are shared by dozens of scripts on
+  a typical profile.  Each unique `(url, pattern)` pair now hits
+  the regex evaluator once per navigation instead of once per script.
+  Cache is bounded at 1024 entries with FIFO eviction; cleared
+  wholesale whenever the installed-script list or `globalExcludes`
+  changes (`IPCScript.update` is the single funnel for every such
+  event).
+* **`(url, glob) → boolean` result memoisation for `@include` /
+  `@exclude` globs.**  Same pattern, same invalidation hook.
+* **`scriptsForUrl(url, when)` result cache.**  `scriptInjector.js`
+  calls this 3-5 times per page load (one per run-at phase, plus
+  any subframe).  Each call previously did a full `gScripts.filter`
+  scan — at 200 scripts that's 600-1000 filter passes per
+  navigation.  Cache is bounded at 256 entries with FIFO eviction.
+* **`isGreasemonkeyable(url)` hoisted out of the per-script loop.**
+  The chrome:/about: deny check now runs once at the top of
+  `scriptsForUrl` instead of once inside every script's
+  `matchesURL`.
+* **`<all_urls>` fast path in `MatchPattern.doMatch`.**  Skips the
+  `getUriFromUrl(...)` parse + scheme check entirely when the
+  pattern is the always-match sentinel; cheaply confirms the URL's
+  scheme is one of the supported ones via a `substring + indexOf`.
+* **`safeGlobalsSnapshot` prelude hoisted to a module-level constant.**
+  Pre-cleanup the same ~30-line string literal was rebuilt fresh on
+  every page-mode script injection.  Now built once at module load
+  and referenced from every injection.
+
+Storage hot path:
+
+* **Skip `Cu.cloneInto` for primitive `GM_getValue` returns.**
+  SpiderMonkey passes strings / numbers / booleans across compartments
+  by value already (they're immutable; no aliasing risk).  The
+  unconditional clone burned ~10-50µs per call even for primitives.
+  Objects and arrays still pay the clone so scripts can't mutate
+  the cached back entry.
+* **Drop redundant `JSON.parse(JSON.stringify(...))` in
+  `listValues`.**  `Cu.cloneInto` already deep-copies the returned
+  array; the round-trip was pure waste.
+* **`GM_setValue` no-op identical-write fast path.**  When the new
+  value structurally equals the cached value, skip the SQLite write,
+  the cache invalidation, and the listener fire entirely.  Matches
+  Violentmonkey's `deepCopyDiff` behaviour — scripts that defensively
+  re-`setValue` the same config on every page navigation pay zero
+  cost on the repeated writes.
+* **`GM_setValue` listener-equality check gated on listener
+  existence.**  `valuesEqualForListener` (two `JSON.stringify`
+  passes) used to run on every write even when no listener was
+  registered for the key — wasted on the common case.  Now skipped
+  unless a listener for the key exists.
+
+Sandbox creation:
+
+* **Per-script lowercased-grants Set.**  Pre-fix the 18 GM_* API
+  registrations each ran
+    `aScript.grants.some(i => String(i).toLowerCase() === String(_API2).toLowerCase())`
+  — `.toLowerCase()` was being called per @grant per API per
+  sandbox.  Now a single Set is built once at the top of
+  `createSandbox` and each API check is one `Set.has` lookup.
+  ~200µs saved per sandbox; matters most on multi-iframe pages
+  where dozens of sandboxes are created back-to-back.
+
+XPCOM service caching:
+
+* **Locale string bundle cache** on `GM_CONSTANTS.getLocaleBundle()`.
+  `nsIStringBundleService.createBundle(...)` returns a fresh
+  bundle handle (~200µs) per call.  Hot-path error sites (one per
+  GM_setValue type-throw, one per XHR scheme-rejection, etc.) can
+  switch to the cached form for repeat savings; cold-path sites
+  continue to work with the old call shape.
+* **One-time `getService` cache** in `util/logError.js`, `util/uuid.js`,
+  `util/getBrowserWindow.js`, and `util/alert.js`.  Each previously
+  resolved its XPCOM service handle on every call; now resolved
+  once at module load.
+
+XHR wiring:
+
+* **`Cu.waiveXrays(aDetails)` hoisted out of `setupRequestEvent`.**
+  The waive used to run once per event-type registration — 8x for
+  the main XHR and 6x for the upload, ~70-140µs per request.  Now
+  done once in `chromeStartRequest` and passed pre-waived to each
+  `setupRequestEvent` call.
+* **`responseXML` clone failure no longer aborts the request.**
+  (Already covered in the round-1 audit notes above; mentioned here
+  because the responseXML clone now lives in the same per-event
+  fast path.)
+
+Frame collection:
+
+* **`urlsOfAllFrames` uses in-place `push.apply` instead of
+  re-allocating via `Array.concat`.**  `urls = urls.concat(...)` was
+  building a new array per iframe — O(N²) on deep frame trees.
+
+Items considered for this release and deferred
+
+* **Lazy `GM_info` getter** (VM's pattern of building `GM_info` only
+  on first read): the cross-compartment accessor-property semantics
+  on `Cu.Sandbox` need empirical verification before landing.  The
+  estimated 0.5-2ms per sandbox saving on a 30-iframe page is real
+  but not worth the X-ray-boundary risk without a test build.
+* **In-sandbox value mirror with bulk preload at injection time**
+  (VM's biggest startup win): the memory cost — one extra copy of
+  each script's storage per sandbox — grows quickly on power-user
+  profiles.  Lowering the existing back-level cache's
+  `CACHE_AFTER_N_GETS` threshold gets most of the same win without
+  duplicating data per sandbox; that's a follow-up candidate.
+* **Write coalescing with debounced flush** (VM's adaptive 100-1000ms
+  flush delay): current `synchronous=OFF` + memory-journal SQLite
+  config already pays most of the same cost; coalescing would change
+  durability semantics in a corner case that's hard to justify
+  against the marginal speed gain.
+* **Async listener dispatch / per-tick batching of cross-sandbox
+  broadcasts:** changes listener-firing semantics in a way scripts
+  may depend on (synchronous fire inside `setValue`).  Niche.
+* **`setTimeout(0)` → `queueMicrotask` for XHR events:** the
+  `setTimeout(0)` boundary exists deliberately to escape XHR
+  readystatechange reentrancy on Gecko.  Worth measuring before
+  changing.
+* **Bulk DOM ops via shadow root in `injectScriptIntoPage`:** real
+  win but interacts with the CSP-probe + nonce flow that took
+  several commits to stabilise.  Best done as its own change.
+
 Note: the standalone CodeMirror editor draft from Phase L was parked
 under `_attic/editor-draft/` so that the M-series redesign could land
 without depending on it.  Right-click → "Edit" still opens the user's
