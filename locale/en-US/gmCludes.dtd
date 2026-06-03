@@ -17,6 +17,7 @@
 <!-- ─── Per-script preferences dialog (3.7.0 redesign) ─────────────────── -->
 <!-- Top-level tab labels -->
 <!ENTITY scriptPrefs.tab.settings           "Settings">
+<!ENTITY scriptPrefs.tab.userPrefs          "User Preferences">
 <!ENTITY scriptPrefs.tab.values             "Values">
 
 <!-- Section captions in the Settings tab -->
@@ -57,6 +58,8 @@
 
 <!-- Pages section sub-headers -->
 <!ENTITY scriptPrefs.pages.userHint         "These rules are added on top of the script's own.">
+<!ENTITY scriptPrefs.section.userPages      "User pages">
+<!ENTITY scriptPrefs.section.scriptDeclared "Script-declared pages (read-only)">
 <!ENTITY scriptPrefs.pages.scriptDeclaredHeader "Script-declared (read-only)">
 <!ENTITY scriptPrefs.pages.scriptHint       "From the script's @include / @match / @exclude.">
 

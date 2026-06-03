@@ -15,8 +15,11 @@
 }
 
 #item-description {
-  color: #222;
-  border-bottom: 1px black dotted;
+  /* Field text colour (pairs with #item-box's textfield appearance) so it
+     stays readable on any theme — a hard-coded dark colour vanished on
+     dark themes.  The divider uses a system colour for the same reason. */
+  color: -moz-FieldText;
+  border-bottom: 1px solid ThreeDShadow;
   padding: 0.5em;
   margin: 0;
   margin-right: 4px;
@@ -26,7 +29,7 @@
   margin: 0;
 }
 
-#includes, #matches {
+#includes, #matches, #grants, #connects {
   margin-bottom: 1em;
   display: none;
 }
@@ -35,8 +38,18 @@
   display: none;
 }
 
-#includes-description, #matches-description, #excludes-description {
+#includes-description, #matches-description, #excludes-description,
+#grants-description, #connects-description {
   font-style: italic;
+}
+
+/* Every bit of text inside the textfield-styled #item-box uses the field
+   text colour, so nothing goes invisible under a theme (the matches list
+   was disappearing on some themes by inheriting an unset colour). */
+#item-box,
+#item-box label,
+#item-box description {
+  color: -moz-FieldText;
 }
 
 #description-notice {

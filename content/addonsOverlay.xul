@@ -35,11 +35,24 @@
   <command id="cmd_userscript_showItemPreferences" />
   <command id="cmd_userscript_manualFindItemUpdates" />
   <command id="cmd_userscript_forcedFindItemUpdates" />
+  <command id="cmd_userscript_remove" />
 </commandset>
 
 <menupopup id="addonitem-popup">
+  <!-- Enable / Disable — first item.  Its label + command flip with the
+       right-clicked script's state in onPopupShowing (same effect as the
+       row's Enable/Disable button; uses the AOM's own commands). -->
+  <menuitem id="gm-context-toggle" class="greasemonkey"
+    enablelabel="&gmEnable;" disablelabel="&gmDisable;"
+    label="&gmDisable;" command="cmd_disableItem" />
   <menuitem command="cmd_userscript_edit"
     label="&edit;" accesskey="&edit.accesskey;" class="greasemonkey" />
+  <!-- Remove — routes through cmd_userscript_remove, which calls the
+       script addon's own undoable uninstall() so the Add-ons Manager
+       shows the same "removed — Undo" affordance as the row button
+       (the generic cmd_uninstallItem removed immediately, no undo). -->
+  <menuitem class="greasemonkey" label="&gmRemove;"
+    command="cmd_userscript_remove" />
   <menuitem command="cmd_userscript_show"
     label="&show;" accesskey="&show.accesskey;" class="greasemonkey" />
   <menuseparator class="greasemonkey" />
@@ -63,27 +76,68 @@
 </menupopup>
 
 <vbox id="list-view">
+  <!-- Small dismissible "Install from URL" popup, anchored to #gm-new-menu.
+       Clicking outside or Cancel closes it (default autohide panel). -->
+  <popupset>
+    <panel id="gm-install-url-panel" orient="vertical"
+      onpopupshown="var i = document.getElementById('gm-install-url-input'); if (i) { i.focus(); }">
+      <label value="&installUrl.heading;"/>
+      <textbox id="gm-install-url-input" type="search" size="48"
+        emptytext="&installUrl.placeholder;"
+        placeholder="&installUrl.placeholder;"
+        onkeypress="if (event.keyCode == 13) { GM_installFromUrlGo(); }"/>
+      <hbox pack="end" align="center">
+        <button label="&installUrl.cancel;"
+          onclick="document.getElementById('gm-install-url-panel').hidePopup();"/>
+        <button label="&installUrl.install;" default="true"
+          onclick="GM_installFromUrlGo();"/>
+      </hbox>
+    </panel>
+
+    <!-- "New…" dropdown contents.  Opened by the New… text-link via
+         GM_newMenuShow, so the trigger can be a plain text-link matching
+         Export All… / Import… rather than a bulky menu button. -->
+    <menupopup id="gm-new-menu-popup">
+      <menuitem label="&menu.new.create;"
+        oncommand="GM_util.newUserScript(window);"/>
+      <menuseparator/>
+      <menuitem label="&menu.new.greasyfork;"
+        oncommand="GM_openSite('https://greasyfork.org/scripts');"/>
+      <menuitem label="&menu.new.openuserjs;"
+        oncommand="GM_openSite('https://openuserjs.org/');"/>
+      <menuitem label="&menu.new.gist;"
+        oncommand="GM_openSite('https://gist.github.com/search?l=JavaScript&amp;o=desc&amp;q=%22%3D%3DUserScript%3D%3D%22&amp;s=updated');"/>
+      <menuseparator/>
+      <menuitem label="&menu.new.fromUrl;"
+        oncommand="GM_installFromUrlShow();"/>
+    </menupopup>
+  </popupset>
+
   <hbox id="greasemonkey-sort-bar" class="view-header"
     pack="end" insertbefore="addon-list-empty">
     <spacer />
+    <!-- "Get user scripts" link removed from the sort bar per forum
+         feedback (discovery now lives in the New… menu and the toolbar
+         "Web sites…" menu).  Kept commented for easy restore. -->
+    <!--
     <label value="&greasemonkey.getUserScripts;" class="text-link"
       onclick="GM_openUserscriptsOrg();" />
-    <label value="&menu.new;" class="text-link"
-      onclick="GM_util.newUserScript(window);" />
-    <label value="&backup.exportAll;" class="text-link"
+    -->
+    <!-- "New…" — a plain text-link (matching Export All… / Import…) that
+         opens #gm-new-menu-popup (in the popupset above) via GM_newMenuShow.
+         Keeps the id so the Install-from-URL panel can anchor to it. -->
+    <label id="gm-new-menu" value="&menu.newButton;" class="text-link"
+      onclick="GM_newMenuShow(event);"/>
+    <label id="gm-export-all" value="&backup.exportAll;" class="text-link"
       onclick="GM_backupExport();" />
-    <label value="&backup.import;" class="text-link"
+    <label id="gm-import" value="&backup.import;" class="text-link"
       onclick="GM_backupImport();" />
     <!-- Recover Orphans link.  Hidden by default; init() in
-         addonsOverlay.js queries Config.getOrphans() at panel-load
-         time and unhides this with a count-suffixed label when
-         there's anything to recover.  Hardcoded English text on the
-         no-l10n path is deliberate — this is a rare admin action,
-         not worth a 34-locale DTD addition before the feature
-         settles. -->
-    <label id="gm-recover-orphans" hidden="true"
-      value="Recover orphans..." class="text-link"
-      tooltiptext="Reinstall script directories that exist in gm_scripts/ but have no entry in config.xml"
+         addonsOverlay.js scans <profile>/gm_scripts/ at panel-load time
+         and, when orphaned script dirs exist, sets a localized
+         count-suffixed label + tooltip (gmAddons.properties:
+         recoverOrphans.label / recoverOrphans.tooltip) and unhides it. -->
+    <label id="gm-recover-orphans" hidden="true" class="text-link"
       onclick="GM_recoverOrphans();" />
     <spacer flex="1"/>
     <!-- Live-search box (3.7.0).  Filters the visible richlistitems in

@@ -49,6 +49,14 @@
         <label id="excludes-label" value="&install.butNotOn;" />
         <description id="excludes-description" />
       </vbox>
+      <vbox id="grants">
+        <label id="grants-label" />
+        <description id="grants-description" />
+      </vbox>
+      <vbox id="connects">
+        <label id="connects-label" />
+        <description id="connects-description" />
+      </vbox>
       <spacer flex="1" />
     </vbox>
 

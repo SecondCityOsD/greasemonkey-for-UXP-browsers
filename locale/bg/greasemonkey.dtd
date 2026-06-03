@@ -58,3 +58,19 @@
 <!ENTITY timeoutUpdatesUnits "Seconds">
 <!ENTITY uninstall "Деинсталиране">
 <!ENTITY updateChecking "Проверка за актуализации">
+
+<!-- 3.7.x: New... menu (about:addons) + Web-sites browse list.
+     en-US source values below; translate per locale. -->
+<!ENTITY menu.newButton            "New...">
+<!ENTITY menu.new.create           "Create new userscript">
+<!ENTITY menu.new.greasyfork       "Install from GreasyFork">
+<!ENTITY menu.new.openuserjs       "Install from OpenUserJS">
+<!ENTITY menu.new.gist             "Install from Gist">
+<!ENTITY menu.new.fromUrl          "Install from URL...">
+<!ENTITY installUrl.heading        "Install user script from URL">
+<!ENTITY installUrl.install        "Install">
+<!ENTITY installUrl.cancel         "Cancel">
+<!ENTITY installUrl.placeholder    "https://example.com/script.user.js">
+<!ENTITY menu.webSites.greasyfork  "GreasyFork">
+<!ENTITY menu.webSites.openuserjs  "OpenUserJS">
+<!ENTITY menu.webSites.gist        "GitHub Gist">

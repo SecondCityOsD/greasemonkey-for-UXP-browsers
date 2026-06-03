@@ -326,6 +326,17 @@ function init() {
         GM_openFolder(aAddon._script.file);
       }
     };
+  gViewController.commands.cmd_userscript_remove = {
+      "isEnabled": addonIsInstalledScript,
+      "doCommand": function (aAddon) {
+        // The addon's own uninstall() marks PENDING_UNINSTALL and fires
+        // onUninstalling, so the Add-ons Manager shows its "removed —
+        // Undo" affordance (cancelUninstall reverts).  The generic
+        // cmd_uninstallItem removed immediately; this matches the row
+        // Remove button instead.
+        aAddon.uninstall();
+      }
+    };
   gViewController.commands.cmd_userscript_showItemPreferences = {
       // Always enabled for installed user scripts — including disabled
       // ones.  The AOM's built-in prefs button gates on `isActive`; ours
@@ -444,9 +455,25 @@ function init() {
         orphans = [];
       }
       if (orphans.length > 0) {
-        recoverLink.setAttribute("value",
-            "Recover " + orphans.length + " orphan"
-            + (orphans.length == 1 ? "" : "s") + "...");
+        // Localized via gmAddons.properties; "#1" → the orphan count.
+        // Falls back to English if a locale file predates these keys, so
+        // non-English users still get the link (the same text they saw
+        // before this string was localized) instead of losing it.
+        let n = orphans.length;
+        let bundle = GM_CONSTANTS.localeStringBundle.createBundle(
+            GM_CONSTANTS.localeGmAddonsProperties);
+        let label, tip;
+        try {
+          label = bundle.GetStringFromName("recoverOrphans.label")
+              .replace("#1", n);
+          tip = bundle.GetStringFromName("recoverOrphans.tooltip");
+        } catch (eL10n) {
+          label = "Recover " + n + " orphan(s)...";
+          tip = "Reinstall script directories that exist in gm_scripts/"
+              + " but have no entry in config.xml";
+        }
+        recoverLink.setAttribute("value", label);
+        recoverLink.setAttribute("tooltiptext", tip);
         recoverLink.hidden = false;
       } else {
         // Defensive: a prior pane open may have unhidden the link;
@@ -459,6 +486,9 @@ function init() {
     Components.utils.reportError(
         "Greasemonkey: orphan-link init failed: " + e);
   }
+
+  // Apply the about:config UI visibility toggles (Import/Export, search).
+  gmApplyManagerPrefs();
 };
 
 function getSortBy(aButtons) {
@@ -756,6 +786,27 @@ function gmOpenScriptPrefs(aAddon) {
 function onPopupShowing(aEvent) {
   // e.g. the restart to gDetailView - aAddon.richlistitem is undefined
   gViewController.updateCommands();
+
+  // Flip the first context-menu item between Enable and Disable based on
+  // the right-clicked script's state, pointing it at the matching AOM
+  // command.  Best-effort: if the selected addon can't be read, the item
+  // keeps its default (Disable) and the AOM command's own isEnabled guard
+  // still applies.
+  try {
+    let toggle = document.getElementById("gm-context-toggle");
+    let list = document.getElementById("addon-list");
+    let item = list ? list.selectedItem : null;
+    let addon = item ? item.mAddon : null;
+    if (toggle && addon) {
+      let disabled = addon.userDisabled;
+      toggle.setAttribute("label",
+          toggle.getAttribute(disabled ? "enablelabel" : "disablelabel"));
+      toggle.setAttribute("command",
+          disabled ? "cmd_enableItem" : "cmd_disableItem");
+    }
+  } catch (e) {
+    // Non-fatal — leave the default label/command.
+  }
 };
 
 function setEmptyWarningVisible() {
@@ -915,6 +966,97 @@ function GM_openUserscriptsOrg() {
   chromeWin.gBrowser.selectedTab = chromeWin.gBrowser.addTab(
       GM_CONSTANTS.dataUserScriptHosting);
   */
+}
+
+// ── "New…" split-menu actions ───────────────────────────────────────────────
+
+// Open a script-host site in a new browser tab (GreasyFork / OpenUserJS /
+// GitHub Gist).  Same mechanism GM_openUserscriptsOrg uses.
+function GM_openSite(aUrl) {
+  let chromeWin = GM_util.getBrowserWindow();
+  chromeWin.gBrowser.selectedTab = chromeWin.gBrowser.addTab(aUrl);
+}
+
+// "Install from URL…" — open the small dismissible panel anchored to the
+// New… button.  Clicking outside or Cancel hides it (autohide panel).
+function GM_installFromUrlShow() {
+  let input = document.getElementById("gm-install-url-input");
+  if (input) {
+    input.value = "";
+  }
+  let panel = document.getElementById("gm-install-url-panel");
+  if (!panel) {
+    return;
+  }
+  let anchor = document.getElementById("gm-new-menu");
+  if (anchor) {
+    panel.openPopup(anchor, "after_start", 0, 0, false, false);
+  } else {
+    panel.openPopup(null, "", 0, 0, false, false);
+  }
+}
+
+// Install the typed URL through the standard install dialog (the same path
+// drag-and-drop uses at GM_onDrop), then close the panel.  An unparseable
+// or non-http(s)/file URL is rejected up front with the same localized
+// "Invalid URL" message GM uses elsewhere, instead of failing silently.
+function GM_installFromUrlGo() {
+  let input = document.getElementById("gm-install-url-input");
+  let panel = document.getElementById("gm-install-url-panel");
+  let url = input ? input.value.trim() : "";
+  if (!url) {
+    return;
+  }
+  let valid = false;
+  try {
+    let uri = Services.io.newURI(url, null, null);
+    valid = (uri.scheme == "http" || uri.scheme == "https"
+        || uri.scheme == "file");
+  } catch (e) {
+    valid = false;
+  }
+  if (!valid) {
+    let bundle = GM_CONSTANTS.localeStringBundle.createBundle(
+        GM_CONSTANTS.localeGreasemonkeyProperties);
+    Services.prompt.alert(null, "Greasemonkey",
+        bundle.GetStringFromName("error.invalidUrl").replace("%1", url));
+    return;
+  }
+  if (panel) {
+    panel.hidePopup();
+  }
+  GM_util.showInstallDialog(url);
+}
+
+// Open the "New…" dropdown anchored under its text-link.  (We use a
+// text-link + JS-opened menupopup instead of a <button type="menu"> so it
+// visually matches the neighbouring Export All… / Import… links.)
+function GM_newMenuShow(aEvent) {
+  let popup = document.getElementById("gm-new-menu-popup");
+  let anchor = document.getElementById("gm-new-menu");
+  if (popup && anchor) {
+    popup.openPopup(anchor, "after_start", 0, 0, false, false);
+  }
+}
+
+// Honour the about:config UI toggles (manager.importExport.enabled /
+// manager.search.enabled): hide the Import/Export links and/or the live-
+// search box when turned off.  Read when the User Scripts pane inits;
+// changing the pref takes effect on the next about:addons open.
+function gmApplyManagerPrefs() {
+  try {
+    let showIE = GM_prefRoot.getValue("manager.importExport.enabled", true);
+    let showSearch = GM_prefRoot.getValue("manager.search.enabled", true);
+    let exportLink = document.getElementById("gm-export-all");
+    let importLink = document.getElementById("gm-import");
+    if (exportLink) { exportLink.hidden = !showIE; }
+    if (importLink) { importLink.hidden = !showIE; }
+    let searchBox = document.getElementById("gm-live-search");
+    if (searchBox) { searchBox.hidden = !showSearch; }
+  } catch (e) {
+    Components.utils.reportError(
+        "Greasemonkey: applying manager UI prefs failed: " + e);
+  }
 }
 
 // Lazy scope for the backup module so we don't pay the import cost until

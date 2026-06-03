@@ -61,6 +61,21 @@ function init() {
   description.appendChild(
       document.createTextNode(gScript.localized.description));
 
+  // Permissions summary (3.7.x): show @grant + @connect so the user sees
+  // what the script can do before installing.  Labels come from the
+  // browser bundle with an English fallback (no per-locale DTD churn).
+  function gmInstallString(aKey, aFallback) {
+    try { return bundle.getString(aKey); } catch (e) { return aFallback; }
+  }
+  document.getElementById("grants-label").setAttribute("value",
+      gmInstallString("install.grants", "Permissions (@grant):"));
+  setUpIncludes("grants", "grants-label", "grants-description",
+      gScript.grants || []);
+  document.getElementById("connects-label").setAttribute("value",
+      gmInstallString("install.connects", "Can connect to (@connect):"));
+  setUpIncludes("connects", "connects-label", "connects-description",
+      gScript.connects || []);
+
   let notice = document.getElementById("description-notice");
   let originalScriptVersion = document.getElementById(
       "original-script-version");

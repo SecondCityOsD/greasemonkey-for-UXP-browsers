@@ -27,7 +27,9 @@ cludes {
 /* The Settings tab is a single dense form; allow it to scroll vertically
    when the contents overflow the dialog height.  XUL handles vertical
    scrolling on a vbox via the `style="overflow: auto"` shim below. */
-#settings-scroll {
+/* Shared scroll style for the Settings and Pages tab containers — both
+   carry class="settings-scroll". */
+.settings-scroll {
   overflow-y: auto;
   overflow-x: hidden;
   padding: 4px 6px;
@@ -72,16 +74,19 @@ cludes {
      #settings-scroll's overflow-x:hidden — which is why it reads
      as "cut out of the resolution").
 
-     Setting width:0 + min-width:0 makes each description's preferred
-     width 0; flex inheritance from the row then stretches the cell
-     to fill exactly the column's flex-allocated space — independent
-     of content length.  .prefs-meta-trunc's text-overflow:ellipsis
-     then does its job inside that stable width.  Multi-line
-     <description> rows (#meta-description, the permissions block)
-     use white-space:normal and just wrap inside the same stable
-     width, so this rule is safe for them too. */
-  width: 0;
-  min-width: 0;
+     We pin the preferred width small so flex inheritance from the row
+     stretches the cell to exactly the column's flex-allocated space,
+     independent of content length; .prefs-meta-trunc's
+     text-overflow:ellipsis then truncates inside that stable width.
+     Multi-line rows (#meta-description, the permissions block) use
+     white-space:normal and wrap inside the same width.
+
+     Goanna/XUL quirk: a box size of 0 / 0px is treated as "auto", so
+     the previous `width:0; min-width:0` silently reverted to content
+     width and long URLs still leaked past the dialog edge.  A non-zero
+     `min-width:1px` is the smallest value that actually constrains a
+     -moz-box flex item.  (Diagnosis credit: Enobarbous, PM forum.) */
+  min-width: 1px;
 }
 
 /* Single-line metadata rows: emulate the old `crop="end"` ellipsis on
@@ -148,16 +153,17 @@ cludes {
 
 .prefs-pages-cludes {
   margin: 2px 0 8px 0;
+  height: 96px;
 }
 
-#grp-pages .name {
+.prefs-pages .name {
   font-weight: bold;
 }
-#grp-pages .sub-name {
+.prefs-pages .sub-name {
   font-style: italic;
   color: -moz-FieldText;
 }
-#grp-pages .count {
+.prefs-pages .count {
   margin-left: 6px;
   color: GrayText;
   font-size: 0.9em;
@@ -168,21 +174,10 @@ cludes {
   font-size: 0.9em;
 }
 
-/* Visual divider between user-side patterns and script-declared ones. */
-#grp-pages separator.thin {
-  border-top: 1px solid ThreeDShadow;
-  margin: 6px 0;
-  height: 0;
-  padding: 0;
-}
-
-/* The script-declared cludes lists run side by side; give each enough
-   width to stay legible. */
-#grp-pages .script-declared cludes {
-  min-width: 0;       /* override the dialog-wide min above */
-  height: 100px;
-  margin-right: 6px;
-}
+/* The script-declared and user lists are full-width vertical stacks (one
+   per Included / Matched / Excluded group, each carrying its list +
+   binding buttons); height comes from .prefs-pages-cludes above.  No
+   side-by-side column overrides are needed. */
 
 /* ─── Permissions section ─────────────────────────────────────────────── */
 

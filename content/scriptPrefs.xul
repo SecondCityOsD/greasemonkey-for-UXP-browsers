@@ -66,14 +66,17 @@
     oncommand="onMetaSelectAll(event);"/>
 </menupopup>
 
-<!-- ── Two-tab top-level ─────────────────────────────────────────────────
-     Settings: dense form (Metadata / Behaviour / Pages / Permissions).
-     Values:   GM_setValue browser, populated in M3.
+<!-- ── Three-tab top-level ───────────────────────────────────────────────
+     Settings:         Metadata / Behaviour / Script-declared pages
+                       (read-only) / Permissions.
+     User Preferences: the user's own include / match / exclude rules.
+     Values:           GM_setValue browser, populated in M3.
      ────────────────────────────────────────────────────────────────────── -->
 <tabbox id="prefs-tabbox" flex="1">
   <tabs id="prefs-tabs">
-    <tab id="tab-settings" label="&scriptPrefs.tab.settings;"/>
-    <tab id="tab-values"   label="&scriptPrefs.tab.values;"/>
+    <tab id="tab-settings"  label="&scriptPrefs.tab.settings;"/>
+    <tab id="tab-userprefs" label="&scriptPrefs.tab.userPrefs;"/>
+    <tab id="tab-values"    label="&scriptPrefs.tab.values;"/>
   </tabs>
 
   <tabpanels id="prefs-tabpanels" flex="1">
@@ -206,7 +209,8 @@
               </row>
               <row align="center">
                 <label class="prefs-meta-key" value="&scriptPrefs.label.autoUpdate;"/>
-                <radiogroup id="behave-autoupdate" orient="horizontal">
+                <radiogroup id="behave-autoupdate" orient="horizontal"
+                  oncommand="onAutoUpdateChange();">
                   <radio value="default" label="&scriptPrefs.autoUpdate.default;"/>
                   <radio value="enable"  label="&scriptPrefs.autoUpdate.on;"/>
                   <radio value="disable" label="&scriptPrefs.autoUpdate.off;"/>
@@ -226,70 +230,38 @@
           </grid>
         </groupbox>
 
-        <!-- ─── Pages (existing UX preserved per user choice) ─────────── -->
-        <groupbox id="grp-pages" class="prefs-section">
-          <caption label="&scriptPrefs.section.pages;"/>
+        <!-- ─── Script-declared pages (read-only) ─────────────────────── -->
+        <!-- The script's own @include / @match / @exclude.  Read-only, but
+             each list's binding offers an "Add as user exclude / include"
+             button that promotes the pattern into the User Preferences tab
+             (wired in scriptPrefs.js → onAddUserExclude / onAddUserInclude).
+             Stacked full-width (not 3 columns) so domains aren't cropped. -->
+        <groupbox id="grp-script-declared" class="prefs-section prefs-pages">
+          <caption label="&scriptPrefs.section.scriptDeclared;"/>
 
           <vbox class="include">
             <hbox align="center">
-              <label class="name" value="&label.grpIncluded;"/>
-              <label class="count" id="user-includes-count" value=""/>
-              <spacer flex="1"/>
-              <label class="prefs-pages-hint" value="&scriptPrefs.pages.userHint;"/>
+              <label class="sub-name" value="&label.grpIncluded;"/>
+              <label class="count" id="script-includes-count" value=""/>
             </hbox>
-            <cludes id="user-includes" class="prefs-pages-cludes"/>
+            <cludes id="script-includes" class="readonly prefs-pages-cludes"/>
           </vbox>
 
           <vbox class="match">
             <hbox align="center">
-              <label class="name" value="&label.grpMatched;"/>
-              <label class="count" id="user-matches-count" value=""/>
+              <label class="sub-name" value="&label.grpMatched;"/>
+              <label class="count" id="script-matches-count" value=""/>
             </hbox>
-            <cludes id="user-matches" class="prefs-pages-cludes"/>
+            <cludes id="script-matches" class="readonly prefs-pages-cludes"/>
           </vbox>
 
           <vbox class="exclude">
             <hbox align="center">
-              <label class="name" value="&label.grpExcluded;"/>
-              <label class="count" id="user-excludes-count" value=""/>
+              <label class="sub-name" value="&label.grpExcluded;"/>
+              <label class="count" id="script-excludes-count" value=""/>
             </hbox>
-            <cludes id="user-excludes" class="prefs-pages-cludes"/>
+            <cludes id="script-excludes" class="readonly prefs-pages-cludes"/>
           </vbox>
-
-          <separator class="thin"/>
-
-          <vbox class="include script-declared">
-            <hbox align="center">
-              <label class="name" value="&scriptPrefs.pages.scriptDeclaredHeader;"/>
-              <spacer flex="1"/>
-              <label class="prefs-pages-hint" value="&scriptPrefs.pages.scriptHint;"/>
-            </hbox>
-            <hbox align="start">
-              <vbox flex="1">
-                <hbox align="center">
-                  <label class="sub-name" value="&label.grpIncluded;"/>
-                  <label class="count" id="script-includes-count" value=""/>
-                </hbox>
-                <cludes id="script-includes" class="readonly prefs-pages-cludes"/>
-              </vbox>
-              <vbox flex="1">
-                <hbox align="center">
-                  <label class="sub-name" value="&label.grpMatched;"/>
-                  <label class="count" id="script-matches-count" value=""/>
-                </hbox>
-                <cludes id="script-matches" class="readonly prefs-pages-cludes"/>
-              </vbox>
-              <vbox flex="1">
-                <hbox align="center">
-                  <label class="sub-name" value="&label.grpExcluded;"/>
-                  <label class="count" id="script-excludes-count" value=""/>
-                </hbox>
-                <cludes id="script-excludes" class="readonly prefs-pages-cludes"/>
-              </vbox>
-            </hbox>
-          </vbox>
-
-          <checkbox id="user-override" label="&checkbox.grpOverride;"/>
         </groupbox>
 
         <!-- ─── Permissions (read-only summary) ───────────────────────── -->
@@ -330,6 +302,44 @@
           </grid>
         </groupbox>
 
+      </vbox>
+    </tabpanel>
+
+    <!-- ─── User Preferences tab — the user's own include / match /
+         exclude rules, layered on top of (or replacing) the script's. ── -->
+    <tabpanel flex="1" orient="vertical">
+      <vbox flex="1" id="userprefs-scroll" class="settings-scroll">
+        <groupbox id="grp-user-pages" class="prefs-section prefs-pages">
+          <caption label="&scriptPrefs.section.userPages;"/>
+
+          <vbox class="include">
+            <hbox align="center">
+              <label class="sub-name" value="&label.grpIncluded;"/>
+              <label class="count" id="user-includes-count" value=""/>
+              <spacer flex="1"/>
+              <label class="prefs-pages-hint" value="&scriptPrefs.pages.userHint;"/>
+            </hbox>
+            <cludes id="user-includes" class="prefs-pages-cludes"/>
+          </vbox>
+
+          <vbox class="match">
+            <hbox align="center">
+              <label class="sub-name" value="&label.grpMatched;"/>
+              <label class="count" id="user-matches-count" value=""/>
+            </hbox>
+            <cludes id="user-matches" class="prefs-pages-cludes"/>
+          </vbox>
+
+          <vbox class="exclude">
+            <hbox align="center">
+              <label class="sub-name" value="&label.grpExcluded;"/>
+              <label class="count" id="user-excludes-count" value=""/>
+            </hbox>
+            <cludes id="user-excludes" class="prefs-pages-cludes"/>
+          </vbox>
+
+          <checkbox id="user-override" label="&checkbox.grpOverride;"/>
+        </groupbox>
       </vbox>
     </tabpanel>
 

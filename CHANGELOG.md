@@ -1,5 +1,54 @@
 ## Changelog
 
+#### 3.8.0 — UI/UX pass (Pale Moon forum feedback)
+
+A round of about:addons / install-dialog / per-script-options refinements
+driven by forum testers (esp. Enobarbous) after the 3.7.0 release.
+
+**Per-script Options window (`scriptPrefs`)**
+* Split into three tabs — **Settings** (Metadata / Behaviour /
+  Script-declared pages / Permissions), **User Preferences** (the user's
+  own include / match / exclude rules + the override checkbox), and
+  **Values** — matching the tester's prototype.  The script-declared
+  lists are now full-width instead of three cramped columns.
+* Fixed long-URL overflow: metadata value cells were reverting to content
+  width because XUL treats a `0`/`0px` box size as `auto`; pinned
+  `min-width:1px` instead (diagnosis credit: Enobarbous).
+* Enabling Automatic updates on a locally-edited script now warns
+  **immediately on the radio click** (was: never, on the Options page),
+  mirroring the Add-ons Manager radio.
+
+**about:addons "User Scripts" pane**
+* Removed the "Get user scripts" sort-bar link.
+* "New User Script…" is now a **New…** text-link dropdown: Create new
+  userscript · Install from GreasyFork · OpenUserJS · GitHub Gist ·
+  Install from URL… (small dismissible panel; invalid URLs now show the
+  localized "Invalid URL" message instead of silently doing nothing).
+* Right-click a script → **Enable/Disable** (first item; label flips with
+  state) and **Remove** (under Edit) — same behaviour as the row buttons,
+  including the undoable "removed — Undo" prompt on Remove.
+* Recover-Orphans link text moved from hard-coded English into
+  `gmAddons.properties` (translatable; still shows the live count).
+* New about:config toggles (default true):
+  `extensions.greasemonkey.manager.importExport.enabled` and
+  `…manager.search.enabled` hide the Import/Export links or live-search.
+
+**Toolbar "Web sites…" menu**
+* Now lists Greasemonkey Manual + GreasyFork / OpenUserJS / GitHub Gist,
+  replacing the old dead greasespot-wiki links.
+
+**Install dialog**
+* Shows a **permissions summary** (`@grant` + `@connect`) so users see
+  what a script can do before installing.
+* Hardened `install.css` to use system field colours (`-moz-FieldText`),
+  so the matches list / text no longer disappears under dark or
+  non-default themes.
+
+**Localization**
+* New menu/label entities propagated to all 34 `greasemonkey.dtd` and
+  `gmAddons.dtd` locale files (English placeholders, pending translation);
+  new keys added to en-US `gmAddons.properties` / `gmBrowser.properties`.
+
 #### Rework branch — internal architecture cleanup (unreleased)
 
 This branch (`Rework`) is the multi-phase strip of the multi-process

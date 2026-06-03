@@ -131,6 +131,10 @@ pref("extensions.greasemonkey.haveInsertedToolbarbutton", false);
 pref("extensions.greasemonkey.installDelay", 5);
 pref("extensions.greasemonkey.jarIsGreaseable", false);
 pref("extensions.greasemonkey.load.earlier", false);
+// 3.7.x: about:addons UI toggles (visible in about:config).  Default on;
+// set false to hide the Import/Export links or the live-search box.
+pref("extensions.greasemonkey.manager.importExport.enabled", true);
+pref("extensions.greasemonkey.manager.search.enabled", true);
 pref("extensions.greasemonkey.newScript.removeUnused", true);
 pref("extensions.greasemonkey.newScript.template", "// ==UserScript==\n// @name        %name%\n// @namespace   %namespace%\n// @description %description%\n// @include     %include%\n// @exclude     %exclude%\n// @version     1\n// @grant       none\n// ==/UserScript==");
 pref("extensions.greasemonkey.requireDisabledScriptsUpdates", false);

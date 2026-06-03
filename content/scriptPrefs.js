@@ -38,6 +38,9 @@ if (typeof Cu === "undefined") {
 Cu.import("chrome://greasemonkey-modules/content/util.js");
 Cu.import("resource://gre/modules/Services.jsm");
 
+// GM_CONSTANTS — for the localized auto-update confirmation bundle.
+Cu.import("chrome://greasemonkey-modules/content/constants.js");
+
 // AddonManager constants for the Auto-update radio mapping.
 Cu.import("resource://gre/modules/AddonManager.jsm");
 
@@ -382,6 +385,46 @@ function populateBehaviourSection() {
 }
 
 /**
+ * Fires the moment the Automatic-updates radio changes.  If the user
+ * flips it from Off to On / Default while the script still has local
+ * edits, warn that the next update will overwrite those edits, and snap
+ * the radio back to Off if they decline.  Mirrors the Add-ons Manager
+ * radio (ScriptAddon.applyBackgroundUpdates in modules/addons.js); the OK
+ * commit then just persists whatever the radio settled on.
+ */
+function onAutoUpdateChange() {
+  let autoRadio = document.getElementById("behave-autoupdate");
+  if (!autoRadio || !autoRadio.value) {
+    return;
+  }
+  let next;
+  switch (autoRadio.value) {
+    case "enable":  next = AddonManager.AUTOUPDATE_ENABLE;  break;
+    case "disable": next = AddonManager.AUTOUPDATE_DISABLE; break;
+    default:        next = AddonManager.AUTOUPDATE_DEFAULT; break;
+  }
+  let reenablingWhileEdited =
+      (gScript.checkRemoteUpdates == AddonManager.AUTOUPDATE_DISABLE)
+      && (next != AddonManager.AUTOUPDATE_DISABLE)
+      && (gScript._modifiedTime > gScript._installTime);
+  if (!reenablingWhileEdited) {
+    return;
+  }
+  let bundle = GM_CONSTANTS.localeStringBundle.createBundle(
+      GM_CONSTANTS.localeGmAddonsProperties);
+  let confirmed = Services.prompt.confirm(
+      null,
+      "Greasemonkey",
+      bundle.GetStringFromName("confirmEnableAutoUpdate"));
+  if (!confirmed) {
+    // Snap back to Off.  A programmatic .value assignment doesn't re-fire
+    // oncommand, and even if it did, "disable" can't satisfy the
+    // re-enabling condition above — so there's no recursion risk.
+    autoRadio.value = "disable";
+  }
+}
+
+/**
  * Selects the menulist's <menuitem> whose `value` attribute matches
  * aValue, falling back to the first item when there's no match.
  */
@@ -607,15 +650,12 @@ function onListRowHover(aEvent) {
 //
 // When the cludes listbox is at its top and the user scroll-wheels up,
 // the platform XUL listbox swallows the event without bubbling — so the
-// surrounding #settings-scroll vbox doesn't move.  Same problem at the
-// bottom in reverse.  We re-dispatch any wheel event the listbox would
-// have absorbed at its scroll boundary so the outer container picks it
-// up and the dialog feels like a normal scrollable page.
+// surrounding scroll container doesn't move.  Same problem at the bottom
+// in reverse.  We re-dispatch any wheel event the listbox would have
+// absorbed at its scroll boundary so the outer container picks it up and
+// the dialog feels like a normal scrollable page.
 
 function installScrollBubbling() {
-  let scroll = document.getElementById("settings-scroll");
-  if (!scroll) return;
-
   let ids = [
     "script-includes", "script-matches", "script-excludes",
     "user-includes",   "user-matches",   "user-excludes",
@@ -623,6 +663,16 @@ function installScrollBubbling() {
   for (let i = 0; i < ids.length; i++) {
     let cludes = document.getElementById(ids[i]);
     if (!cludes) continue;
+    // Each list bubbles to its own tab's scroll container: the
+    // script-declared lists live in the Settings tab, the user lists in
+    // the User Preferences tab.  Both containers carry the
+    // "settings-scroll" class, so walk up to the nearest one.
+    let scroll = cludes.parentNode;
+    while (scroll && !(scroll.classList
+        && scroll.classList.contains("settings-scroll"))) {
+      scroll = scroll.parentNode;
+    }
+    if (!scroll) continue;
     let listbox = document.getAnonymousElementByAttribute(
         cludes, "id", "listbox");
     if (!listbox) continue;
@@ -887,6 +937,9 @@ function onDialogAccept() {
       default:        next = AddonManager.AUTOUPDATE_DEFAULT; break;
     }
     if (next !== gScript.checkRemoteUpdates) {
+      // The re-enable-while-edited disclaimer fires immediately when the
+      // radio is flipped (onAutoUpdateChange below), so by commit time the
+      // radio already reflects a confirmed choice — just persist it.
       gScript.checkRemoteUpdates = next;
     }
   }

@@ -33,3 +33,8 @@
 
 <!-- 3.7.0: live-search placeholder; translate as needed. -->
 <!ENTITY greasemonkey.search.placeholder "Search scripts...">
+
+<!-- 3.7.x: user-script context-menu actions (right-click in the list). -->
+<!ENTITY gmEnable  "Enable">
+<!ENTITY gmDisable "Disable">
+<!ENTITY gmRemove  "Remove">
