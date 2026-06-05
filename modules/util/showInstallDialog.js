@@ -42,7 +42,15 @@ function showInstallDialog(aUrlOrRemoteScript, aBrowser, aRequest) {
 
   var browser = aBrowser || GM_util.getBrowserWindow().gBrowser;
   var params = null;
+  // opened: did the install dialog actually open?  reported: have we already
+  // shown a failure alert?  These let a programmatic install (Install-from-URL
+  // or drag-and-drop, which pass no intercepted request) report a clear error
+  // when the download finishes without producing a valid user script, instead
+  // of failing silently.
+  var opened = false;
+  var reported = false;
   function openDialog(aScript) {
+    opened = true;
     params = [rs, browser, aScript];
     params.wrappedJSObject = params;
     // Don't set "modal" param, or this blocks.
@@ -127,6 +135,33 @@ function showInstallDialog(aUrlOrRemoteScript, aBrowser, aRequest) {
           */
         }
       }
+    }
+
+    // Programmatic install with no intercepted request (Install-from-URL or
+    // drag-and-drop): if the download finished without ever opening the
+    // install dialog, the URL either failed to download or wasn't a user
+    // script — surface that instead of failing silently.  (With an
+    // intercepted request the browser's own navigation/error UI covers it;
+    // if the dialog opened there's nothing to report.)
+    if (!aRequest && !opened && !reported) {
+      reported = true;
+      let msg = rs.errorMessage;
+      if (!msg) {
+        let url = (typeof aUrlOrRemoteScript == "string")
+            ? aUrlOrRemoteScript
+            : (rs._url || "");
+        try {
+          msg = GM_CONSTANTS.localeStringBundle.createBundle(
+              GM_CONSTANTS.localeGreasemonkeyProperties)
+              .GetStringFromName("error.notUserScript");
+        } catch (e) {
+          msg = "This URL does not point to a user script.";
+        }
+        if (url) {
+          msg += "\n" + url;
+        }
+      }
+      GM_util.alert(msg);
     }
   });
 }
