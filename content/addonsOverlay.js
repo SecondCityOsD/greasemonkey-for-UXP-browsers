@@ -489,6 +489,10 @@ function init() {
 
   // Apply the about:config UI visibility toggles (Import/Export, search).
   gmApplyManagerPrefs();
+
+  // Wire up the opt-in responsive (two-row-when-narrow) header.  No-op unless
+  // extensions.greasemonkey.manager.responsiveHeader.enabled is true.
+  gmSetupResponsiveHeader();
 };
 
 function getSortBy(aButtons) {
@@ -599,6 +603,9 @@ function onViewChanged(aEvent) {
     document.documentElement.classList.add("greasemonkey");
     setEmptyWarningVisible();
     applySort();
+    // The User Scripts pane just became visible (and laid out) — re-check
+    // whether the responsive header should stack.  No-op when the pref is off.
+    gmScheduleHeaderEval();
   } else {
     document.documentElement.classList.remove("greasemonkey");
   }
@@ -1056,6 +1063,80 @@ function gmApplyManagerPrefs() {
   } catch (e) {
     Components.utils.reportError(
         "Greasemonkey: applying manager UI prefs failed: " + e);
+  }
+}
+
+// ── Opt-in responsive header (manager.responsiveHeader.enabled) ──────────────
+// Default OFF: the sort bar stays the classic single row, exactly as it has
+// always been.  When the pref is true we watch the header's width and toggle
+// the "gm-sortbar-stacked" class (see addons.css) whenever the single row
+// would overflow — so the actions and the search/sort controls wrap onto two
+// rows instead of the sort buttons being cropped off the right edge.
+//
+// We measure the two groups' natural widths directly rather than relying on a
+// CSS media-query breakpoint, so the decision is correct in any locale, font
+// size, or zoom level, and regardless of the category sidebar's width.
+
+var gmResponsiveHeaderEnabled = false;
+var gmHeaderEvalPending = false;
+
+function gmSetupResponsiveHeader() {
+  try {
+    gmResponsiveHeaderEnabled =
+        GM_prefRoot.getValue("manager.responsiveHeader.enabled", false);
+  } catch (e) {
+    gmResponsiveHeaderEnabled = false;
+  }
+  if (!gmResponsiveHeaderEnabled) {
+    return;
+  }
+  // Re-evaluate on window resize (this also fires on full-page zoom, which
+  // shrinks the CSS-pixel viewport) — and once now.
+  window.addEventListener("resize", gmScheduleHeaderEval, false);
+  gmScheduleHeaderEval();
+}
+
+// Coalesce bursts of resize events into a single evaluation on the next tick.
+function gmScheduleHeaderEval() {
+  if (!gmResponsiveHeaderEnabled || gmHeaderEvalPending) {
+    return;
+  }
+  gmHeaderEvalPending = true;
+  window.setTimeout(gmEvaluateHeader, 0);
+}
+
+function gmEvaluateHeader() {
+  gmHeaderEvalPending = false;
+  if (!gmResponsiveHeaderEnabled) {
+    return;
+  }
+  // The bar only exists / is laid out on the User Scripts pane.
+  if (gViewController.currentViewId != GM_CONSTANTS.scriptViewID) {
+    return;
+  }
+  let bar = document.getElementById("greasemonkey-sort-bar");
+  let actions = document.getElementById("gm-sortbar-actions");
+  let listControls = document.getElementById("gm-sortbar-listcontrols");
+  if (!bar || !actions || !listControls) {
+    return;
+  }
+  // Measure the groups' natural widths in the UN-stacked state.  Removing the
+  // class and re-adding it within this one synchronous function never paints
+  // an intermediate frame, so there is no flicker.
+  if (bar.classList.contains("gm-sortbar-stacked")) {
+    bar.classList.remove("gm-sortbar-stacked");
+  }
+  let have = bar.getBoundingClientRect().width;
+  if (have < 1) {
+    // Not laid out yet (e.g. pane hidden) — leave it single-row.
+    return;
+  }
+  // 24px slack covers the .view-header padding and a minimum inter-group gap,
+  // and doubles as hysteresis so the layout doesn't oscillate at the edge.
+  let need = actions.getBoundingClientRect().width
+      + listControls.getBoundingClientRect().width + 24;
+  if (need > have) {
+    bar.classList.add("gm-sortbar-stacked");
   }
 }
 

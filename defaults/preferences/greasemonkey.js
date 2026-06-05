@@ -135,6 +135,11 @@ pref("extensions.greasemonkey.load.earlier", false);
 // set false to hide the Import/Export links or the live-search box.
 pref("extensions.greasemonkey.manager.importExport.enabled", true);
 pref("extensions.greasemonkey.manager.search.enabled", true);
+// On by default: the User Scripts header collapses to two rows when the
+// window is too narrow — or zoomed in too far — to fit the toolbar on one
+// row, instead of cropping the sort buttons.  Set false to keep the classic
+// single-row header exactly as it has always been.
+pref("extensions.greasemonkey.manager.responsiveHeader.enabled", true);
 pref("extensions.greasemonkey.newScript.removeUnused", true);
 pref("extensions.greasemonkey.newScript.template", "// ==UserScript==\n// @name        %name%\n// @namespace   %namespace%\n// @description %description%\n// @include     %include%\n// @exclude     %exclude%\n// @version     1\n// @grant       none\n// ==/UserScript==");
 pref("extensions.greasemonkey.requireDisabledScriptsUpdates", false);

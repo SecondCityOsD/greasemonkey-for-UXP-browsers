@@ -14,7 +14,29 @@
 }
 
 page.greasemonkey #greasemonkey-sort-bar {
+  /* Default: the classic single-row bar — the look it has had for years.
+     Intentionally ONLY `display:-moz-box` here (no orient/align/height
+     overrides), so this is byte-identical to the original; the AOM's
+     .view-header supplies the rest (horizontal box, stretch, min-height). */
   display: -moz-box;
+}
+
+/* Opt-in responsive stacking.  addonsOverlay.js adds the .gm-sortbar-stacked
+   class ONLY when extensions.greasemonkey.manager.responsiveHeader.enabled is
+   true AND it has measured that the single row would overflow (narrow window
+   or zoomed in).  When set, the actions group and the list-controls group
+   stack into two rows so nothing is cropped.  With the pref off (default)
+   this class is never applied and the bar above is untouched. */
+page.greasemonkey #greasemonkey-sort-bar.gm-sortbar-stacked {
+  -moz-box-orient: vertical;
+  -moz-box-align: stretch;
+  height: auto;
+}
+page.greasemonkey #greasemonkey-sort-bar.gm-sortbar-stacked > #gm-sortbar-gap {
+  display: none;
+}
+page.greasemonkey #greasemonkey-sort-bar.gm-sortbar-stacked > #gm-sortbar-listcontrols {
+  margin-top: 4px;
 }
 
 page.greasemonkey #addon-list-empty,

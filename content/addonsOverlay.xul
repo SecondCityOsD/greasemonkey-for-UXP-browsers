@@ -113,50 +113,71 @@
     </menupopup>
   </popupset>
 
+  <!-- Responsive header.  At normal width it's a single row (actions on the
+       left, live-search + sort buttons on the right).  When the pane is
+       narrow or zoomed in (see the @media rule in addons.css) the outer box
+       flips to vertical and the groups stack into two rows, so the controls
+       never overflow / get cropped.  Still ONE container keeping the id
+       #greasemonkey-sort-bar, so addonsOverlay.js works unchanged: it finds
+       the sort buttons via getElementsByTagName/Attribute (recursive) and
+       catches their bubbling `command` events with the single delegated
+       listener it attaches to this container. -->
   <hbox id="greasemonkey-sort-bar" class="view-header"
-    pack="end" insertbefore="addon-list-empty">
-    <spacer />
-    <!-- "Get user scripts" link removed from the sort bar per forum
-         feedback (discovery now lives in the New… menu and the toolbar
-         "Web sites…" menu).  Kept commented for easy restore. -->
-    <!--
-    <label value="&greasemonkey.getUserScripts;" class="text-link"
-      onclick="GM_openUserscriptsOrg();" />
-    -->
-    <!-- "New…" — a plain text-link (matching Export All… / Import…) that
-         opens #gm-new-menu-popup (in the popupset above) via GM_newMenuShow.
-         Keeps the id so the Install-from-URL panel can anchor to it. -->
-    <label id="gm-new-menu" value="&menu.newButton;" class="text-link"
-      onclick="GM_newMenuShow(event);"/>
-    <label id="gm-export-all" value="&backup.exportAll;" class="text-link"
-      onclick="GM_backupExport();" />
-    <label id="gm-import" value="&backup.import;" class="text-link"
-      onclick="GM_backupImport();" />
-    <!-- Recover Orphans link.  Hidden by default; init() in
-         addonsOverlay.js scans <profile>/gm_scripts/ at panel-load time
-         and, when orphaned script dirs exist, sets a localized
-         count-suffixed label + tooltip (gmAddons.properties:
-         recoverOrphans.label / recoverOrphans.tooltip) and unhides it. -->
-    <label id="gm-recover-orphans" hidden="true" class="text-link"
-      onclick="GM_recoverOrphans();" />
-    <spacer flex="1"/>
-    <!-- Live-search box (3.7.0).  Filters the visible richlistitems in
-         #addon-list as the user types, against name + namespace +
-         description + id.  Independent of AOM's own top-right search
-         box (which navigates to a separate "search results" view). -->
-    <textbox id="gm-live-search" class="greasemonkey-live-search"
-      type="search" emptytext="&greasemonkey.search.placeholder;"
-      placeholder="&greasemonkey.search.placeholder;"
-      oninput="gmLiveSearchInput();"
-      oncommand="gmLiveSearchInput();"/>
-    <button label="&sort.status;" tooltiptext="&sort.byStatus;"
-      class="sorter" sortBy="uiState,name" checkState="2" />
-    <button label="&sort.name;" tooltiptext="&sort.byName;"
-      class="sorter" sortBy="name" />
-    <button label="&sort.namespace;" tooltiptext="&sort.byNamespace;"
-      class="sorter" sortBy="namespace" />
-    <button label="&sort.execution;" tooltiptext="&sort.byExecution;"
-      class="sorter" sortBy="executionIndex" />
+    insertbefore="addon-list-empty">
+
+    <!-- Actions group (becomes row 1 when stacked). -->
+    <hbox id="gm-sortbar-actions" class="gm-sortbar-row">
+      <!-- "Get user scripts" link removed from the sort bar per forum
+           feedback (discovery now lives in the New… menu and the toolbar
+           "Web sites…" menu).  Kept commented for easy restore. -->
+      <!--
+      <label value="&greasemonkey.getUserScripts;" class="text-link"
+        onclick="GM_openUserscriptsOrg();" />
+      -->
+      <!-- "New…" — a plain text-link (matching Export All… / Import…) that
+           opens #gm-new-menu-popup (in the popupset above) via GM_newMenuShow.
+           Keeps the id so the Install-from-URL panel can anchor to it. -->
+      <label id="gm-new-menu" value="&menu.newButton;" class="text-link"
+        onclick="GM_newMenuShow(event);"/>
+      <label id="gm-export-all" value="&backup.exportAll;" class="text-link"
+        onclick="GM_backupExport();" />
+      <label id="gm-import" value="&backup.import;" class="text-link"
+        onclick="GM_backupImport();" />
+      <!-- Recover Orphans link.  Hidden by default; init() in
+           addonsOverlay.js scans <profile>/gm_scripts/ at panel-load time
+           and, when orphaned script dirs exist, sets a localized
+           count-suffixed label + tooltip (gmAddons.properties:
+           recoverOrphans.label / recoverOrphans.tooltip) and unhides it. -->
+      <label id="gm-recover-orphans" hidden="true" class="text-link"
+        onclick="GM_recoverOrphans();" />
+    </hbox>
+
+    <!-- Flexible gap: separates the two groups on one row at normal width;
+         the @media rule hides it when the header stacks into two rows. -->
+    <spacer flex="1" id="gm-sortbar-gap"/>
+
+    <!-- List-controls group (becomes row 2 when stacked):
+         live-search (left) + sort buttons (right). -->
+    <hbox id="gm-sortbar-listcontrols" class="gm-sortbar-row">
+      <!-- Live-search box (3.7.0).  Filters the visible richlistitems in
+           #addon-list as the user types, against name + namespace +
+           description + id.  Independent of AOM's own top-right search
+           box (which navigates to a separate "search results" view). -->
+      <textbox id="gm-live-search" class="greasemonkey-live-search"
+        type="search" emptytext="&greasemonkey.search.placeholder;"
+        placeholder="&greasemonkey.search.placeholder;"
+        oninput="gmLiveSearchInput();"
+        oncommand="gmLiveSearchInput();"/>
+      <spacer flex="1"/>
+      <button label="&sort.status;" tooltiptext="&sort.byStatus;"
+        class="sorter" sortBy="uiState,name" checkState="2" />
+      <button label="&sort.name;" tooltiptext="&sort.byName;"
+        class="sorter" sortBy="name" />
+      <button label="&sort.namespace;" tooltiptext="&sort.byNamespace;"
+        class="sorter" sortBy="namespace" />
+      <button label="&sort.execution;" tooltiptext="&sort.byExecution;"
+        class="sorter" sortBy="executionIndex" />
+    </hbox>
   </hbox>
 
   <vbox id="user-script-list-empty" insertbefore="addon-list-empty"
