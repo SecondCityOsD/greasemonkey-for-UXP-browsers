@@ -1,6 +1,6 @@
 ## Changelog
 
-#### 3.8.0 — UI/UX pass (Pale Moon forum feedback)
+#### 3.8 — UI/UX pass (Pale Moon forum feedback)
 
 A round of about:addons / install-dialog / per-script-options refinements
 driven by forum testers (esp. Enobarbous) after the 3.7.0 release.
@@ -22,11 +22,18 @@ driven by forum testers (esp. Enobarbous) after the 3.7.0 release.
 * Removed the "Get user scripts" sort-bar link.
 * "New User Script…" is now a **New…** text-link dropdown: Create new
   userscript · Install from GreasyFork · OpenUserJS · GitHub Gist ·
-  Install from URL… (small dismissible panel; invalid URLs now show the
-  localized "Invalid URL" message instead of silently doing nothing).
+  Install from URL… (small dismissible panel).
+* Installing from a URL — or by drag-and-drop — now reports a clear error
+  when the address is invalid, can't be downloaded, or isn't a user script,
+  instead of failing silently.
 * Right-click a script → **Enable/Disable** (first item; label flips with
   state) and **Remove** (under Edit) — same behaviour as the row buttons,
   including the undoable "removed — Undo" prompt on Remove.
+* **Responsive header (on by default):** when the window is too narrow — or
+  zoomed in too far — to fit the toolbar on one row, the action links and the
+  search + sort buttons stack onto two rows instead of the sort buttons being
+  cropped off the right edge.  Disable with the about:config pref
+  `extensions.greasemonkey.manager.responsiveHeader.enabled`.
 * Recover-Orphans link text moved from hard-coded English into
   `gmAddons.properties` (translatable; still shows the live count).
 * New about:config toggles (default true):
