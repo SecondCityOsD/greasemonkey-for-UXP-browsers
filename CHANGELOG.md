@@ -1,5 +1,16 @@
 ## Changelog
 
+#### 3.8.1 — Hotfix
+
+* **Fixed:** opening a script's **Preferences** failed with an "XML Parser
+  Error: undefined entity" on every non-English UI locale — a regression from
+  the 3.8 per-script Options redesign, whose new interface labels were missing
+  from the translations.  All localisations are restored (new labels fall back
+  to English until translated; a malformed entity in the Hebrew locale was also
+  corrected).  Thanks to the reporter of issue #23.
+* Added a **Report a bug** entry to the toolbar **Web sites…** menu, linking to
+  the project's issue tracker.
+
 #### 3.8 — UI/UX pass (Pale Moon forum feedback)
 
 A round of about:addons / install-dialog / per-script-options refinements
