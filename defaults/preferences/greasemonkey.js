@@ -144,7 +144,7 @@ pref("extensions.greasemonkey.manager.responsiveHeader.enabled", true);
 // instead of jumping straight into the editor with an auto-named script.
 pref("extensions.greasemonkey.manager.newScript.classicDialog.enabled", false);
 pref("extensions.greasemonkey.newScript.removeUnused", true);
-pref("extensions.greasemonkey.newScript.template", "// ==UserScript==\n// @name        %name%\n// @namespace   %namespace%\n// @description %description%\n// @include     %include%\n// @exclude     %exclude%\n// @version     1\n// @grant       none\n// ==/UserScript==");
+pref("extensions.greasemonkey.newScript.template", "// ==UserScript==\n// @name         %name%\n// @namespace    %namespace%\n// @version      1.0.0\n// @author       \n// @description  %description%\n// @homepageURL  \n// @supportURL   \n// @icon         \n// @include      %include%\n// @exclude      %exclude%\n// @run-at       document-end\n// @grant        none\n// @license      MIT\n// ==/UserScript==\n\n(function () {\n  'use strict';\n\n  // Your code here...\n\n})();");
 // Monotonic counter for auto-naming editor-jump scripts ("New User Script N").
 pref("extensions.greasemonkey.newScript.counter", 0);
 pref("extensions.greasemonkey.requireDisabledScriptsUpdates", false);
