@@ -995,6 +995,13 @@ function GM_openSite(aUrl) {
 // data is keyed by folder (not name), so a later rename keeps stored values.
 // The classic dialog is still available via GM_util.newUserScript().
 function GM_createNewUserScript() {
+  // about:config escape hatch: when this pref is enabled, fall back to the
+  // classic name/namespace metadata dialog instead of jumping into the editor.
+  if (GM_prefRoot.getValue("manager.newScript.classicDialog.enabled", false)) {
+    GM_util.newUserScript(window);
+    return;
+  }
+
   let installScriptFromSource = GM_util.installScriptFromSource;
   if (typeof installScriptFromSource !== "function") {
     alert("Internal error: installScriptFromSource is unavailable.");

@@ -140,6 +140,9 @@ pref("extensions.greasemonkey.manager.search.enabled", true);
 // row, instead of cropping the sort buttons.  Set false to keep the classic
 // single-row header exactly as it has always been.
 pref("extensions.greasemonkey.manager.responsiveHeader.enabled", true);
+// When true, "Create new userscript" opens the classic name/namespace dialog
+// instead of jumping straight into the editor with an auto-named script.
+pref("extensions.greasemonkey.manager.newScript.classicDialog.enabled", false);
 pref("extensions.greasemonkey.newScript.removeUnused", true);
 pref("extensions.greasemonkey.newScript.template", "// ==UserScript==\n// @name        %name%\n// @namespace   %namespace%\n// @description %description%\n// @include     %include%\n// @exclude     %exclude%\n// @version     1\n// @grant       none\n// ==/UserScript==");
 // Monotonic counter for auto-naming editor-jump scripts ("New User Script N").
