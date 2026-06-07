@@ -142,6 +142,8 @@ pref("extensions.greasemonkey.manager.search.enabled", true);
 pref("extensions.greasemonkey.manager.responsiveHeader.enabled", true);
 pref("extensions.greasemonkey.newScript.removeUnused", true);
 pref("extensions.greasemonkey.newScript.template", "// ==UserScript==\n// @name        %name%\n// @namespace   %namespace%\n// @description %description%\n// @include     %include%\n// @exclude     %exclude%\n// @version     1\n// @grant       none\n// ==/UserScript==");
+// Monotonic counter for auto-naming editor-jump scripts ("New User Script N").
+pref("extensions.greasemonkey.newScript.counter", 0);
 pref("extensions.greasemonkey.requireDisabledScriptsUpdates", false);
 pref("extensions.greasemonkey.requireSecureUpdates", true);
 pref("extensions.greasemonkey.requireTimeoutUpdates", true);

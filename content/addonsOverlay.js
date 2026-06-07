@@ -984,6 +984,91 @@ function GM_openSite(aUrl) {
   chromeWin.gBrowser.selectedTab = chromeWin.gBrowser.addTab(aUrl);
 }
 
+// "Create new userscript" — auto-name a fresh script and jump straight into
+// the editor, instead of opening the metadata dialog that demanded a name +
+// namespace up front.  The script gets a unique placeholder name
+// ("New User Script N", N from a persisted counter) and a constant
+// "Greasemonkey" namespace, pre-scoped to the active tab's URL; then
+// installScriptFromSource() installs it and opens it in the configured editor
+// (or Scratchpad).  The user renames it by editing @name in the editor — safe,
+// because the on-disk folder + uuid are the stable identity and GM_setValue
+// data is keyed by folder (not name), so a later rename keeps stored values.
+// The classic dialog is still available via GM_util.newUserScript().
+function GM_createNewUserScript() {
+  let installScriptFromSource = GM_util.installScriptFromSource;
+  if (typeof installScriptFromSource !== "function") {
+    alert("Internal error: installScriptFromSource is unavailable.");
+    return;
+  }
+
+  let config = GM_util.getService().config;
+
+  // Default @include to the active tab's URL so the new script is pre-scoped
+  // to where the user is (mirrors Violentmonkey).  Privileged / cross-origin /
+  // about: pages throw or aren't http(s); fall back to match-all in that case.
+  let include = "*";
+  try {
+    let gBrowser = GM_util.getBrowserWindow().gBrowser;
+    let href = gBrowser.selectedBrowser.contentWindow.location.href;
+    if (href && /^https?:/.test(href)) {
+      include = href;
+    }
+  } catch (e) {
+    // Leave include = "*".
+  }
+
+  // parse() turns the assembled source into a Script so config.installIsUpdate()
+  // can tell us whether that (name, namespace) pair already exists.
+  let scope = {};
+  Components.utils.import(
+      "chrome://greasemonkey-modules/content/parseScript.js", scope);
+
+  // Bump N (persisted across sessions) until the (name, namespace) pair is
+  // unique, so creating several scripts in a row never collides.  The guard
+  // caps the search in the pathological all-match case.
+  let n = GM_prefRoot.getValue("newScript.counter", 0);
+  let source;
+  let guard = 0;
+  do {
+    n++;
+    guard++;
+    source = gmBuildScriptSource("New User Script " + n, "Greasemonkey", include);
+  } while (config.installIsUpdate(scope.parse(source)) && (guard < 1000));
+  GM_prefRoot.setValue("newScript.counter", n);
+
+  // installScriptFromSource writes the file, runs the install pipeline, and
+  // opens the new script in the editor as its final step.
+  installScriptFromSource(source);
+}
+
+// Assemble a userscript from the user's newScript.template pref: fill the
+// @name / @namespace / @include placeholders and drop the optional
+// @description / @exclude lines (honouring newScript.removeUnused, exactly as
+// the classic New Script dialog does).  split()/join() is used instead of
+// String.replace so a '$' in a substituted value can't be misread as a
+// replacement pattern.
+function gmBuildScriptSource(aName, aNamespace, aInclude) {
+  let source = GM_prefRoot.getValue("newScript.template");
+  let removeUnused = GM_prefRoot.getValue("newScript.removeUnused");
+
+  source = source.split("%name%").join(aName);
+  source = source.split("%namespace%").join(aNamespace);
+  source = source.split("%include%").join(aInclude);
+
+  if (removeUnused) {
+    source = source.replace(/^\/\/[ \t]*@description.*\n?/im, "");
+    source = source.replace(/^\/\/[ \t]*@exclude.*\n?/im, "");
+  } else {
+    source = source.split("%description%").join("");
+    source = source.split("%exclude%").join("");
+  }
+
+  if (GM_util.getEnvironment().osWindows) {
+    source = source.replace(/\n/g, "\r\n");
+  }
+  return source;
+}
+
 // "Install from URL…" — open the small dismissible panel anchored to the
 // New… button.  Clicking outside or Cancel hides it (autohide panel).
 function GM_installFromUrlShow() {
