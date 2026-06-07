@@ -1,5 +1,15 @@
 ## Changelog
 
+#### 3.9
+
+**about:addons "User Scripts" pane**
+* **Create new userscript** now opens the editor directly with an auto-named
+  script ("New User Script N", namespace "Greasemonkey", scoped to the active
+  tab) instead of a dialog that required a name and namespace up front —
+  matching Violentmonkey / Tampermonkey.  Set
+  `extensions.greasemonkey.manager.newScript.classicDialog.enabled` to true to
+  restore the classic metadata dialog.
+
 #### 3.8.1 — Hotfix
 
 * **Fixed:** opening a script's **Preferences** failed with an "XML Parser
