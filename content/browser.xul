@@ -84,6 +84,9 @@
           <menuitem
             label="&menu.webSites.manual;"
             oncommand="GM_BrowserUI.openTab('http://wiki.greasespot.net/Greasemonkey_Manual');" />
+          <menuitem
+            label="&menu.webSites.reportBug;"
+            oncommand="GM_BrowserUI.openTab('https://github.com/SecondCityOsD/greasemonkey-for-UXP-browsers/issues');" />
           <menuseparator />
           <menuitem
             label="&menu.webSites.greasyfork;"

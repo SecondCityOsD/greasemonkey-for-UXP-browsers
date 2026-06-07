@@ -34,6 +34,7 @@
 <!ENTITY menu.webSites.greasespotWiki "Greasespot Wiki">
 -->
 <!ENTITY menu.webSites.manual "Greasemonkey Manual">
+<!ENTITY menu.webSites.reportBug "Report a bug">
 <!ENTITY newScript.description "Description">
 <!ENTITY newScript.excludes "Excludes (One per line)">
 <!ENTITY newScript.fromClipboard "Use Script From Clipboard">

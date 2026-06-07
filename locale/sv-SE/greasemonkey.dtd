@@ -74,3 +74,8 @@
 <!ENTITY menu.webSites.greasyfork  "GreasyFork">
 <!ENTITY menu.webSites.openuserjs  "OpenUserJS">
 <!ENTITY menu.webSites.gist        "GitHub Gist">
+
+<!-- 3.8.1: entities present in en-US but absent here, added as English
+     fallback to prevent a fatal XML "undefined entity" parse error (issue #23).
+     Translate when convenient. -->
+<!ENTITY menu.webSites.reportBug "Report a bug">
