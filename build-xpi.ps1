@@ -22,6 +22,21 @@ Add-Type -AssemblyName System.IO.Compression.FileSystem
 # Resolve project dir (this script lives in it).
 $src = Split-Path -Parent $MyInvocation.MyCommand.Path
 
+# Pre-build locale guard (see issue #23): every locale DTD must define all
+# en-US entities and be well-formed, or the XPI would ship a fatal XML
+# "undefined entity" parse error.  Requires Node; skipped with a warning if
+# Node is unavailable so the build still works on minimal machines.
+$nodeCmd = Get-Command node -ErrorAction SilentlyContinue
+if ($nodeCmd) {
+    Write-Host "Checking locale DTD completeness ..."
+    & node (Join-Path $src 'tools/check-locales.js')
+    if ($LASTEXITCODE -ne 0) {
+        throw "Locale DTD check failed (see above) - aborting build."
+    }
+} else {
+    Write-Warning "node not found - skipping locale DTD completeness/well-formedness check."
+}
+
 # Read version from install.rdf so the filename always matches.
 $installRdf = Join-Path $src 'install.rdf'
 if (-not (Test-Path $installRdf)) {
@@ -44,7 +59,8 @@ $excludeDirs = @(
     '.github',
     'docs',
     'tests',
-    'node_modules'
+    'node_modules',
+    'tools'
 )
 
 # File-name patterns that must never appear in the XPI.

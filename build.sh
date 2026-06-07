@@ -13,6 +13,17 @@ else
 fi
 GMXPI="greasemonkey-$GMVER.xpi"
 
+# Pre-build locale guard (see issue #23): every locale DTD must define all
+# en-US entities and be well-formed, or the XPI would ship a fatal XML
+# "undefined entity" parse error.  Requires Node; skipped with a warning if
+# Node is unavailable so the build still works on minimal machines.
+if command -v node >/dev/null 2>&1; then
+  echo "Checking locale DTD completeness ..."
+  node tools/check-locales.js || exit 1
+else
+  echo "  WARNING: node not found - skipping locale DTD completeness/well-formedness check."
+fi
+
 # Copy base structure to a temporary build directory and change to it
 echo "Creating working directory ..."
 rm -rf build
