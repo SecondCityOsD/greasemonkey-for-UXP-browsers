@@ -4,7 +4,7 @@
 <!ENTITY button.addUserMatch "Add as user match">
 <!ENTITY button.edit "ערוך...">
 <!ENTITY button.remove "הסר">
-<!ENTITY checkbox.grpOverride "מנע קובץ script והשתמש רק באלה המוגדרים ע"י המשתמש">
+<!ENTITY checkbox.grpOverride "מנע קובץ script והשתמש רק באלה המוגדרים ע&quot;י המשתמש">
 <!ENTITY label.grpExcluded "אל תכלול דפים">
 <!ENTITY label.grpIncluded "כלול דפים">
 <!ENTITY label.grpMatched "Matched Pages">
@@ -78,3 +78,10 @@
 <!ENTITY scriptPrefs.copy.accesskey         "C">
 <!ENTITY scriptPrefs.selectAll              "Select All">
 <!ENTITY scriptPrefs.selectAll.accesskey    "A">
+
+<!-- 3.8.1: entities present in en-US but absent here, added as English
+     fallback to prevent a fatal XML "undefined entity" parse error (issue #23).
+     Translate when convenient. -->
+<!ENTITY scriptPrefs.tab.userPrefs "User Preferences">
+<!ENTITY scriptPrefs.section.userPages "User pages">
+<!ENTITY scriptPrefs.section.scriptDeclared "Script-declared pages (read-only)">
