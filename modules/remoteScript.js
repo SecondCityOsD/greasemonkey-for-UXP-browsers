@@ -815,8 +815,13 @@ RemoteScript.prototype.showSource = function (aBrowser) {
     // The context menu.
     tabBrowser = aBrowser.ownerDocument.defaultView.gBrowser;
   }
-  let tab = tabBrowser.addTab(
-      GM_CONSTANTS.ioService.newFileURI(this._scriptFile).spec);
+  // Show the source in our read-only CodeMirror viewer (a chrome XHTML page)
+  // rather than the browser's raw file:// view, so the user gets syntax
+  // highlighting, line numbers and find while reviewing before install.  The
+  // viewer falls back to plain read-only text if CodeMirror can't load.
+  let viewerUrl = "chrome://greasemonkey/content/sourceViewer.xhtml?path="
+      + encodeURIComponent(this._scriptFile.path);
+  let tab = tabBrowser.addTab(viewerUrl);
   tabBrowser.selectedTab = tab;
 
   // Ensure any temporary files are deleted after the tab is closed.

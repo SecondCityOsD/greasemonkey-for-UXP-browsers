@@ -1,0 +1,182 @@
+/*
+ * Greasemonkey read-only source viewer
+ *   chrome://greasemonkey/skin/sourceViewer.css
+ *
+ * Layered on top of the browser's own CodeMirror structural stylesheet
+ * (chrome://devtools/content/sourceeditor/codemirror/lib/codemirror.css,
+ * linked first by sourceViewer.xhtml).  This file only supplies:
+ *   1. flex layout so the editor fills the tab above a thin status strip;
+ *   2. light / dark token colours.
+ * We deliberately don't touch CodeMirror's gutters / padding / font metrics,
+ * so the viewer stays native on whatever Pale Moon / Basilisk build runs it.
+ */
+
+html, body {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+}
+
+/* The host fills all space above the status strip.  min-height:0 lets the
+   flex child shrink instead of being forced to its content height. */
+#gm-sv-host {
+  flex: 1 1 auto;
+  min-height: 0;
+  position: relative;
+  overflow: hidden;
+}
+
+/* Make the live CodeMirror surface fill the host. */
+#gm-sv-host > .CodeMirror {
+  height: 100%;
+  width: 100%;
+}
+
+/* Plain-textarea fallback (no CodeMirror): fill the host, monospace. */
+#gm-sv-textarea {
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  border: none;
+  padding: 4px 6px;
+  font-family: monospace;
+  font-size: 12px;
+  white-space: pre;
+  resize: none;
+}
+
+/* Thin status strip: path on the left, note on the right. */
+#gm-sv-status {
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+  border-top: 1px solid ThreeDShadow;
+  background: -moz-Field;
+  color: -moz-FieldText;
+  padding: 2px 6px;
+  min-height: 20px;
+  font-family: monospace;
+  font-size: 11px;
+}
+#gm-sv-status[hidden] {
+  display: none;
+}
+
+/* ── Find bar (overlay, top-right) ─────────────────────────────────────────
+   Note: flexbox `gap` isn't supported on this Gecko (UXP / FF52-era), so
+   spacing is done with margins on the children instead. */
+#gm-sv-find {
+  position: fixed;
+  top: 8px;
+  right: 16px;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  padding: 4px 6px;
+  border: 1px solid ThreeDShadow;
+  background: -moz-Field;
+  color: -moz-FieldText;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
+  font-family: sans-serif;
+  font-size: 12px;
+}
+#gm-sv-find[hidden] {
+  display: none;
+}
+#gm-sv-find > * {
+  margin-left: 4px;
+}
+#gm-sv-find > *:first-child {
+  margin-left: 0;
+}
+#gm-sv-find-input {
+  font: inherit;
+  min-width: 14em;
+}
+#gm-sv-find-count {
+  min-width: 3.5em;
+  text-align: center;
+  opacity: 0.75;
+}
+#gm-sv-find button {
+  cursor: pointer;
+  font-size: 11px;
+  line-height: 1;
+  padding: 2px 5px;
+}
+
+/* "Find" button in the status strip — the reliable way to open the find bar. */
+#gm-sv-find-open {
+  flex: 0 0 auto;
+  margin-left: 8px;
+  cursor: pointer;
+  font: inherit;
+}
+#gm-sv-find-open[hidden] {
+  display: none;
+}
+#gm-sv-path {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;          /* crop the start of long paths, keep filename */
+  text-align: left;
+}
+#gm-sv-note {
+  flex: 0 0 auto;
+  padding-left: 8px;
+  opacity: 0.75;
+}
+
+/* ── Light theme (default) ─────────────────────────────────────────────── */
+body.theme-light .CodeMirror {
+  background: #ffffff;
+  color: #1d1d1d;
+}
+body.theme-light .CodeMirror-gutters {
+  background: #f5f5f5;
+  border-right: 1px solid #e0e0e0;
+  color: #888888;
+}
+body.theme-light .CodeMirror-selected {
+  background: #b4d5fe;
+}
+body.theme-light .cm-comment  { color: #5d8aa8; font-style: italic; }
+body.theme-light .cm-string   { color: #a31515; }
+body.theme-light .cm-number   { color: #098658; }
+body.theme-light .cm-keyword  { color: #0000ff; font-weight: bold; }
+body.theme-light .cm-atom     { color: #0000ff; }
+body.theme-light #gm-sv-textarea { background: #ffffff; color: #1d1d1d; }
+
+/* ── Dark theme ────────────────────────────────────────────────────────── */
+body.theme-dark {
+  background: #1e1e1e;
+}
+body.theme-dark .CodeMirror {
+  background: #1e1e1e;
+  color: #d4d4d4;
+}
+body.theme-dark .CodeMirror-gutters {
+  background: #1e1e1e;
+  border-right: 1px solid #333333;
+  color: #858585;
+}
+body.theme-dark .CodeMirror-linenumber {
+  color: #858585;
+}
+body.theme-dark .CodeMirror-selected {
+  background: #264f78;
+}
+body.theme-dark .cm-comment  { color: #6a9955; font-style: italic; }
+body.theme-dark .cm-string   { color: #ce9178; }
+body.theme-dark .cm-number   { color: #b5cea8; }
+body.theme-dark .cm-keyword  { color: #569cd6; }
+body.theme-dark .cm-atom     { color: #569cd6; }
+body.theme-dark #gm-sv-textarea { background: #1e1e1e; color: #d4d4d4; }
