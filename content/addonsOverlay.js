@@ -1002,6 +1002,14 @@ function GM_createNewUserScript() {
     return;
   }
 
+  // A customised template with no %name% placeholder can't be auto-named
+  // uniquely; fall back to the classic dialog rather than churn the counter
+  // and risk a duplicate (name, namespace).
+  if (GM_prefRoot.getValue("newScript.template").indexOf("%name%") === -1) {
+    GM_util.newUserScript(window);
+    return;
+  }
+
   let installScriptFromSource = GM_util.installScriptFromSource;
   if (typeof installScriptFromSource !== "function") {
     alert("Internal error: installScriptFromSource is unavailable.");
@@ -1010,18 +1018,18 @@ function GM_createNewUserScript() {
 
   let config = GM_util.getService().config;
 
-  // Default @include to the active tab's URL so the new script is pre-scoped
-  // to where the user is (mirrors Violentmonkey).  Privileged / cross-origin /
-  // about: pages throw or aren't http(s); fall back to match-all in that case.
-  let include = "*";
+  // Default @include to a clearly-inert placeholder so a freshly-created
+  // script never silently runs on every site.  If the active tab happens to
+  // be a real web page (rare — New... is invoked from about:addons), scope the
+  // new script to that site (scheme://host/*) instead.
+  let include = "https://example.com/*";
   try {
-    let gBrowser = GM_util.getBrowserWindow().gBrowser;
-    let href = gBrowser.selectedBrowser.contentWindow.location.href;
-    if (href && /^https?:/.test(href)) {
-      include = href;
+    let uri = GM_util.getBrowserWindow().gBrowser.selectedBrowser.currentURI;
+    if (uri && /^https?$/.test(uri.scheme) && uri.host) {
+      include = uri.scheme + "://" + uri.host + "/*";
     }
   } catch (e) {
-    // Leave include = "*".
+    // Leave the inert placeholder.
   }
 
   // parse() turns the assembled source into a Script so config.installIsUpdate()
@@ -1032,20 +1040,29 @@ function GM_createNewUserScript() {
 
   // Bump N (persisted across sessions) until the (name, namespace) pair is
   // unique, so creating several scripts in a row never collides.  The guard
-  // caps the search in the pathological all-match case.
-  let n = GM_prefRoot.getValue("newScript.counter", 0);
-  let source;
-  let guard = 0;
-  do {
-    n++;
-    guard++;
-    source = gmBuildScriptSource("New User Script " + n, "Greasemonkey", include);
-  } while (config.installIsUpdate(scope.parse(source)) && (guard < 1000));
-  GM_prefRoot.setValue("newScript.counter", n);
+  // caps the search in the pathological all-match case.  If anything throws
+  // (e.g. a customised template that no longer parses), fall back to the
+  // classic dialog so the menu item still does something useful.
+  try {
+    let n = GM_prefRoot.getValue("newScript.counter", 0);
+    let source;
+    let guard = 0;
+    do {
+      n++;
+      guard++;
+      source = gmBuildScriptSource(
+          "New User Script " + n, "Greasemonkey", include);
+    } while (config.installIsUpdate(scope.parse(source)) && (guard < 1000));
+    GM_prefRoot.setValue("newScript.counter", n);
 
-  // installScriptFromSource writes the file, runs the install pipeline, and
-  // opens the new script in the editor as its final step.
-  installScriptFromSource(source);
+    // installScriptFromSource writes the file, runs the install pipeline, and
+    // opens the new script in the editor as its final step.
+    installScriptFromSource(source);
+  } catch (e) {
+    Components.utils.reportError(
+        "Greasemonkey: auto-create failed, falling back to dialog: " + e);
+    GM_util.newUserScript(window);
+  }
 }
 
 // Assemble a userscript from the user's newScript.template pref: fill the

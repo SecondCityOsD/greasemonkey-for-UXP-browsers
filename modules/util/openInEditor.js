@@ -50,6 +50,20 @@ function openInEditor(aScript) {
         "saved": true,
       });
     } catch (e) {
+      // No built-in editor (Scratchpad/DevTools unavailable on this build) and
+      // none configured.  Explain before throwing the user into a bare file
+      // picker, then let them choose a local text editor.
+      let msg;
+      try {
+        msg = GM_CONSTANTS.localeStringBundle.createBundle(
+            GM_CONSTANTS.localeGmBrowserProperties)
+            .GetStringFromName("editor.noBuiltInChoose");
+      } catch (e2) {
+        msg = "This browser has no built-in script editor available. Please "
+            + "choose a local text editor (for example Notepad, or a code "
+            + "editor such as VS Code) to open user scripts with.";
+      }
+      GM_util.alert(msg);
       if (GM_util.setEditor(0)) {
         openInEditor(aScript);
       }
