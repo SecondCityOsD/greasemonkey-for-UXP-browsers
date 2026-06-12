@@ -13,6 +13,7 @@ Cu.import("chrome://greasemonkey-modules/content/constants.js");
 Cu.import("resource://gre/modules/Services.jsm");
 
 Cu.import("chrome://greasemonkey-modules/content/prefManager.js");
+Cu.import("chrome://greasemonkey-modules/content/updateScheduler.js");
 Cu.import("chrome://greasemonkey-modules/content/util.js");
 
 
@@ -28,6 +29,14 @@ function GM_getEditor() {
 }
 
 function GM_loadOptions() {
+  let intervalUpdatesInDays = parseInt(
+      GM_prefRoot.getValue("update.intervalDays"), 10);
+  intervalUpdatesInDays =
+      (isNaN(intervalUpdatesInDays) || (intervalUpdatesInDays < 0))
+          ? 1
+          : Math.min(intervalUpdatesInDays, 365);
+  document.getElementById("interval-update-value")
+      .value = intervalUpdatesInDays;
   document.getElementById("secure-update")
       .checked = GM_prefRoot.getValue("requireSecureUpdates");
   document.getElementById("disable-update")
@@ -68,6 +77,13 @@ function GM_loadOptions() {
 }
 
 function GM_saveOptions() {
+  let intervalUpdatesInDays = parseInt(
+      document.getElementById("interval-update-value").value, 10);
+  intervalUpdatesInDays =
+      (isNaN(intervalUpdatesInDays) || (intervalUpdatesInDays < 0))
+          ? 1
+          : Math.min(intervalUpdatesInDays, 365);
+  GM_prefRoot.setValue("update.intervalDays", intervalUpdatesInDays);
   GM_prefRoot.setValue("requireSecureUpdates",
       !!document.getElementById("secure-update").checked);
   GM_prefRoot.setValue("requireDisabledScriptsUpdates",
@@ -89,4 +105,17 @@ function GM_saveOptions() {
   // on the service to fan out the refreshed script descriptors to all
   // content frames without any IPC round-trip.
   GM_util.getService().broadcastScriptUpdates();
+}
+
+// "Check now" button: run an update sweep immediately (stamps
+// update.lastCheck).  Results surface through the regular pipeline —
+// notifications and about:addons; per-script settings are honoured.
+function GM_checkUpdatesNow() {
+  GM_updateScheduler.checkNow();
+  // Brief disable as click feedback; the sweep itself is asynchronous.
+  let button = document.getElementById("update-check-now");
+  button.disabled = true;
+  setTimeout(function () {
+    button.disabled = false;
+  }, 3000);
 }

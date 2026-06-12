@@ -75,3 +75,9 @@
 <!ENTITY menu.webSites.greasyfork  "GreasyFork">
 <!ENTITY menu.webSites.openuserjs  "OpenUserJS">
 <!ENTITY menu.webSites.gist        "GitHub Gist">
+
+<!-- 3.9: Greasemonkey-owned script update scheduling (options dialog).
+     en-US source values below; translate per locale. -->
+<!ENTITY intervalUpdates           "Check for script updates every">
+<!ENTITY intervalUpdatesUnits      "day(s); 0 disables scheduled checks">
+<!ENTITY updatesCheckNow           "Check now">

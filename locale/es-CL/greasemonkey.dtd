@@ -79,3 +79,8 @@
      fallback to prevent a fatal XML "undefined entity" parse error (issue #23).
      Translate when convenient. -->
 <!ENTITY menu.webSites.reportBug "Report a bug">
+
+<!-- 3.9: script update scheduling (en-US fallback; translate). -->
+<!ENTITY intervalUpdates           "Check for script updates every">
+<!ENTITY intervalUpdatesUnits      "day(s); 0 disables scheduled checks">
+<!ENTITY updatesCheckNow           "Check now">

@@ -36,6 +36,14 @@
 <vbox flex="1">
   <groupbox>
     <caption label="&preferencesCmd2.label;" />
+    <hbox id="interval-update-box" align="center">
+      <label value="&intervalUpdates;" />
+      <textbox id="interval-update-value" type="number" min="0" max="365"
+        increment="1" size="3" />
+      <label value="&intervalUpdatesUnits;" />
+      <button id="update-check-now" label="&updatesCheckNow;"
+        oncommand="GM_checkUpdatesNow();" />
+    </hbox>
     <checkbox id="secure-update" label="&requireSecureUpdates;" />
     <checkbox id="disable-update" label="&requireDisabledScriptsUpdates;" />
     <checkbox id="timeout-update" label="&requireTimeoutUpdates;" />
