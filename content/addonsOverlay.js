@@ -1226,23 +1226,14 @@ function GM_backupImport() {
     return;
   }
 
-  let backup = GM_backup_get();
-  backup.GM_BackupImport(fp.file, function (aSuccess, aResult, aErr) {
-    let bundle = GM_backup_stringBundle();
-    if (!aSuccess) {
-      let msg = bundle.GetStringFromName("backup.failed")
-          .replace("%1", aErr || "");
-      alert(msg);
-      return;
-    }
-    let msg = bundle.GetStringFromName("backup.imported")
-        .replace("%1", aResult.imported)
-        .replace("%2", aResult.skipped);
-    if (aResult.errors && aResult.errors.length) {
-      msg += "\n\n" + aResult.errors.join("\n");
-    }
-    alert(msg);
-  });
+  // The selective-import dialog previews the archive, lets the user pick
+  // scripts and toggles (overwrite / values / settings), runs the import
+  // with progress, and reports the summary + safety-snapshot path.
+  window.openDialog(
+      "chrome://greasemonkey/content/importDialog.xul",
+      "greasemonkey-import-dialog",
+      "chrome,dialog,modal,centerscreen,resizable",
+      { "file": fp.file });
 }
 
 /**

@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<?xml-stylesheet href="chrome://global/skin/global.css" type="text/css"?>
+<!--
+  Selective backup-import dialog.
+
+  All visible text is set at runtime from gmAddons.properties (with English
+  fallbacks) by importDialog.js, so this file needs no DTD and a missing
+  locale key can never break the XUL parse (see issue #23 for why that
+  matters).  Opened modally by GM_backupImport (content/addonsOverlay.js)
+  with window.arguments[0] = { file: nsIFile }.
+
+  Rows are richlistitems each holding a real <checkbox> — the native
+  checkbox binding handles toggling reliably (listitem type="checkbox"
+  click-toggle behaviour is theme-dependent on UXP).
+-->
+<dialog id="greasemonkey-import-dialog"
+  xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul"
+  buttons="accept,cancel"
+  onload="GM_ImportDialog.onLoad();"
+  ondialogaccept="return GM_ImportDialog.onAccept();"
+  style="min-width: 48em;">
+
+  <script type="application/x-javascript"
+    src="chrome://greasemonkey/content/importDialog.js" />
+
+  <label id="gm-import-heading" crop="center" />
+
+  <checkbox id="gm-import-select-all" checked="true"
+    oncommand="GM_ImportDialog.toggleAll();" />
+
+  <richlistbox id="gm-import-list" flex="1"
+    style="min-height: 18em;" />
+
+  <vbox id="gm-import-toggles">
+    <checkbox id="gm-import-overwrite" />
+    <checkbox id="gm-import-values" checked="true" />
+    <checkbox id="gm-import-settings" />
+  </vbox>
+
+  <label id="gm-import-status" crop="center" value="" />
+</dialog>

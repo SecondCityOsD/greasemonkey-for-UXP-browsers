@@ -29,7 +29,11 @@
  * @exports GM_BackupExport, GM_BackupImport
  */
 
-const EXPORTED_SYMBOLS = ["GM_BackupExport", "GM_BackupImport"];
+const EXPORTED_SYMBOLS = [
+  "GM_BackupExport",
+  "GM_BackupImport",
+  "GM_BackupPreview",
+];
 
 if (typeof Cc === "undefined") {
   var Cc = Components.classes;
@@ -46,6 +50,7 @@ Cu.import("chrome://greasemonkey-modules/content/constants.js");
 Cu.import("resource://gre/modules/AddonManager.jsm");
 
 Cu.import("chrome://greasemonkey-modules/content/parseScript.js");
+Cu.import("chrome://greasemonkey-modules/content/prefManager.js");
 Cu.import("chrome://greasemonkey-modules/content/remoteScript.js");
 Cu.import("chrome://greasemonkey-modules/content/storageBack.js");
 Cu.import("chrome://greasemonkey-modules/content/util.js");
@@ -64,6 +69,27 @@ const DEPS_INFIX = USER_JS_SUFFIX + ".deps/";
 // Per-entry inflate cap (zip-bomb guard) — oversized entries are skipped
 // and reported, never read into memory.
 const MAX_ENTRY_BYTES = 32 * 1024 * 1024;
+
+// extensions.greasemonkey.* prefs that round-trip through the manifest's
+// "settings" block.  Deliberately curated: machine-specific values (editor
+// path) and sync state are excluded, mirroring what VM/TM strip.
+const SETTINGS_PREFS = [
+  "enableScriptRefreshing",
+  "installDelay",
+  "newScript.removeUnused",
+  "newScript.template",
+  "requireDisabledScriptsUpdates",
+  "requireSecureUpdates",
+  "requireTimeoutUpdates",
+  "showGrantsWarning",
+  "sniffGrants",
+  "timeoutUpdatesInSeconds",
+  "update.intervalDays",
+];
+
+// How many automatic pre-import safety snapshots to keep in
+// <profile>/gm_backups/ before pruning the oldest.
+const SNAPSHOTS_TO_KEEP = 10;
 
 // nsIZipWriter open flags (PR_* constants, unavailable on the JS side).
 const PR_WRONLY = 0x02;
@@ -152,6 +178,10 @@ function GM_BackupExport(aDestFile, aIncludeValues, aCallback) {
       "timestamp": new Date().getTime(),
       "includesValues": !!aIncludeValues,
       "scripts": exportedBasenames,
+      "settings": {
+        "globalExcludes": config.globalExcludes,
+        "prefs": _exportSettingsPrefs(),
+      },
     };
     _addEntryFromString(
         zipWriter, MANIFEST_FILENAME, JSON.stringify(manifest, null, 2));
@@ -176,17 +206,41 @@ function GM_BackupExport(aDestFile, aIncludeValues, aCallback) {
  * Imports user scripts from a ZIP archive produced by GM_BackupExport,
  * Violentmonkey, or Tampermonkey.  Installs each unique script sequentially.
  *
- * A script whose (name, namespace) already matches an installed script is
- * skipped — we never silently overwrite.  Dependencies (@require, @resource,
- * @icon) are re-downloaded fresh via the regular RemoteScript pipeline.
+ * By default a script whose (name, namespace) already matches an installed
+ * script is skipped; aOptions.overwrite turns that into an in-place update
+ * (position kept, stored values carried over, sidecar state applied on
+ * top).  Archived dependencies (format v2) restore offline; anything else
+ * is re-downloaded via the regular RemoteScript pipeline.
  *
- * @param {nsIFile}  aSrcFile        - The .zip to read from.
- * @param {function} [aCallback]     - Called (success, result, errorMsg) where
- *   result = {total, imported, skipped, errors[]}.
+ * Unless aOptions.skipSnapshot is set, a full safety snapshot is exported
+ * to <profile>/gm_backups/pre-import-<timestamp>.zip before anything is
+ * installed — a durable on-disk undo point.
+ *
+ * @param {nsIFile}  aSrcFile    - The .zip to read from.
+ * @param {object}   [aOptions]  - {selectedKeys: string[]|null (archive keys
+ *   to install; null = all), overwrite: boolean, restoreValues: boolean
+ *   (default true), restoreSettings: boolean (apply the manifest's global
+ *   settings), skipSnapshot: boolean, onProgress: function(done, total,
+ *   key)}.  Passing a function here instead is the legacy
+ *   (file, callback) signature and still works.
+ * @param {function} [aCallback] - Called (success, result, errorMsg) where
+ *   result = {total, imported, skipped, errors[], snapshotPath}.
  */
-function GM_BackupImport(aSrcFile, aCallback) {
+function GM_BackupImport(aSrcFile, aOptions, aCallback) {
+  // Legacy signature: (file, callback).
+  if (typeof aOptions === "function") {
+    aCallback = aOptions;
+    aOptions = null;
+  }
+  let opts = aOptions || {};
   aCallback = aCallback || function () {};
-  let result = { "total": 0, "imported": 0, "skipped": 0, "errors": [] };
+  let result = {
+    "total": 0,
+    "imported": 0,
+    "skipped": 0,
+    "errors": [],
+    "snapshotPath": null,
+  };
 
   let entries;
   let payloads;
@@ -207,20 +261,95 @@ function GM_BackupImport(aSrcFile, aCallback) {
     return;
   }
 
-  // Group entries by logical script basename.  Three tables:
-  //   scripts[name.user.js] = { source, options, storage }
-  //   The VM manifest (if present) fills in options gaps.
+  let scripts = _collectScripts(entries, payloads).scripts;
+
+  // Our own manifest (format v2 carries the global settings block; older
+  // and foreign archives simply have none).
+  let manifest = null;
+  if (payloads[MANIFEST_FILENAME]) {
+    try {
+      manifest = JSON.parse(payloads[MANIFEST_FILENAME]);
+    } catch (e) {
+      // Tolerated — script entries still import.
+    }
+  }
+
+  // Collect only entries with actual source.
+  let toInstall = [];
+  let all = Object.keys(scripts);
+  for (let i = 0; i < all.length; i++) {
+    if (scripts[all[i]].source) {
+      toInstall.push(all[i]);
+    } else {
+      result.skipped++;
+      result.errors.push(all[i] + ": no source in archive");
+    }
+  }
+
+  // Selective import (dialog): only the chosen archive keys.  Deselected
+  // scripts are neither installed nor counted as skipped errors.
+  if (Array.isArray(opts.selectedKeys)) {
+    let allow = {};
+    for (let i = 0; i < opts.selectedKeys.length; i++) {
+      allow[opts.selectedKeys[i]] = true;
+    }
+    toInstall = toInstall.filter(function (aKey) {
+      return allow[aKey] === true;
+    });
+  }
+
+  result.total = toInstall.length;
+
+  let finish = function () {
+    if (opts.restoreSettings && manifest && manifest.settings) {
+      _applyImportedSettings(manifest.settings, result);
+    }
+    aCallback(true, result, null);
+  };
+
+  if (!toInstall.length) {
+    if (opts.restoreSettings && manifest && manifest.settings) {
+      // Settings-only restore is a legitimate operation.
+      finish();
+      return;
+    }
+    aCallback(false, result, "No user scripts found in archive.");
+    return;
+  }
+
+  // Durable safety snapshot BEFORE anything is installed — unlike an
+  // in-memory undo, a zip in <profile>/gm_backups/ survives restarts.
+  if (!opts.skipSnapshot) {
+    try {
+      result.snapshotPath = _writeSnapshot();
+    } catch (e) {
+      GM_util.logError("Backup import: snapshot failed: " + e, false);
+      result.errors.push("safety snapshot failed: " + e);
+    }
+  }
+
+  _installNext(0, toInstall, scripts, binaries, opts, result, finish);
+}
+
+/**
+ * Groups raw zip entries into logical scripts:
+ *   scripts[name.user.js] = { source, options, storage }
+ * Tolerates the GM/VM idiom (.user.js.options.json sidecars), the TM idiom
+ * (sidecars without the .user.js infix), and a Violentmonkey index entry
+ * whose per-script objects fill remaining options gaps.
+ */
+function _collectScripts(aEntries, aPayloads) {
   let scripts = {};
   let vmManifest = null;
 
   // First pass: pick up all .user.js files + direct sidecars (TM layout
   // with .user.js.options.json / .user.js.storage.json — GM / VM idiom).
-  for (let i = 0; i < entries.length; i++) {
-    let name = entries[i];
+  for (let i = 0; i < aEntries.length; i++) {
+    let name = aEntries[i];
     if (name === MANIFEST_FILENAME) continue;
     if (name === VM_MANIFEST_FILENAME) {
       try {
-        vmManifest = JSON.parse(payloads[name]);
+        vmManifest = JSON.parse(aPayloads[name]);
       } catch (e) {
         GM_util.logError("Backup import: bad VM manifest: " + e, false);
       }
@@ -232,7 +361,7 @@ function GM_BackupImport(aSrcFile, aCallback) {
         && name.slice(-(USER_JS_SUFFIX.length + OPTIONS_SUFFIX.length))
             === USER_JS_SUFFIX + OPTIONS_SUFFIX) {
       let base = name.slice(0, -OPTIONS_SUFFIX.length);
-      (scripts[base] = scripts[base] || {}).options = payloads[name];
+      (scripts[base] = scripts[base] || {}).options = aPayloads[name];
       continue;
     }
     if (name.length > STORAGE_SUFFIX.length
@@ -241,33 +370,33 @@ function GM_BackupImport(aSrcFile, aCallback) {
         && name.slice(-(USER_JS_SUFFIX.length + STORAGE_SUFFIX.length))
             === USER_JS_SUFFIX + STORAGE_SUFFIX) {
       let base = name.slice(0, -STORAGE_SUFFIX.length);
-      (scripts[base] = scripts[base] || {}).storage = payloads[name];
+      (scripts[base] = scripts[base] || {}).storage = aPayloads[name];
       continue;
     }
     if (name.length > USER_JS_SUFFIX.length
         && name.slice(-USER_JS_SUFFIX.length) === USER_JS_SUFFIX) {
-      (scripts[name] = scripts[name] || {}).source = payloads[name];
+      (scripts[name] = scripts[name] || {}).source = aPayloads[name];
       continue;
     }
   }
 
   // Second pass: TM-style sidecars without the .user.js infix
   // (e.g. "<name>.options.json" where <name>.user.js also exists).
-  for (let i = 0; i < entries.length; i++) {
-    let name = entries[i];
+  for (let i = 0; i < aEntries.length; i++) {
+    let name = aEntries[i];
     if (name.length > OPTIONS_SUFFIX.length
         && name.slice(-OPTIONS_SUFFIX.length) === OPTIONS_SUFFIX) {
       let stem = name.slice(0, -OPTIONS_SUFFIX.length);
       let candidate = stem + USER_JS_SUFFIX;
       if (scripts[candidate] && !scripts[candidate].options) {
-        scripts[candidate].options = payloads[name];
+        scripts[candidate].options = aPayloads[name];
       }
     } else if (name.length > STORAGE_SUFFIX.length
         && name.slice(-STORAGE_SUFFIX.length) === STORAGE_SUFFIX) {
       let stem = name.slice(0, -STORAGE_SUFFIX.length);
       let candidate = stem + USER_JS_SUFFIX;
       if (scripts[candidate] && !scripts[candidate].storage) {
-        scripts[candidate].storage = payloads[name];
+        scripts[candidate].storage = aPayloads[name];
       }
     }
   }
@@ -290,27 +419,110 @@ function GM_BackupImport(aSrcFile, aCallback) {
     }
   }
 
-  // Collect only entries with actual source.
-  let toInstall = [];
-  let all = Object.keys(scripts);
-  for (let i = 0; i < all.length; i++) {
-    if (scripts[all[i]].source) {
-      toInstall.push(all[i]);
-    } else {
-      result.skipped++;
-      result.errors.push(all[i] + ": no source in archive");
+  return { "scripts": scripts, "vmManifest": vmManifest };
+}
+
+/**
+ * Parses an archive WITHOUT installing anything: returns one row per
+ * script entry so an import dialog can offer selective restore.
+ *
+ * @param {nsIFile} aSrcFile - The .zip to inspect.
+ * @returns {object} {ok, error, hasSettings, warnings[], scripts: [{key,
+ *   name, namespace, version, installed, hasStorage, depCount, error}]}.
+ */
+function GM_BackupPreview(aSrcFile) {
+  let out = {
+    "ok": false,
+    "error": null,
+    "hasSettings": false,
+    "warnings": [],
+    "scripts": [],
+  };
+
+  let parsed;
+  try {
+    parsed = _readZipContents(aSrcFile);
+  } catch (e) {
+    GM_util.logError("Backup preview: cannot read ZIP: " + e, false);
+    out.error = "" + e;
+    return out;
+  }
+  out.warnings = parsed.skipped.concat();
+
+  let scripts = _collectScripts(parsed.entries, parsed.payloads).scripts;
+
+  if (parsed.payloads[MANIFEST_FILENAME]) {
+    try {
+      let manifest = JSON.parse(parsed.payloads[MANIFEST_FILENAME]);
+      out.hasSettings = !!(manifest && manifest.settings);
+    } catch (e) {
+      // No settings then.
     }
   }
 
-  result.total = toInstall.length;
-  if (!toInstall.length) {
-    aCallback(false, result, "No user scripts found in archive.");
-    return;
+  let config = GM_util.getService().config;
+  let keys = Object.keys(scripts);
+  for (let i = 0; i < keys.length; i++) {
+    let key = keys[i];
+    let entry = scripts[key];
+    if (!entry.source) {
+      continue;
+    }
+    let row = {
+      "key": key,
+      "name": null,
+      "namespace": null,
+      "version": null,
+      "installed": false,
+      "hasStorage": !!entry.storage,
+      "depCount": 0,
+      "error": null,
+    };
+
+    let options = null;
+    if (entry.options) {
+      try {
+        options = _normalizeImportedOptions(JSON.parse(entry.options));
+      } catch (e) {
+        // Defaults below.
+      }
+    }
+    if (options && Array.isArray(options.dependencies)) {
+      row.depCount = options.dependencies.length;
+    }
+    let installUri = null;
+    if (options && options.downloadURL) {
+      try {
+        installUri = GM_util.getUriFromUrl(options.downloadURL);
+      } catch (e) {
+        installUri = null;
+      }
+    }
+
+    try {
+      let s = parse(entry.source, installUri);
+      if (!s || !s._name) {
+        row.error = "no usable script name";
+      } else {
+        row.name = (s.localized && s.localized.name) || s._name;
+        row.namespace = s._namespace || "";
+        row.version = s._version || "";
+        row.installed = config.installIsUpdate(s);
+        if (s.parseErrors && s.parseErrors.length) {
+          row.error = s.parseErrors.join("; ");
+        }
+      }
+    } catch (e) {
+      row.error = "" + e;
+    }
+    out.scripts.push(row);
   }
 
-  _installNext(0, toInstall, scripts, binaries, result, function () {
-    aCallback(true, result, null);
+  out.scripts.sort(function (aA, aB) {
+    return ("" + aA.name).localeCompare("" + aB.name);
   });
+  out.ok = true;
+  return out;
 }
 
 
@@ -594,15 +806,23 @@ function _readEntryAsBytes(aZipReader, aEntryName) {
 /**
  * Sequential installer.  We chain callbacks rather than install in parallel
  * so that the scripts directory is written to one entry at a time and we
- * don't race on config.xml persistence.
+ * don't race on config.xml persistence.  aOpts carries the import options
+ * (overwrite / restoreValues / onProgress) documented on GM_BackupImport.
  */
-function _installNext(aIdx, aKeys, aScripts, aBinaries, aResult, aDone) {
+function _installNext(aIdx, aKeys, aScripts, aBinaries, aOpts, aResult, aDone) {
   if (aIdx >= aKeys.length) {
     aDone();
     return;
   }
 
   let key = aKeys[aIdx];
+  if (aOpts && (typeof aOpts.onProgress === "function")) {
+    try {
+      aOpts.onProgress(aIdx, aKeys.length, key);
+    } catch (e) {
+      // Progress UI must never break the import.
+    }
+  }
   let entry = aScripts[key];
   let source = entry.source;
   let options = null;
@@ -639,7 +859,7 @@ function _installNext(aIdx, aKeys, aScripts, aBinaries, aResult, aDone) {
   }
 
   let next = function () {
-    _installNext(aIdx + 1, aKeys, aScripts, aBinaries, aResult, aDone);
+    _installNext(aIdx + 1, aKeys, aScripts, aBinaries, aOpts, aResult, aDone);
   };
 
   // Synthesise an install URI from the sidecar's downloadURL so that
@@ -689,11 +909,17 @@ function _installNext(aIdx, aKeys, aScripts, aBinaries, aResult, aDone) {
     return;
   }
 
-  // Refuse to overwrite an already-installed script (matches (name, namespace)).
+  // A script matching an installed (name, namespace) is skipped by
+  // default.  With aOpts.overwrite the install proceeds as an in-place
+  // update instead: config.install() auto-resolves the existing script,
+  // preserves its list position, and the stored-values .db carries over
+  // via basedir-name reuse; the sidecar's options/values then apply on
+  // top below.
   let config = GM_util.getService().config;
-  if (config.installIsUpdate(parsedScript)) {
+  if (config.installIsUpdate(parsedScript)
+      && !(aOpts && aOpts.overwrite)) {
     aResult.skipped++;
-    aResult.errors.push(key + ": already installed");
+    aResult.errors.push(key + ": already installed (overwrite is off)");
     next();
     return;
   }
@@ -743,7 +969,7 @@ function _installNext(aIdx, aKeys, aScripts, aBinaries, aResult, aDone) {
         try {
           remoteScript.install();
           _applyImportedOptions(parsedScript, options);
-          if (entry.storage) {
+          if (entry.storage && !(aOpts && (aOpts.restoreValues === false))) {
             _applyImportedStorage(parsedScript, entry.storage);
           }
           aResult.imported++;
@@ -947,5 +1173,126 @@ function _applyImportedStorage(aScript, aStorageJson) {
     }
   } catch (e) {
     GM_util.logError("Backup import: storage open failed: " + e, false);
+  }
+}
+
+/**
+ * Snapshots the whitelisted extensions.greasemonkey.* prefs for the
+ * manifest's settings block.
+ */
+function _exportSettingsPrefs() {
+  let out = {};
+  for (let i = 0; i < SETTINGS_PREFS.length; i++) {
+    try {
+      let value = GM_prefRoot.getValue(SETTINGS_PREFS[i]);
+      if (typeof value !== "undefined") {
+        out[SETTINGS_PREFS[i]] = value;
+      }
+    } catch (e) {
+      // Leave the key out.
+    }
+  }
+  return out;
+}
+
+/**
+ * Applies a manifest settings block: global excludes plus the whitelisted
+ * prefs.  Only primitive values are accepted, and only keys on the
+ * whitelist — a tampered archive can't write arbitrary preferences.
+ */
+function _applyImportedSettings(aSettings, aResult) {
+  if (!aSettings || typeof aSettings !== "object") {
+    return;
+  }
+
+  if (Array.isArray(aSettings.globalExcludes)) {
+    try {
+      let service = GM_util.getService();
+      service.config.globalExcludes =
+          aSettings.globalExcludes.filter(function (aItem) {
+            return typeof aItem === "string";
+          });
+      service.broadcastScriptUpdates();
+    } catch (e) {
+      GM_util.logError("Backup import: global excludes failed: " + e, false);
+      aResult.errors.push("global excludes restore failed: " + e);
+    }
+  }
+
+  if (aSettings.prefs && (typeof aSettings.prefs === "object")) {
+    for (let i = 0; i < SETTINGS_PREFS.length; i++) {
+      let key = SETTINGS_PREFS[i];
+      if (!(key in aSettings.prefs)) {
+        continue;
+      }
+      let value = aSettings.prefs[key];
+      let type = typeof value;
+      if ((type !== "boolean") && (type !== "number") && (type !== "string")) {
+        continue;
+      }
+      try {
+        GM_prefRoot.setValue(key, value);
+      } catch (e) {
+        GM_util.logError(
+            "Backup import: pref " + key + " failed: " + e, false);
+        aResult.errors.push("setting " + key + " restore failed: " + e);
+      }
+    }
+  }
+}
+
+/**
+ * Writes a full pre-import safety snapshot (scripts + values + settings)
+ * to <profile>/gm_backups/pre-import-<timestamp>.zip and prunes old ones.
+ * GM_BackupExport runs synchronously, so on return the file either exists
+ * or this throws.
+ *
+ * @returns {string} The snapshot file's full path.
+ */
+function _writeSnapshot() {
+  let dir = GM_util.scriptDir().parent;
+  dir.append("gm_backups");
+  if (!dir.exists()) {
+    dir.create(Ci.nsIFile.DIRECTORY_TYPE, GM_CONSTANTS.directoryMask);
+  }
+
+  // ISO timestamp, filesystem-safe and lexically chronological:
+  // "2026-06-13_01-23-45".
+  let stamp = new Date().toISOString()
+      .replace(/[:.]/g, "-")
+      .replace("T", "_")
+      .slice(0, 19);
+  let file = dir.clone();
+  file.append("pre-import-" + stamp + ".zip");
+
+  GM_BackupExport(file, /* includeValues */ true, function () {});
+  if (!file.exists()) {
+    throw new Error("snapshot was not written: " + file.path);
+  }
+
+  _pruneSnapshots(dir);
+  return file.path;
+}
+
+/** Keeps only the newest SNAPSHOTS_TO_KEEP pre-import snapshots. */
+function _pruneSnapshots(aDir) {
+  let names = [];
+  let entries = aDir.directoryEntries;
+  while (entries.hasMoreElements()) {
+    let file = entries.getNext().QueryInterface(Ci.nsIFile);
+    if (/^pre-import-.*\.zip$/.test(file.leafName)) {
+      names.push(file.leafName);
+    }
+  }
+  // Timestamped names sort lexically = chronologically; drop the oldest.
+  names.sort();
+  while (names.length > SNAPSHOTS_TO_KEEP) {
+    let victim = aDir.clone();
+    victim.append(names.shift());
+    try {
+      victim.remove(false);
+    } catch (e) {
+      // Best effort.
+    }
   }
 }
