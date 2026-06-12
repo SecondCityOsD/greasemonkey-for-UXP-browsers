@@ -337,7 +337,16 @@ function _buildOptionsJson(aScript) {
  */
 function _buildStorageJson(aScript) {
   try {
-    let storage = new GM_ScriptStorageBack(aScript);
+    let storage = getStorageBackForScript(aScript);
+    // No .db on disk = the script never stored a value.  Bail before the
+    // lazy db getter would CREATE the file (and run its open-time VACUUM)
+    // as a side effect — an export must not mutate the profile.  Going
+    // through the module registry (instead of a private Back) also means
+    // the connection is shared with the live script and closed at
+    // shutdown rather than leaked.
+    if (!storage.dbFile.exists()) {
+      return null;
+    }
     let keys = storage.listValues();
     if (!keys.length) return null;
     let out = {};
@@ -508,6 +517,19 @@ function _installNext(aIdx, aKeys, aScripts, aResult, aDone) {
     return;
   }
 
+  // The normal install pipeline refuses scripts with recoverable parse
+  // problems (invalid @match, bad @require/@resource URLs — see
+  // remoteScript.js); installing them here would silently drop those
+  // directives and ship a script that malfunctions at runtime.  Match the
+  // pipeline: report and skip.
+  if (parsedScript.parseErrors && parsedScript.parseErrors.length) {
+    aResult.skipped++;
+    aResult.errors.push(
+        key + ": parse errors - " + parsedScript.parseErrors.join("; "));
+    next();
+    return;
+  }
+
   // Refuse to overwrite an already-installed script (matches (name, namespace)).
   let config = GM_util.getService().config;
   if (config.installIsUpdate(parsedScript)) {
@@ -533,7 +555,16 @@ function _installNext(aIdx, aKeys, aScripts, aResult, aDone) {
     return;
   }
 
-  GM_util.writeToFile(source, tempFile, function () {
+  GM_util.writeToFile(source, tempFile, function (aWriteErr) {
+    if (aWriteErr) {
+      // Without this branch a failed temp write used to stall the whole
+      // sequential chain: next() never ran and the completion callback
+      // never fired (silent partial import).
+      aResult.skipped++;
+      aResult.errors.push(key + ": temp write failed - " + aWriteErr);
+      next();
+      return undefined;
+    }
     try {
       remoteScript.setScript(parsedScript, tempFile);
       if (typeof remoteScript.setSilent === "function") {
@@ -636,7 +667,9 @@ function _applyImportedStorage(aScript, aStorageJson) {
   }
   if (!data || typeof data !== "object") return;
   try {
-    let storage = new GM_ScriptStorageBack(aScript);
+    // Module registry, not a private Back: shared with the live script and
+    // closed at shutdown instead of leaking an open SQLite connection.
+    let storage = getStorageBackForScript(aScript);
     let keys = Object.keys(data);
     for (let i = 0; i < keys.length; i++) {
       try {

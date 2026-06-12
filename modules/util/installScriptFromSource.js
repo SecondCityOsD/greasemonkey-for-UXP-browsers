@@ -60,7 +60,13 @@ function installScriptFromSource(aSource, aCallback, aOptions) {
       + GM_CONSTANTS.fileScriptExtension;
   var tempFile = GM_util.getTempFile(remoteScript._tempDir, tempFileName);
 
-  GM_util.writeToFile(aSource, tempFile, function () {
+  GM_util.writeToFile(aSource, tempFile, function (aWriteErr) {
+    if (aWriteErr) {
+      if (aCallback) {
+        aCallback(aWriteErr);
+      }
+      return undefined;
+    }
     remoteScript.setScript(script, tempFile);
     remoteScript.download(function (aSuccess) {
       if (!aSuccess) {

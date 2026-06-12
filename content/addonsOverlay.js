@@ -1177,6 +1177,10 @@ function GM_backupExport() {
       GM_backup_stringBundle().GetStringFromName("backup.exportTitle"),
       Components.interfaces.nsIFilePicker.modeSave);
   fp.defaultString = GM_backup_defaultFilename();
+  // Without defaultExtension some pickers (GTK notably) save the file
+  // extensionless when the user types a bare name — which the import
+  // picker's *.zip filter would then hide.
+  fp.defaultExtension = "zip";
   fp.appendFilter("ZIP archive", "*.zip");
 
   // nsIFilePicker's show() is synchronous on Pale Moon/Basilisk.
@@ -1194,6 +1198,12 @@ function GM_backupExport() {
       let msg = bundle.GetStringFromName("backup.exported")
           .replace("%1", aCount)
           .replace("%2", fp.file.path);
+      // Per-script export problems (missing source file, zip entry
+      // failures) used to be swallowed here — the user saw a clean
+      // success dialog for an incomplete backup.
+      if (aErr) {
+        msg += "\n\n" + aErr.split("; ").join("\n");
+      }
       alert(msg);
     } else {
       let msg = bundle.GetStringFromName("backup.failed")

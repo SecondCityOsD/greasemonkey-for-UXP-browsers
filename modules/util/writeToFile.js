@@ -34,7 +34,12 @@ converter.charset = GM_CONSTANTS.fileScriptCharset;
  * Asynchronously writes a Unicode string to an nsIFile using a temp-then-move strategy.
  * @param {string} aData - The text content to write.
  * @param {nsIFile} aFile - The destination file; the write is performed to a sibling temp file first.
- * @param {Function} [aCallback] - Called with no arguments after the file has been successfully written and renamed.
+ * @param {Function} [aCallback] - Always called when the operation finishes:
+ *   with undefined on success, with an Error on failure (failed copy, or a
+ *   failed move into place).  Existing 0-arg callers are unaffected; callers
+ *   that care can inspect the argument and abort instead of proceeding —
+ *   previously the callback simply never fired on failure, silently stalling
+ *   any continuation chained on it.
  * @returns {void}
  */
 function writeToFile(aData, aFile, aCallback) {
@@ -49,13 +54,32 @@ function writeToFile(aData, aFile, aCallback) {
   ostream.init(tmpFile, STREAM_FLAGS, GM_CONSTANTS.fileMask, 0);
 
   NetUtil.asyncCopy(istream, ostream, function (aStatus) {
+    let error = null;
     if (Components.isSuccessCode(aStatus)) {
-      // On successful write, move it to the real location.
-      tmpFile.moveTo(aFile.parent, aFile.leafName);
-
-      if (aCallback) {
-        aCallback();
+      // On successful write, move it to the real location.  moveTo can
+      // itself throw (destination locked on Windows, permissions) — that
+      // is a failure too, not an exception to leak into NetUtil.
+      try {
+        tmpFile.moveTo(aFile.parent, aFile.leafName);
+      } catch (e) {
+        error = e;
       }
+    } else {
+      error = new Error(
+          "async copy failed: 0x" + (aStatus >>> 0).toString(16));
+    }
+
+    if (error) {
+      Cu.reportError(
+          "Greasemonkey: writeToFile(" + aFile.path + "): " + error);
+      try {
+        tmpFile.remove(false);
+      } catch (e) {
+        // Best effort — an orphaned unique temp file is otherwise harmless.
+      }
+    }
+    if (aCallback) {
+      aCallback(error || undefined);
     }
   });
 }
