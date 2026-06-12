@@ -425,6 +425,7 @@ function RemoteScript(aUrl) {
   this._channels = [];
   this._dependencies = [];
   this._metadata = null;
+  this._prefetchedDeps = null;
   this._progress = [0, 0];
   this._progressCallbacks = [];
   this._progressIndex = 0;
@@ -897,6 +898,39 @@ RemoteScript.prototype._dispatchCallbacks = function (aType, aData) {
 };
 
 /**
+ * Supplies pre-fetched dependency payloads keyed by download URL:
+ *   { url: { bytes, mimetype, charset } }
+ * Used by the backup importer (format v2): _downloadDependencies writes
+ * these bytes straight to the temp file instead of hitting the network, so
+ * a restore works offline and survives dead dependency URLs.  Any
+ * dependency not in the map downloads normally.
+ *
+ * @param {object|null} aMap - Map of download URL to payload descriptor.
+ */
+RemoteScript.prototype.setPrefetchedDependencies = function (aMap) {
+  this._prefetchedDeps = aMap || null;
+};
+
+/**
+ * Synchronously writes a raw byte string (one character per byte) to a
+ * file, binary-safe.  Small-payload helper for pre-fetched dependencies.
+ */
+function writeBytesToFile(aBytes, aFile) {
+  let ostream = Cc["@mozilla.org/network/file-output-stream;1"]
+      .createInstance(Ci.nsIFileOutputStream);
+  //            PR_WRONLY PR_CREATE_FILE PR_TRUNCATE
+  ostream.init(aFile, 0x02 | 0x08 | 0x20, GM_CONSTANTS.fileMask, 0);
+  let bstream = Cc["@mozilla.org/binaryoutputstream;1"]
+      .createInstance(Ci.nsIBinaryOutputStream);
+  try {
+    bstream.setOutputStream(ostream);
+    bstream.writeBytes(aBytes, aBytes.length);
+  } finally {
+    try { bstream.close(); } catch (e) { /* closes ostream too */ }
+  }
+}
+
+/**
  * Downloads the next pending dependency in sequence.
  * Called recursively until all dependencies are fetched, then invokes
  * aCompletionCallback(true, "dependencies").
@@ -928,6 +962,30 @@ RemoteScript.prototype._downloadDependencies = function (aCompletionCallback) {
   let file = GM_util.getTempFile(
       this._tempDir, filenameFromUri(uri, GM_CONSTANTS.fileScriptName));
   dependency.setFilename(file);
+
+  // Backup import (format v2): when this dependency's bytes were archived,
+  // write them straight to the temp file — no network, and long-dead URLs
+  // keep working.  Any failure falls through to a normal download.
+  let prefetched = this._prefetchedDeps
+      && this._prefetchedDeps[dependency.downloadURL];
+  if (prefetched) {
+    try {
+      writeBytesToFile(prefetched.bytes, file);
+      if (dependency.setCharset) {
+        dependency.setCharset(prefetched.charset || null);
+      }
+      if (dependency.setMimetype && prefetched.mimetype) {
+        dependency.setMimetype(prefetched.mimetype);
+      }
+      this._downloadDependencies(aCompletionCallback);
+      return undefined;
+    } catch (e) {
+      GM_util.logError(
+          "RemoteScript: archived dependency restore failed for "
+          + dependency.downloadURL + " - falling back to download: " + e,
+          false);
+    }
+  }
 
   function dependencyDownloadComplete(aChannel, aSuccess, aErrorMessage) {
     if (!aSuccess) {

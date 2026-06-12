@@ -2,18 +2,26 @@
  * @file backup.js
  * @overview Tampermonkey-compatible ZIP export/import for user scripts.
  *
- * Produces a single .zip archive containing:
+ * Produces a single .zip archive containing (formatVersion 2):
  *   - One <basename>.user.js per installed script (raw source).
- *   - One <basename>.user.js.options.json per script (metadata sidecar).
+ *   - One <basename>.user.js.options.json per script (metadata sidecar,
+ *     including a "dependencies" table describing the archived dependency
+ *     entries below).
  *   - Optionally one <basename>.user.js.storage.json per script (GM values).
+ *   - The script's cached @require / @resource / @icon files under
+ *     <basename>.user.js.deps/<n>-<filename>, so a restore can pre-seed
+ *     them and work fully OFFLINE with the exact bytes that worked at
+ *     export time — even when the original URLs are long dead.
  *   - A top-level "greasemonkey" manifest (JSON) with format version and the
  *     list of exported basenames.
  *
  * The layout is forward- and backward-compatible with Violentmonkey's and
  * Tampermonkey's exports: their importers read individual .user.js entries
- * directly, and our importer tolerates either a VM-style "violentmonkey"
- * manifest or TM-style per-script .options.json / .storage.json sidecars
- * (with or without the .user.js infix).
+ * directly (and ignore the .deps/ entries), and our importer tolerates a
+ * VM-style "violentmonkey" manifest or TM-style per-script .options.json /
+ * .storage.json sidecars (with or without the .user.js infix), translating
+ * VM's config/custom and TM's options/settings/meta schemas into our flat
+ * per-script options.
  *
  * Uses native XPCOM nsIZipWriter / nsIZipReader — no bundled JS library.
  * Entirely local: no cloud sync.
@@ -46,10 +54,16 @@ Cu.import("chrome://greasemonkey-modules/content/util.js");
 // Layout constants.
 const MANIFEST_FILENAME = "greasemonkey";
 const VM_MANIFEST_FILENAME = "violentmonkey";
-const MANIFEST_FORMAT_VERSION = 1;
+const MANIFEST_FORMAT_VERSION = 2;
 const OPTIONS_SUFFIX = ".options.json";
 const STORAGE_SUFFIX = ".storage.json";
 const USER_JS_SUFFIX = GM_CONSTANTS.fileScriptExtension; // ".user.js"
+// Archived dependency entries live under "<base>.user.js.deps/"; the infix
+// also routes those entries through the binary (not UTF-8) zip reader.
+const DEPS_INFIX = USER_JS_SUFFIX + ".deps/";
+// Per-entry inflate cap (zip-bomb guard) — oversized entries are skipped
+// and reported, never read into memory.
+const MAX_ENTRY_BYTES = 32 * 1024 * 1024;
 
 // nsIZipWriter open flags (PR_* constants, unavailable on the JS side).
 const PR_WRONLY = 0x02;
@@ -102,11 +116,17 @@ function GM_BackupExport(aDestFile, aIncludeValues, aCallback) {
       // 1. Raw .user.js source.
       _addEntryFromFile(zipWriter, userJsName, script.file);
 
-      // 2. Options sidecar (.user.js.options.json).
-      _addEntryFromString(
-          zipWriter, userJsName + OPTIONS_SUFFIX, _buildOptionsJson(script));
+      // 2. Cached dependency files (@require / @resource / @icon) under
+      //    <base>.user.js.deps/ so a restore works offline (format v2).
+      //    Returns the table embedded in the options sidecar.
+      let dependencies = _exportDependencies(zipWriter, script, userJsName);
 
-      // 3. Optional GM values dump (.user.js.storage.json).
+      // 3. Options sidecar (.user.js.options.json).
+      _addEntryFromString(
+          zipWriter, userJsName + OPTIONS_SUFFIX,
+          _buildOptionsJson(script, dependencies));
+
+      // 4. Optional GM values dump (.user.js.storage.json).
       if (aIncludeValues) {
         let storageJson = _buildStorageJson(script);
         if (storageJson) {
@@ -170,10 +190,17 @@ function GM_BackupImport(aSrcFile, aCallback) {
 
   let entries;
   let payloads;
+  let binaries;
   try {
     let parsed = _readZipContents(aSrcFile);
     entries = parsed.entries;
     payloads = parsed.payloads;
+    binaries = parsed.binaries;
+    // Oversized entries were skipped, not read — surface that in the
+    // result instead of pretending the archive was fully consumed.
+    for (let i = 0; i < parsed.skipped.length; i++) {
+      result.errors.push(parsed.skipped[i]);
+    }
   } catch (e) {
     GM_util.logError("Backup import: cannot read ZIP: " + e, false);
     aCallback(false, result, "" + e);
@@ -281,7 +308,7 @@ function GM_BackupImport(aSrcFile, aCallback) {
     return;
   }
 
-  _installNext(0, toInstall, scripts, result, function () {
+  _installNext(0, toInstall, scripts, binaries, result, function () {
     aCallback(true, result, null);
   });
 }
@@ -310,9 +337,10 @@ function _uniqueExportBasename(aScript, aTaken) {
 
 /**
  * Serialises the persisted per-script state that isn't recoverable from the
- * script source alone (enabled, user cludes, autoUpdate, etc.).
+ * script source alone (enabled, user cludes, autoUpdate, etc.), plus the
+ * table of archived dependency entries (format v2).
  */
-function _buildOptionsJson(aScript) {
+function _buildOptionsJson(aScript, aDependencies) {
   return JSON.stringify({
     "name": aScript._name,
     "namespace": aScript._namespace,
@@ -327,7 +355,67 @@ function _buildOptionsJson(aScript) {
     "userIncludes": aScript.userIncludes,
     "userMatches": aScript.userMatches.map(function (m) { return m.pattern; }),
     "userOverride": aScript._userOverride,
+    "dependencies": aDependencies || [],
   }, null, 2);
+}
+
+/**
+ * Adds every cached dependency file of a script (@require / @resource /
+ * @icon) to the archive under "<userJsName>.deps/<n>-<filename>" and
+ * returns the table describing them for the options sidecar:
+ *   [{ kind, name, url, entry, mimetype, charset }, …]
+ * A dependency whose local file is missing is skipped — import falls back
+ * to downloading it from its original URL, exactly as format v1 did for
+ * everything.
+ */
+function _exportDependencies(aZipWriter, aScript, aUserJsName) {
+  let out = [];
+  let groups = [
+    { "kind": "require", "list": aScript.requires },
+    { "kind": "resource", "list": aScript.resources },
+  ];
+  try {
+    let icon = aScript.icon;
+    if (icon && icon._filename && icon.downloadURL) {
+      groups.push({ "kind": "icon", "list": [icon] });
+    }
+  } catch (e) {
+    // No usable icon — fine.
+  }
+
+  let index = 0;
+  for (let g = 0; g < groups.length; g++) {
+    let group = groups[g];
+    for (let i = 0; i < group.list.length; i++) {
+      let dep = group.list[i];
+      try {
+        if (!dep._filename || !dep.downloadURL) {
+          continue;
+        }
+        let file = dep.file;
+        if (!file || !file.exists()) {
+          continue;
+        }
+        let entry = aUserJsName + ".deps/" + index + "-"
+            + cleanFilename(file.leafName, "dependency");
+        _addEntryFromFile(aZipWriter, entry, file);
+        out.push({
+          "kind": group.kind,
+          "name": (group.kind == "resource") ? dep.name : null,
+          "url": dep.downloadURL,
+          "entry": entry,
+          "mimetype": dep._mimetype || null,
+          "charset": dep._charset || null,
+        });
+        index++;
+      } catch (e) {
+        GM_util.logError(
+            "Backup export: dependency skipped for " + aScript.id
+            + " - " + e, false);
+      }
+    }
+  }
+  return out;
 }
 
 /**
@@ -414,16 +502,42 @@ function _readZipContents(aSrcFile) {
   try {
     let entries = [];
     let payloads = {};
+    let binaries = {};
+    let skipped = [];
     let iter = zipReader.findEntries("*");
     while (iter.hasMore()) {
       let name = iter.getNext();
       if (!name || name.charAt(name.length - 1) === "/") {
         continue;
       }
+      // Zip-bomb guard: refuse to inflate any entry past the cap; record
+      // the skip so the import result reports it instead of silently
+      // pretending the archive was fully consumed.
+      let realSize = 0;
+      try {
+        realSize = zipReader.getEntry(name).realSize;
+      } catch (e) {
+        // Unreadable entry record — let the read below throw if it must.
+      }
+      if (realSize > MAX_ENTRY_BYTES) {
+        skipped.push(name + ": entry too large (" + realSize + " bytes)");
+        continue;
+      }
+      if (name.indexOf(DEPS_INFIX) !== -1) {
+        // Archived dependency payloads (format v2) can be binary (images,
+        // fonts) — read raw bytes, NOT UTF-8 with replacement characters.
+        binaries[name] = _readEntryAsBytes(zipReader, name);
+        continue;
+      }
       entries.push(name);
       payloads[name] = _readEntryAsString(zipReader, name);
     }
-    return { "entries": entries, "payloads": payloads };
+    return {
+      "entries": entries,
+      "payloads": payloads,
+      "binaries": binaries,
+      "skipped": skipped,
+    };
   } finally {
     try { zipReader.close(); } catch (e) { /* ignore */ }
   }
@@ -456,11 +570,33 @@ function _readEntryAsString(aZipReader, aEntryName) {
 }
 
 /**
+ * Reads a single ZIP entry as a raw byte string (binary-safe — one
+ * character per byte, code points 0-255).  Used for archived dependency
+ * payloads, which may be images, fonts, or other non-text files.
+ */
+function _readEntryAsBytes(aZipReader, aEntryName) {
+  let stream = aZipReader.getInputStream(aEntryName);
+  try {
+    let bstream = Cc["@mozilla.org/binaryinputstream;1"]
+        .createInstance(Ci.nsIBinaryInputStream);
+    bstream.setInputStream(stream);
+    let chunks = [];
+    let avail;
+    while ((avail = bstream.available()) > 0) {
+      chunks.push(bstream.readBytes(avail));
+    }
+    return chunks.join("");
+  } finally {
+    try { stream.close(); } catch (e) { /* some impls auto-close */ }
+  }
+}
+
+/**
  * Sequential installer.  We chain callbacks rather than install in parallel
  * so that the scripts directory is written to one entry at a time and we
  * don't race on config.xml persistence.
  */
-function _installNext(aIdx, aKeys, aScripts, aResult, aDone) {
+function _installNext(aIdx, aKeys, aScripts, aBinaries, aResult, aDone) {
   if (aIdx >= aKeys.length) {
     aDone();
     return;
@@ -478,9 +614,32 @@ function _installNext(aIdx, aKeys, aScripts, aResult, aDone) {
       options = null;
     }
   }
+  // Translate foreign sidecar schemas (Violentmonkey config/custom,
+  // Tampermonkey options/settings/meta) into our flat shape; our own
+  // sidecars pass through unchanged.
+  options = _normalizeImportedOptions(options);
+
+  // Collect archived dependency bytes (format v2) for this script so the
+  // install can pre-seed them: restore works offline, dead URLs keep
+  // working.  Anything not in the archive downloads normally.
+  let prefetch = null;
+  if (options && Array.isArray(options.dependencies)) {
+    for (let d = 0; d < options.dependencies.length; d++) {
+      let dep = options.dependencies[d];
+      if (dep && dep.url && dep.entry
+          && aBinaries && (dep.entry in aBinaries)) {
+        prefetch = prefetch || {};
+        prefetch[dep.url] = {
+          "bytes": aBinaries[dep.entry],
+          "mimetype": dep.mimetype || null,
+          "charset": dep.charset || null,
+        };
+      }
+    }
+  }
 
   let next = function () {
-    _installNext(aIdx + 1, aKeys, aScripts, aResult, aDone);
+    _installNext(aIdx + 1, aKeys, aScripts, aBinaries, aResult, aDone);
   };
 
   // Synthesise an install URI from the sidecar's downloadURL so that
@@ -570,6 +729,10 @@ function _installNext(aIdx, aKeys, aScripts, aResult, aDone) {
       if (typeof remoteScript.setSilent === "function") {
         remoteScript.setSilent();
       }
+      if (prefetch
+          && (typeof remoteScript.setPrefetchedDependencies === "function")) {
+        remoteScript.setPrefetchedDependencies(prefetch);
+      }
       remoteScript.download(function (aSuccess) {
         if (!aSuccess) {
           aResult.skipped++;
@@ -596,6 +759,109 @@ function _installNext(aIdx, aKeys, aScripts, aResult, aDone) {
       next();
     }
   });
+}
+
+/**
+ * Translates a foreign per-script options sidecar into our flat shape.
+ *
+ * Detection:
+ *   - Violentmonkey: state nested under config ({enabled, shouldUpdate} as
+ *     0/1 numbers) and custom ({include/match/exclude arrays, downloadURL,
+ *     origInclude/origMatch/origExclude merge flags}).
+ *   - Tampermonkey: {options: {override: {use_* / merge_* lists},
+ *     check_for_updates}, settings: {enabled, position}, meta: {file_url}}.
+ *   - Anything else (our own exports) passes through unchanged.
+ *
+ * Mapping notes: VM/TM keep replace-vs-merge per clude list; we have one
+ * userOverride flag for all of them — any "replace" wins.  TM use_* lists
+ * take precedence over merge_* lists when both are present.
+ */
+function _normalizeImportedOptions(aRaw) {
+  if (!aRaw || typeof aRaw !== "object") {
+    return null;
+  }
+
+  // Violentmonkey (zip index entry with config/custom nesting).
+  if (aRaw.config || aRaw.custom) {
+    let config = aRaw.config || {};
+    let custom = aRaw.custom || {};
+    let out = {};
+    if (config.enabled != null) {
+      out.enabled = !!+config.enabled;
+    }
+    if ((config.shouldUpdate != null) && !+config.shouldUpdate) {
+      out.checkRemoteUpdates = AddonManager.AUTOUPDATE_DISABLE;
+    }
+    if (custom.downloadURL) {
+      out.downloadURL = "" + custom.downloadURL;
+    }
+    if (custom.homepageURL) {
+      out.homepageURL = "" + custom.homepageURL;
+    }
+    if (Array.isArray(custom.include)) {
+      out.userIncludes = custom.include;
+    }
+    if (Array.isArray(custom.exclude)) {
+      out.userExcludes = custom.exclude;
+    }
+    if (Array.isArray(custom.match)) {
+      out.userMatches = custom.match;
+    }
+    // VM's origInclude/origMatch/origExclude default to true (= merge the
+    // custom lists with the script's own); an explicit false means
+    // "replace" — our userOverride.
+    if ((custom.origInclude === false) || (custom.origMatch === false)
+        || (custom.origExclude === false)) {
+      out.userOverride = true;
+    } else if (out.userIncludes || out.userExcludes || out.userMatches) {
+      out.userOverride = false;
+    }
+    return out;
+  }
+
+  // Tampermonkey (.options.json with options/settings/meta).
+  if (aRaw.settings || aRaw.meta
+      || (aRaw.options && (typeof aRaw.options === "object"))) {
+    let tmOptions = aRaw.options || {};
+    let override = tmOptions.override || {};
+    let settings = aRaw.settings || {};
+    let meta = aRaw.meta || {};
+    let out = {};
+    if (typeof settings.enabled === "boolean") {
+      out.enabled = settings.enabled;
+    }
+    if (tmOptions.check_for_updates === false) {
+      out.checkRemoteUpdates = AddonManager.AUTOUPDATE_DISABLE;
+    }
+    if (meta.file_url) {
+      out.downloadURL = "" + meta.file_url;
+    }
+    let pick = function (aList) {
+      return (Array.isArray(aList) && aList.length) ? aList : null;
+    };
+    let useIncludes = pick(override.use_includes);
+    let useMatches = pick(override.use_matches);
+    let useExcludes = pick(override.use_excludes);
+    if (useIncludes || useMatches || useExcludes) {
+      if (useIncludes) { out.userIncludes = useIncludes; }
+      if (useMatches) { out.userMatches = useMatches; }
+      if (useExcludes) { out.userExcludes = useExcludes; }
+      out.userOverride = true;
+    } else {
+      let mergeIncludes = pick(override.merge_includes);
+      let mergeMatches = pick(override.merge_matches);
+      let mergeExcludes = pick(override.merge_excludes);
+      if (mergeIncludes) { out.userIncludes = mergeIncludes; }
+      if (mergeMatches) { out.userMatches = mergeMatches; }
+      if (mergeExcludes) { out.userExcludes = mergeExcludes; }
+      if (mergeIncludes || mergeMatches || mergeExcludes) {
+        out.userOverride = false;
+      }
+    }
+    return out;
+  }
+
+  return aRaw;
 }
 
 /**
