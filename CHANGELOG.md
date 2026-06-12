@@ -10,6 +10,28 @@
   `extensions.greasemonkey.manager.newScript.classicDialog.enabled` to true to
   restore the classic metadata dialog.
 
+**Toolbar menu**
+* **New User Script…** now uses the same editor-jump flow as about:addons
+  (it still opened the classic name/namespace dialog), and scopes the new
+  script to the active tab of the window it was invoked from.  Both entry
+  points share `modules/util/createUserScript.js`; the `classicDialog`
+  escape hatch governs both.
+* **User Script Commands…** is now grouped per script: a bold header row
+  for each script (sorted by name) with its commands indented beneath, and
+  separators between groups.  Duplicate rows from re-registered commands or
+  the same script running in several frames are gone (de-duplicated by
+  script + command name).
+
+**Script updates**
+* Greasemonkey now schedules its own update checks: **Check for script
+  updates every N day(s)** in Greasemonkey Preferences, with **0 disabling
+  scheduled checks entirely** and a **Check now** button.  Userscript
+  checks no longer ride the browser-global add-ons sweep (manual checks in
+  about:addons are unchanged); the per-script Automatic Updates radios, the
+  disabled-scripts and HTTPS-only gates, and the local-edit safety all
+  apply exactly as before.  Prefs:
+  `extensions.greasemonkey.update.intervalDays` / `update.lastCheck`.
+
 #### 3.8.1 — Hotfix
 
 * **Fixed:** opening a script's **Preferences** failed with an "XML Parser
