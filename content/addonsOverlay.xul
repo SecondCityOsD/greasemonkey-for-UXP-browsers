@@ -99,7 +99,7 @@
          Export All… / Import… rather than a bulky menu button. -->
     <menupopup id="gm-new-menu-popup">
       <menuitem label="&menu.new.create;"
-        oncommand="GM_createNewUserScript();"/>
+        oncommand="GM_util.createUserScript(window);"/>
       <menuseparator/>
       <menuitem label="&menu.new.greasyfork;"
         oncommand="GM_openSite('https://greasyfork.org/scripts');"/>

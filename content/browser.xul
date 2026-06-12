@@ -111,7 +111,7 @@
       <menuitem
         accesskey="&menu.new.accesskey;"
         label="&menu.new;"
-        oncommand="GM_util.newUserScript(window);" />
+        oncommand="GM_util.createUserScript(window);" />
       <menu
         accesskey="&menu.commands.accesskey;"
         label="&menu.commands;">

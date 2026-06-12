@@ -33,6 +33,7 @@ var GM_util = {};
 // Do not edit below this line. Use "util.sh" to auto-populate.
 XPCOMUtils.defineLazyModuleGetter(GM_util, "alert", "chrome://greasemonkey-modules/content/util/alert.js");
 XPCOMUtils.defineLazyModuleGetter(GM_util, "compareVersion", "chrome://greasemonkey-modules/content/util/compareVersion.js");
+XPCOMUtils.defineLazyModuleGetter(GM_util, "createUserScript", "chrome://greasemonkey-modules/content/util/createUserScript.js");
 XPCOMUtils.defineLazyModuleGetter(GM_util, "emptyElm", "chrome://greasemonkey-modules/content/util/emptyElm.js");
 XPCOMUtils.defineLazyModuleGetter(GM_util, "enqueueRemove", "chrome://greasemonkey-modules/content/util/enqueueRemove.js");
 XPCOMUtils.defineLazyModuleGetter(GM_util, "fileXhr", "chrome://greasemonkey-modules/content/util/fileXhr.js");
