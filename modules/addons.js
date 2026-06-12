@@ -382,6 +382,27 @@ ScriptAddon.prototype.isCompatibleWith = function () {
  * @param {number}                 aReason         - AddonManager.UPDATE_WHEN_* constant.
  */
 ScriptAddon.prototype.findUpdates = function (aUpdateListener, aReason) {
+  // The GM update scheduler (modules/updateScheduler.js) owns periodic
+  // cadence via extensions.greasemonkey.update.intervalDays.  Suppress the
+  // browser's own daily background sweep so scripts aren't checked on two
+  // schedules (or at all, when the interval is 0).  Scheduler-driven sweeps
+  // mark the addon with _gmScheduledCheck around this synchronous call;
+  // manual checks (UPDATE_WHEN_USER_REQUESTED / this.manualUpdate) are
+  // unaffected.
+  if ((aReason == AddonManager.UPDATE_WHEN_PERIODIC_UPDATE)
+      && !this._gmScheduledCheck) {
+    if (aUpdateListener
+        && (typeof aUpdateListener.onNoUpdateAvailable != "undefined")) {
+      aUpdateListener.onNoUpdateAvailable(this);
+    }
+    if (aUpdateListener
+        && (typeof aUpdateListener.onUpdateFinished != "undefined")) {
+      aUpdateListener.onUpdateFinished(
+          this, AddonManager.UPDATE_STATUS_NO_ERROR);
+    }
+    return undefined;
+  }
+
   let callback = this._handleRemoteUpdate.bind(this, aUpdateListener);
   // Treat user-initiated update checks (clicking "Check for Updates") as
   // manual — bypasses the shouldAutoUpdate() gate so scripts get checked

@@ -159,6 +159,11 @@ pref("extensions.greasemonkey.sync.values.deleteNonExistentValues", false);
 pref("extensions.greasemonkey.sync.values.maxSizePerScript", 65536);
 pref("extensions.greasemonkey.timeoutUpdatesInSeconds", 45);
 pref("extensions.greasemonkey.unmhtIsGreaseable", false);
+// Greasemonkey-owned script-update scheduling (modules/updateScheduler.js):
+// check every N days; 0 disables scheduled checks entirely.  lastCheck is
+// the epoch-ms of the last sweep (a string: the value exceeds int32 prefs).
+pref("extensions.greasemonkey.update.intervalDays", 1);
+pref("extensions.greasemonkey.update.lastCheck", "0");
 pref("extensions.greasemonkey.version", "0.0");
 pref("extensions.greasemonkey.view-sourceIsGreaseable", false);
 pref("services.sync.prefs.sync.extensions.greasemonkey.enableScriptRefreshing", true);
@@ -173,3 +178,4 @@ pref("services.sync.prefs.sync.extensions.greasemonkey.sync.enabled", true);
 pref("services.sync.prefs.sync.extensions.greasemonkey.sync.values", true);
 pref("services.sync.prefs.sync.extensions.greasemonkey.sync.values.deleteNonExistentValues", true);
 pref("services.sync.prefs.sync.extensions.greasemonkey.timeoutUpdatesInSeconds", true);
+pref("services.sync.prefs.sync.extensions.greasemonkey.update.intervalDays", true);

@@ -24,6 +24,7 @@ Cu.import("chrome://greasemonkey-modules/content/scriptInjector.js");
 Cu.import("chrome://greasemonkey-modules/content/scriptProtocol.js");
 Cu.import("chrome://greasemonkey-modules/content/storageBack.js");
 Cu.import("chrome://greasemonkey-modules/content/sync.js");
+Cu.import("chrome://greasemonkey-modules/content/updateScheduler.js");
 Cu.import("chrome://greasemonkey-modules/content/util.js");
 
 // Import installPolicy here so its nsIContentPolicy registration runs at
@@ -41,6 +42,8 @@ var gStartupHasRun = false;
 /////////////////////// Component-global Helper Functions //////////////////////
 
 function shutdown(aService) {
+  // No further scheduled update sweeps once teardown begins.
+  GM_updateScheduler.stop();
   // Closes every per-script SQLite Back this session opened.  The
   // per-script registry lives inside modules/storageBack.js, so shutdown
   // is a single module call.
@@ -103,6 +106,9 @@ function startup(aService) {
 
   Cu.import("chrome://greasemonkey-modules/content/requestObserver.js", {});
   Cu.import("chrome://greasemonkey-modules/content/responseObserver.js", {});
+
+  // GM-owned periodic script-update checks (update.intervalDays pref).
+  GM_updateScheduler.start();
 
   Services.obs.addObserver(aService, "quit-application", false);
 
