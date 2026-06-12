@@ -18,6 +18,7 @@ Cu.import("chrome://greasemonkey-modules/content/util.js");
 
 var GM_MenuCommander = {
   "cookieShowing": null,
+  "groups": null,
   "messageCookie": 1,
   "popup": null,
 };
@@ -27,6 +28,13 @@ var GM_MenuCommander = {
 //   sandbox → Services.obs.notifyObservers("greasemonkey:menu-command-
 //             response", …) → _observer below → messageMenuCommandResponse
 // Both legs stay in-process and avoid any messageManager indirection.
+//
+// Display model: commands are grouped per owning script.  Each script gets
+// a bold non-clickable header row with its commands beneath it, separators
+// between groups; groups are sorted by script name, commands keep their
+// registration order.  Responses arrive in one batch per sandbox (script ×
+// frame), so the popup is rebuilt from the accumulated groups on every
+// batch.
 
 /**
  * Bridge object passed to Services.obs.addObserver.  The platform calls
@@ -79,6 +87,7 @@ GM_MenuCommander.commandClicked = function (aCommand) {
 
 GM_MenuCommander.createMenuItem = function (aCommand) {
   let menuItem = document.createElement("menuitem");
+  menuItem.setAttribute("class", "greasemonkey-command-item");
   menuItem.setAttribute("label", aCommand.name);
   menuItem.setAttribute("tooltiptext", aCommand.scriptName);
   menuItem.addEventListener("command", function () {
@@ -89,8 +98,6 @@ GM_MenuCommander.createMenuItem = function (aCommand) {
     menuItem.setAttribute("accesskey", aCommand.accesskey);
   }
 
-  menuItem.setAttribute("_object", JSON.stringify(aCommand));
-
   return menuItem;
 };
 
@@ -98,28 +105,73 @@ GM_MenuCommander.messageMenuCommandResponse = function (aMessage) {
   if (aMessage.data.cookie != GM_MenuCommander.cookieShowing) {
     return undefined;
   }
+  if (!GM_MenuCommander.groups) {
+    // Late response after the popup already hid.
+    return undefined;
+  }
 
+  // Fold the batch into the per-script groups.  A (scriptUuid, name) pair
+  // that arrives again replaces the earlier registration, so scripts that
+  // re-register and the same script running in several frames don't
+  // produce duplicate rows.  Null-prototype maps: command names are
+  // script-controlled strings ("__proto__" must stay an ordinary key).
+  let groups = GM_MenuCommander.groups;
   for (let i in aMessage.data.commands) {
     let command = aMessage.data.commands[i];
-    let menuItem = GM_MenuCommander.createMenuItem(command);
-    let menuItems = GM_MenuCommander.popup.childNodes;
-    let menuItemExists = false;
-    for (let i = 0, iLen = menuItems.length; i < iLen; i++) {
-      if (JSON.stringify(command) == menuItems[i].getAttribute("_object")) {
-        menuItemExists = true;
-        break;
-      }
+    let group = groups[command.scriptUuid];
+    if (!group) {
+      group = groups[command.scriptUuid] = {
+        "byName": Object.create(null),
+        "order": [],
+        "scriptName": String(command.scriptName),
+      };
     }
-    if (!menuItemExists) {
-      GM_MenuCommander.popup.appendChild(menuItem);
+    if (!(command.name in group.byName)) {
+      group.order.push(command.name);
+    }
+    group.byName[command.name] = command;
+  }
+
+  GM_MenuCommander.rebuildPopup();
+};
+
+GM_MenuCommander.rebuildPopup = function () {
+  let popup = GM_MenuCommander.popup;
+  let groups = GM_MenuCommander.groups;
+  if (!popup || !groups) {
+    return undefined;
+  }
+
+  GM_util.emptyElm(popup);
+
+  let uuids = Object.keys(groups);
+  uuids.sort(function (aA, aB) {
+    return groups[aA].scriptName.localeCompare(groups[aB].scriptName);
+  });
+
+  let total = 0;
+  for (let u = 0, uLen = uuids.length; u < uLen; u++) {
+    let group = groups[uuids[u]];
+    if (u > 0) {
+      popup.appendChild(document.createElement("menuseparator"));
+    }
+    let header = document.createElement("menuitem");
+    header.setAttribute("class", "greasemonkey-command-script-header");
+    header.setAttribute("disabled", "true");
+    header.setAttribute("label", group.scriptName);
+    popup.appendChild(header);
+    for (let c = 0, cLen = group.order.length; c < cLen; c++) {
+      popup.appendChild(
+          GM_MenuCommander.createMenuItem(group.byName[group.order[c]]));
+      total++;
     }
   }
-  if (GM_MenuCommander.popup.firstChild) {
-    GM_MenuCommander.popup.parentNode.disabled = false;
-  }
+
+  popup.parentNode.disabled = (total == 0);
 };
 
 GM_MenuCommander.onPopupHiding = function () {
+  GM_MenuCommander.groups = null;
   // See #1632.
   // Asynchronously.
   GM_util.timeout(function () {
@@ -133,6 +185,7 @@ GM_MenuCommander.onPopupShowing = function (aEventTarget) {
 
   GM_MenuCommander.messageCookie++;
   GM_MenuCommander.cookieShowing = GM_MenuCommander.messageCookie;
+  GM_MenuCommander.groups = Object.create(null);
 
   // Start disabled and empty...
   GM_MenuCommander.popup.parentNode.disabled = true;
