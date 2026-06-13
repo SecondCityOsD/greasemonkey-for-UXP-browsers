@@ -55,6 +55,11 @@
     <checkbox id="check-sync" label="&enableSync;" />
   </groupbox>
 
+  <!-- PARKED for 3.9: scheduled-backup UI needs fine-tuning before release.
+       Re-enable this groupbox together with the backup wiring in
+       options.js and the scheduler start() in components/greasemonkey.js.
+       (Entity refs inside an XML comment are not parsed, so the unused
+       &options.backups; etc. entities cause no harm here.)
   <groupbox>
     <caption label="&options.backups;" />
     <hbox id="interval-backup-box" align="center">
@@ -78,6 +83,7 @@
       <label value="&backupsKeepUnits;" />
     </hbox>
   </groupbox>
+  -->
 
   <groupbox>
     <caption label="&options.editor;" />

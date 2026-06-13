@@ -1226,14 +1226,38 @@ function GM_backupImport() {
     return;
   }
 
-  // The selective-import dialog previews the archive, lets the user pick
-  // scripts and toggles (overwrite / values / settings), runs the import
-  // with progress, and reports the summary + safety-snapshot path.
-  window.openDialog(
-      "chrome://greasemonkey/content/importDialog.xul",
-      "greasemonkey-import-dialog",
-      "chrome,dialog,modal,centerscreen,resizable",
-      { "file": fp.file });
+  // PARKED for 3.9: the selective-import dialog (preview + per-script
+  // checkboxes + overwrite/values/settings toggles + pre-import safety
+  // snapshot) needs more fine-tuning before release.  Re-enable by
+  // restoring the openDialog() call below and removing the direct import.
+  // The dialog (content/importDialog.{xul,js}) and the backup.js machinery
+  // it drives (GM_BackupPreview, the options argument, overwrite, snapshot)
+  // all remain in the tree, just unreferenced.
+  //
+  // window.openDialog(
+  //     "chrome://greasemonkey/content/importDialog.xul",
+  //     "greasemonkey-import-dialog",
+  //     "chrome,dialog,modal,centerscreen,resizable",
+  //     { "file": fp.file });
+
+  // 3.9 ships the straight import: install every parsable script (skipping
+  // ones already installed), restore their stored values, no snapshot.
+  let backup = GM_backup_get();
+  backup.GM_BackupImport(fp.file, { "skipSnapshot": true },
+      function (aSuccess, aResult, aErr) {
+    let bundle = GM_backup_stringBundle();
+    if (!aSuccess) {
+      alert(bundle.GetStringFromName("backup.failed").replace("%1", aErr || ""));
+      return;
+    }
+    let msg = bundle.GetStringFromName("backup.imported")
+        .replace("%1", aResult.imported)
+        .replace("%2", aResult.skipped);
+    if (aResult.errors && aResult.errors.length) {
+      msg += "\n\n" + aResult.errors.join("\n");
+    }
+    alert(msg);
+  });
 }
 
 /**
