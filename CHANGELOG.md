@@ -47,6 +47,17 @@
   imports reject scripts the normal install pipeline would reject;
   exporting no longer creates/locks per-script value databases as a side
   effect; per-entry zip-bomb guard on import.
+* **Native, off-main-thread compression** — export compresses on a
+  background thread via the platform's own ZIP writer, so the browser no
+  longer freezes while a large backup is built.  Disable with
+  `extensions.greasemonkey.backup.asyncExport` if needed.
+* **Constant-memory import** — archived dependencies are streamed straight
+  out of the ZIP to disk and copied into place natively, so importing a
+  large archive no longer loads the whole thing into memory.
+* **Integrity-checked, de-duplicated dependencies** — identical dependency
+  files shared by several scripts are stored once (smaller archives), and
+  each is SHA-256-verified on import; a corrupt or tampered dependency is
+  re-downloaded instead of installed.
 
 #### 3.8.1 — Hotfix
 
