@@ -126,6 +126,12 @@ function GM_BackupExport(aDestFile, aIncludeValues, aCallback) {
   let exportedBasenames = [];
   let exportedCount = 0;
   let errors = [];
+  // Off-main-thread native compression when enabled (the default): every
+  // entry is queued, then processQueue() compresses on a background thread
+  // and the observer closes the writer + fires the callback, so the UI
+  // never freezes.  Flip extensions.greasemonkey.backup.asyncExport to
+  // false to force the proven synchronous path.
+  let useAsync = GM_prefRoot.getValue("backup.asyncExport", true);
 
   for (let i = 0; i < scripts.length; i++) {
     let script = scripts[i];
@@ -140,24 +146,25 @@ function GM_BackupExport(aDestFile, aIncludeValues, aCallback) {
       }
 
       // 1. Raw .user.js source.
-      _addEntryFromFile(zipWriter, userJsName, script.file);
+      _addEntryFromFile(zipWriter, userJsName, script.file, useAsync);
 
       // 2. Cached dependency files (@require / @resource / @icon) under
       //    <base>.user.js.deps/ so a restore works offline (format v2).
       //    Returns the table embedded in the options sidecar.
-      let dependencies = _exportDependencies(zipWriter, script, userJsName);
+      let dependencies =
+          _exportDependencies(zipWriter, script, userJsName, useAsync);
 
       // 3. Options sidecar (.user.js.options.json).
       _addEntryFromString(
           zipWriter, userJsName + OPTIONS_SUFFIX,
-          _buildOptionsJson(script, dependencies));
+          _buildOptionsJson(script, dependencies), useAsync);
 
       // 4. Optional GM values dump (.user.js.storage.json).
       if (aIncludeValues) {
         let storageJson = _buildStorageJson(script);
         if (storageJson) {
           _addEntryFromString(
-              zipWriter, userJsName + STORAGE_SUFFIX, storageJson);
+              zipWriter, userJsName + STORAGE_SUFFIX, storageJson, useAsync);
         }
       }
 
@@ -184,21 +191,69 @@ function GM_BackupExport(aDestFile, aIncludeValues, aCallback) {
       },
     };
     _addEntryFromString(
-        zipWriter, MANIFEST_FILENAME, JSON.stringify(manifest, null, 2));
+        zipWriter, MANIFEST_FILENAME, JSON.stringify(manifest, null, 2),
+        useAsync);
   } catch (e) {
     // Non-fatal; scripts are already in the archive.
     GM_util.logError("Backup manifest: " + e, false);
   }
 
-  try {
-    zipWriter.close();
-  } catch (e) {
-    GM_util.logError("Backup export: close failed: " + e, false);
-    aCallback(false, exportedCount, "" + e);
+  let errMsg = errors.length ? errors.join("; ") : null;
+
+  // Synchronous path (kill-switch off): compress + close inline, as before.
+  if (!useAsync) {
+    try {
+      zipWriter.close();
+    } catch (e) {
+      GM_util.logError("Backup export: close failed: " + e, false);
+      aCallback(false, exportedCount, "" + e);
+      return;
+    }
+    aCallback(true, exportedCount, errMsg);
     return;
   }
 
-  aCallback(true, exportedCount, errors.length ? errors.join("; ") : null);
+  // Async path: processQueue() compresses every queued entry on a
+  // background thread; the observer closes the writer and fires the
+  // callback when the queue drains.  A synchronous throw from
+  // processQueue (bad state) falls through to a failure callback.
+  let observer = {
+    "onStartRequest": function (aReq, aCtx) {},
+    "onStopRequest": function (aReq, aCtx, aStatus) {
+      let ok = Components.isSuccessCode(aStatus);
+      try {
+        zipWriter.close();
+      } catch (e) {
+        GM_util.logError("Backup export: async close failed: " + e, false);
+        aCallback(false, exportedCount, "" + e);
+        return undefined;
+      }
+      if (ok) {
+        aCallback(true, exportedCount, errMsg);
+      } else {
+        aCallback(false, exportedCount,
+            "compression failed: 0x" + (aStatus >>> 0).toString(16));
+      }
+      return undefined;
+    },
+    "QueryInterface": function (aIID) {
+      if (aIID.equals(Ci.nsIRequestObserver) || aIID.equals(Ci.nsISupports)) {
+        return this;
+      }
+      throw Components.results.NS_ERROR_NO_INTERFACE;
+    },
+  };
+  try {
+    zipWriter.processQueue(observer, null);
+  } catch (e) {
+    GM_util.logError("Backup export: processQueue failed: " + e, false);
+    try {
+      zipWriter.close();
+    } catch (e2) {
+      // Already failing; nothing more to do.
+    }
+    aCallback(false, exportedCount, "" + e);
+  }
 }
 
 
@@ -580,7 +635,7 @@ function _buildOptionsJson(aScript, aDependencies) {
  * to downloading it from its original URL, exactly as format v1 did for
  * everything.
  */
-function _exportDependencies(aZipWriter, aScript, aUserJsName) {
+function _exportDependencies(aZipWriter, aScript, aUserJsName, aQueue) {
   let out = [];
   let groups = [
     { "kind": "require", "list": aScript.requires },
@@ -610,7 +665,7 @@ function _exportDependencies(aZipWriter, aScript, aUserJsName) {
         }
         let entry = aUserJsName + ".deps/" + index + "-"
             + cleanFilename(file.leafName, "dependency");
-        _addEntryFromFile(aZipWriter, entry, file);
+        _addEntryFromFile(aZipWriter, entry, file, aQueue);
         out.push({
           "kind": group.kind,
           "name": (group.kind == "resource") ? dep.name : null,
@@ -666,20 +721,22 @@ function _buildStorageJson(aScript) {
 }
 
 /** Adds an on-disk file to the ZIP at the given entry path. */
-function _addEntryFromFile(aZipWriter, aEntryName, aFile) {
+function _addEntryFromFile(aZipWriter, aEntryName, aFile, aQueue) {
   aZipWriter.addEntryFile(
       aEntryName,
       Ci.nsIZipWriter.COMPRESSION_DEFAULT,
       aFile,
-      false);
+      !!aQueue);
 }
 
 /**
  * Adds a string (UTF-8 encoded) to the ZIP at the given entry path.
  * Uses nsIStringInputStream with the UTF-8 byte length so multi-byte
- * characters survive the round-trip.
+ * characters survive the round-trip.  When aQueue is true the entry is
+ * queued for background-thread compression (see GM_BackupExport); the
+ * string input stream is held by the writer's queue until processed.
  */
-function _addEntryFromString(aZipWriter, aEntryName, aString) {
+function _addEntryFromString(aZipWriter, aEntryName, aString, aQueue) {
   let converter = Cc["@mozilla.org/intl/scriptableunicodeconverter"]
       .createInstance(Ci.nsIScriptableUnicodeConverter);
   converter.charset = "UTF-8";
@@ -696,7 +753,7 @@ function _addEntryFromString(aZipWriter, aEntryName, aString) {
       nowMicros,
       Ci.nsIZipWriter.COMPRESSION_DEFAULT,
       sis,
-      false);
+      !!aQueue);
 }
 
 /**
