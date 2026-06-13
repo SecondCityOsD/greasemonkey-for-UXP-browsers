@@ -38,27 +38,15 @@
   bytes instead of re-downloading, so a backup restores fully offline and
   survives long-dead dependency URLs.  No other userscript manager
   currently delivers this.
-* **Selective import dialog** — importing a zip now previews its contents:
-  pick scripts individually, see already-installed / stored-values /
-  archived-dependency badges, optionally **overwrite installed scripts**
-  (in-place update: position kept, stored values carried over), restore
-  stored values, and restore global settings.
-* **Durable safety snapshot** — before an import installs anything, a full
-  backup is written to `<profile>/gm_backups/pre-import-<timestamp>.zip`
-  (newest 10 kept): an undo point that survives restarts.
-* **Scheduled backups** — new Backups group in Greasemonkey Preferences:
-  back up everything every N days (0 = off) to a folder of your choice
-  (point it at a Dropbox/Syncthing-synced directory for free cloud
-  backup), keep the newest N, plus a **Back up now** button.
 * **Real Violentmonkey / Tampermonkey compatibility** — foreign archives
   now restore enabled state and custom include/match/exclude rules (VM's
   `config`/`custom` and TM's `options`/`settings` schemas are translated)
   instead of silently importing with defaults.
-* **Correctness** — global settings travel in the archive; a failed write
-  can no longer silently stall an import; export reports skipped scripts
-  instead of claiming a clean backup; imports reject scripts the normal
-  install pipeline would reject; exporting no longer creates/locks
-  per-script value databases as a side effect; per-entry zip-bomb guard.
+* **Correctness** — a failed write can no longer silently stall an import;
+  export reports skipped scripts instead of claiming a clean backup;
+  imports reject scripts the normal install pipeline would reject;
+  exporting no longer creates/locks per-script value databases as a side
+  effect; per-entry zip-bomb guard on import.
 
 #### 3.8.1 — Hotfix
 
