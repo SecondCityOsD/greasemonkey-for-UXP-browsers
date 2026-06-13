@@ -56,6 +56,30 @@
   </groupbox>
 
   <groupbox>
+    <caption label="&options.backups;" />
+    <hbox id="interval-backup-box" align="center">
+      <label value="&intervalBackups;" />
+      <textbox id="interval-backup-value" type="number" min="0" max="365"
+        increment="1" size="3" />
+      <label value="&intervalBackupsUnits;" />
+      <button id="backup-now" label="&backupsNow;"
+        oncommand="GM_backupNow();" />
+    </hbox>
+    <hbox id="backup-folder-box" align="center">
+      <label value="&backupsFolder;" />
+      <textbox id="backup-folder" readonly="true" flex="1" />
+      <button id="backup-browse" label="&backupsBrowse;"
+        oncommand="GM_backupBrowseFolder();" />
+    </hbox>
+    <hbox id="backup-keep-box" align="center">
+      <label value="&backupsKeep;" />
+      <textbox id="backup-keep-value" type="number" min="1" max="50"
+        increment="1" size="2" />
+      <label value="&backupsKeepUnits;" />
+    </hbox>
+  </groupbox>
+
+  <groupbox>
     <caption label="&options.editor;" />
     <hbox flex="1">
       <textbox id="editor-path" value="" tooltiptext="" readonly="true"

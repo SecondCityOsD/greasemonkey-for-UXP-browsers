@@ -81,3 +81,14 @@
 <!ENTITY intervalUpdates           "Check for script updates every">
 <!ENTITY intervalUpdatesUnits      "day(s); 0 disables scheduled checks">
 <!ENTITY updatesCheckNow           "Check now">
+
+<!-- 3.9: scheduled on-disk backups (options dialog).
+     en-US source values below; translate per locale. -->
+<!ENTITY options.backups           "Backups">
+<!ENTITY intervalBackups           "Back up all scripts every">
+<!ENTITY intervalBackupsUnits      "day(s); 0 disables automatic backups">
+<!ENTITY backupsFolder             "Folder:">
+<!ENTITY backupsBrowse             "Browse...">
+<!ENTITY backupsKeep               "Keep the newest">
+<!ENTITY backupsKeepUnits          "backups">
+<!ENTITY backupsNow                "Back up now">
