@@ -912,25 +912,6 @@ RemoteScript.prototype.setPrefetchedDependencies = function (aMap) {
 };
 
 /**
- * Synchronously writes a raw byte string (one character per byte) to a
- * file, binary-safe.  Small-payload helper for pre-fetched dependencies.
- */
-function writeBytesToFile(aBytes, aFile) {
-  let ostream = Cc["@mozilla.org/network/file-output-stream;1"]
-      .createInstance(Ci.nsIFileOutputStream);
-  //            PR_WRONLY PR_CREATE_FILE PR_TRUNCATE
-  ostream.init(aFile, 0x02 | 0x08 | 0x20, GM_CONSTANTS.fileMask, 0);
-  let bstream = Cc["@mozilla.org/binaryoutputstream;1"]
-      .createInstance(Ci.nsIBinaryOutputStream);
-  try {
-    bstream.setOutputStream(ostream);
-    bstream.writeBytes(aBytes, aBytes.length);
-  } finally {
-    try { bstream.close(); } catch (e) { /* closes ostream too */ }
-  }
-}
-
-/**
  * Downloads the next pending dependency in sequence.
  * Called recursively until all dependencies are fetched, then invokes
  * aCompletionCallback(true, "dependencies").
@@ -963,14 +944,20 @@ RemoteScript.prototype._downloadDependencies = function (aCompletionCallback) {
       this._tempDir, filenameFromUri(uri, GM_CONSTANTS.fileScriptName));
   dependency.setFilename(file);
 
-  // Backup import (format v2): when this dependency's bytes were archived,
-  // write them straight to the temp file — no network, and long-dead URLs
-  // keep working.  Any failure falls through to a normal download.
+  // Backup import (format v2): when this dependency was archived, its
+  // bytes were already streamed out of the zip into a temp file.  Copy
+  // that file straight into the dependency's expected temp path with a
+  // native file copy (no bytes through JS, so a large resource doesn't
+  // spike memory) — no network, and long-dead URLs keep working.  Any
+  // failure falls through to a normal download.
   let prefetched = this._prefetchedDeps
       && this._prefetchedDeps[dependency.downloadURL];
-  if (prefetched) {
+  if (prefetched && prefetched.file && prefetched.file.exists()) {
     try {
-      writeBytesToFile(prefetched.bytes, file);
+      if (file.exists()) {
+        file.remove(false);
+      }
+      prefetched.file.copyTo(file.parent, file.leafName);
       if (dependency.setCharset) {
         dependency.setCharset(prefetched.charset || null);
       }

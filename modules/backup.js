@@ -297,14 +297,18 @@ function GM_BackupImport(aSrcFile, aOptions, aCallback) {
     "snapshotPath": null,
   };
 
+  // Dependency payloads stream out of the archive into this temp dir
+  // (constant-memory import); removed once the installs finish.
+  let depDir = GM_util.getTempDir();
+
   let entries;
   let payloads;
-  let binaries;
+  let depFiles;
   try {
-    let parsed = _readZipContents(aSrcFile);
+    let parsed = _readZipContents(aSrcFile, depDir);
     entries = parsed.entries;
     payloads = parsed.payloads;
-    binaries = parsed.binaries;
+    depFiles = parsed.depFiles;
     // Oversized entries were skipped, not read — surface that in the
     // result instead of pretending the archive was fully consumed.
     for (let i = 0; i < parsed.skipped.length; i++) {
@@ -312,6 +316,7 @@ function GM_BackupImport(aSrcFile, aOptions, aCallback) {
     }
   } catch (e) {
     GM_util.logError("Backup import: cannot read ZIP: " + e, false);
+    _cleanupDir(depDir);
     aCallback(false, result, "" + e);
     return;
   }
@@ -356,6 +361,7 @@ function GM_BackupImport(aSrcFile, aOptions, aCallback) {
   result.total = toInstall.length;
 
   let finish = function () {
+    _cleanupDir(depDir);
     if (opts.restoreSettings && manifest && manifest.settings) {
       _applyImportedSettings(manifest.settings, result);
     }
@@ -368,6 +374,7 @@ function GM_BackupImport(aSrcFile, aOptions, aCallback) {
       finish();
       return;
     }
+    _cleanupDir(depDir);
     aCallback(false, result, "No user scripts found in archive.");
     return;
   }
@@ -383,7 +390,22 @@ function GM_BackupImport(aSrcFile, aOptions, aCallback) {
     }
   }
 
-  _installNext(0, toInstall, scripts, binaries, opts, result, finish);
+  _installNext(0, toInstall, scripts, depFiles, opts, result, finish);
+}
+
+/** Best-effort recursive removal of an import scratch directory. */
+function _cleanupDir(aDir) {
+  if (!aDir) {
+    return undefined;
+  }
+  try {
+    if (aDir.exists()) {
+      aDir.remove(true);
+    }
+  } catch (e) {
+    // Temp files are harmless if they linger; the OS clears the temp dir.
+  }
+  return undefined;
 }
 
 /**
@@ -764,15 +786,16 @@ function _addEntryFromString(aZipWriter, aEntryName, aString, aQueue) {
  * are decoded as UTF-8 strings; binary entries aren't expected in a backup
  * archive.
  */
-function _readZipContents(aSrcFile) {
+function _readZipContents(aSrcFile, aExtractDir) {
   let zipReader = Cc["@mozilla.org/libjar/zip-reader;1"]
       .createInstance(Ci.nsIZipReader);
   zipReader.open(aSrcFile);
   try {
     let entries = [];
     let payloads = {};
-    let binaries = {};
+    let depFiles = {};
     let skipped = [];
+    let depIndex = 0;
     let iter = zipReader.findEntries("*");
     while (iter.hasMore()) {
       let name = iter.getNext();
@@ -793,9 +816,25 @@ function _readZipContents(aSrcFile) {
         continue;
       }
       if (name.indexOf(DEPS_INFIX) !== -1) {
-        // Archived dependency payloads (format v2) can be binary (images,
-        // fonts) — read raw bytes, NOT UTF-8 with replacement characters.
-        binaries[name] = _readEntryAsBytes(zipReader, name);
+        // Archived dependency payload (format v2).  Stream it straight to a
+        // temp file via the native zip reader instead of buffering its
+        // bytes in memory, so import stays roughly constant-memory no
+        // matter how large the archive (a WebExtension using JSZip/fflate
+        // must hold the whole thing in memory).  No extract dir = caller
+        // only wants metadata (GM_BackupPreview), so skip the payload.
+        if (aExtractDir) {
+          try {
+            let outFile = aExtractDir.clone();
+            outFile.append("dep-" + depIndex);
+            depIndex++;
+            zipReader.extract(name, outFile);
+            depFiles[name] = outFile;
+          } catch (e) {
+            GM_util.logError(
+                "Backup import: could not extract " + name + " - " + e,
+                false);
+          }
+        }
         continue;
       }
       entries.push(name);
@@ -804,7 +843,7 @@ function _readZipContents(aSrcFile) {
     return {
       "entries": entries,
       "payloads": payloads,
-      "binaries": binaries,
+      "depFiles": depFiles,
       "skipped": skipped,
     };
   } finally {
@@ -839,34 +878,12 @@ function _readEntryAsString(aZipReader, aEntryName) {
 }
 
 /**
- * Reads a single ZIP entry as a raw byte string (binary-safe — one
- * character per byte, code points 0-255).  Used for archived dependency
- * payloads, which may be images, fonts, or other non-text files.
- */
-function _readEntryAsBytes(aZipReader, aEntryName) {
-  let stream = aZipReader.getInputStream(aEntryName);
-  try {
-    let bstream = Cc["@mozilla.org/binaryinputstream;1"]
-        .createInstance(Ci.nsIBinaryInputStream);
-    bstream.setInputStream(stream);
-    let chunks = [];
-    let avail;
-    while ((avail = bstream.available()) > 0) {
-      chunks.push(bstream.readBytes(avail));
-    }
-    return chunks.join("");
-  } finally {
-    try { stream.close(); } catch (e) { /* some impls auto-close */ }
-  }
-}
-
-/**
  * Sequential installer.  We chain callbacks rather than install in parallel
  * so that the scripts directory is written to one entry at a time and we
  * don't race on config.xml persistence.  aOpts carries the import options
  * (overwrite / restoreValues / onProgress) documented on GM_BackupImport.
  */
-function _installNext(aIdx, aKeys, aScripts, aBinaries, aOpts, aResult, aDone) {
+function _installNext(aIdx, aKeys, aScripts, aDepFiles, aOpts, aResult, aDone) {
   if (aIdx >= aKeys.length) {
     aDone();
     return;
@@ -896,18 +913,18 @@ function _installNext(aIdx, aKeys, aScripts, aBinaries, aOpts, aResult, aDone) {
   // sidecars pass through unchanged.
   options = _normalizeImportedOptions(options);
 
-  // Collect archived dependency bytes (format v2) for this script so the
-  // install can pre-seed them: restore works offline, dead URLs keep
+  // Map each archived dependency (format v2) to its extracted temp file so
+  // the install can pre-seed it: restore works offline and dead URLs keep
   // working.  Anything not in the archive downloads normally.
   let prefetch = null;
   if (options && Array.isArray(options.dependencies)) {
     for (let d = 0; d < options.dependencies.length; d++) {
       let dep = options.dependencies[d];
       if (dep && dep.url && dep.entry
-          && aBinaries && (dep.entry in aBinaries)) {
+          && aDepFiles && (dep.entry in aDepFiles)) {
         prefetch = prefetch || {};
         prefetch[dep.url] = {
-          "bytes": aBinaries[dep.entry],
+          "file": aDepFiles[dep.entry],
           "mimetype": dep.mimetype || null,
           "charset": dep.charset || null,
         };
@@ -916,7 +933,7 @@ function _installNext(aIdx, aKeys, aScripts, aBinaries, aOpts, aResult, aDone) {
   }
 
   let next = function () {
-    _installNext(aIdx + 1, aKeys, aScripts, aBinaries, aOpts, aResult, aDone);
+    _installNext(aIdx + 1, aKeys, aScripts, aDepFiles, aOpts, aResult, aDone);
   };
 
   // Synthesise an install URI from the sidecar's downloadURL so that
