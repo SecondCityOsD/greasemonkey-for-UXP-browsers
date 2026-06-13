@@ -10,6 +10,13 @@ pref("extensions.greasemonkey.api.GM_cookie", true);
 pref("extensions.greasemonkey.api.GM_download", true);
 pref("extensions.greasemonkey.api.object.polyfill", true);
 pref("extensions.greasemonkey.api.unsafeWindow.grant", false);
+// Scheduled on-disk backups (modules/backupScheduler.js): every N days to
+// `folder` (empty = <profile>/gm_backups), keeping the newest `keep` zips.
+// 0 days = off (opt-in).  lastBackup is epoch-ms as a string (> int32).
+pref("extensions.greasemonkey.backup.auto.intervalDays", 0);
+pref("extensions.greasemonkey.backup.auto.folder", "");
+pref("extensions.greasemonkey.backup.auto.keep", 5);
+pref("extensions.greasemonkey.backup.auto.lastBackup", "0");
 pref("extensions.greasemonkey.cors_csp_override.excludes", false);
 pref("extensions.greasemonkey.cors_csp_override.excludes.value", "[\"\"]");
 pref("extensions.greasemonkey.cors_csp_override.includes", false);

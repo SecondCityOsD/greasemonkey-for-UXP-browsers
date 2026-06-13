@@ -17,6 +17,7 @@ Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 
 Cu.import("resource://gre/modules/AddonManager.jsm");
 
+Cu.import("chrome://greasemonkey-modules/content/backupScheduler.js");
 Cu.import("chrome://greasemonkey-modules/content/ipcScript.js");
 Cu.import("chrome://greasemonkey-modules/content/menuCommand.js");
 Cu.import("chrome://greasemonkey-modules/content/prefManager.js");
@@ -42,8 +43,9 @@ var gStartupHasRun = false;
 /////////////////////// Component-global Helper Functions //////////////////////
 
 function shutdown(aService) {
-  // No further scheduled update sweeps once teardown begins.
+  // No further scheduled update sweeps or backups once teardown begins.
   GM_updateScheduler.stop();
+  GM_backupScheduler.stop();
   // Closes every per-script SQLite Back this session opened.  The
   // per-script registry lives inside modules/storageBack.js, so shutdown
   // is a single module call.
@@ -109,6 +111,8 @@ function startup(aService) {
 
   // GM-owned periodic script-update checks (update.intervalDays pref).
   GM_updateScheduler.start();
+  // Scheduled on-disk backups (backup.auto.* prefs; off by default).
+  GM_backupScheduler.start();
 
   Services.obs.addObserver(aService, "quit-application", false);
 
