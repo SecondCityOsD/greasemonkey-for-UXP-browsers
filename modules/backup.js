@@ -132,6 +132,10 @@ function GM_BackupExport(aDestFile, aIncludeValues, aCallback) {
   // never freezes.  Flip extensions.greasemonkey.backup.asyncExport to
   // false to force the proven synchronous path.
   let useAsync = GM_prefRoot.getValue("backup.asyncExport", true);
+  // Content-hash dedup across the whole export: a dependency whose exact
+  // bytes were already archived (e.g. the same jQuery @require shared by
+  // several scripts) is stored once and referenced by every script's table.
+  let seenHashes = {};
 
   for (let i = 0; i < scripts.length; i++) {
     let script = scripts[i];
@@ -151,8 +155,8 @@ function GM_BackupExport(aDestFile, aIncludeValues, aCallback) {
       // 2. Cached dependency files (@require / @resource / @icon) under
       //    <base>.user.js.deps/ so a restore works offline (format v2).
       //    Returns the table embedded in the options sidecar.
-      let dependencies =
-          _exportDependencies(zipWriter, script, userJsName, useAsync);
+      let dependencies = _exportDependencies(
+          zipWriter, script, userJsName, useAsync, seenHashes);
 
       // 3. Options sidecar (.user.js.options.json).
       _addEntryFromString(
@@ -657,7 +661,37 @@ function _buildOptionsJson(aScript, aDependencies) {
  * to downloading it from its original URL, exactly as format v1 did for
  * everything.
  */
-function _exportDependencies(aZipWriter, aScript, aUserJsName, aQueue) {
+/**
+ * Computes the lowercase hex SHA-256 of a file by streaming it through the
+ * platform's native nsICryptoHash — no bytes are buffered in JS.  Used for
+ * dependency dedup (content addressing) and import-time integrity checks.
+ * A WebExtension has neither file access nor native file hashing.
+ *
+ * @param {nsIFile} aFile - File to hash.
+ * @returns {string} 64-char lowercase hex digest.
+ */
+function sha256OfFile(aFile) {
+  let istream = Cc["@mozilla.org/network/file-input-stream;1"]
+      .createInstance(Ci.nsIFileInputStream);
+  istream.init(aFile, 0x01 /* PR_RDONLY */, parseInt("444", 8), 0);
+  try {
+    let hasher = Cc["@mozilla.org/security/hash;1"]
+        .createInstance(Ci.nsICryptoHash);
+    hasher.init(Ci.nsICryptoHash.SHA256);
+    hasher.updateFromStream(istream, 0xffffffff);
+    let binary = hasher.finish(false);
+    let hex = "";
+    for (let i = 0; i < binary.length; i++) {
+      hex += ("0" + binary.charCodeAt(i).toString(16)).slice(-2);
+    }
+    return hex;
+  } finally {
+    try { istream.close(); } catch (e) { /* best effort */ }
+  }
+}
+
+function _exportDependencies(
+    aZipWriter, aScript, aUserJsName, aQueue, aSeenHashes) {
   let out = [];
   let groups = [
     { "kind": "require", "list": aScript.requires },
@@ -685,18 +719,37 @@ function _exportDependencies(aZipWriter, aScript, aUserJsName, aQueue) {
         if (!file || !file.exists()) {
           continue;
         }
-        let entry = aUserJsName + ".deps/" + index + "-"
-            + cleanFilename(file.leafName, "dependency");
-        _addEntryFromFile(aZipWriter, entry, file, aQueue);
+        // Hash for dedup + an integrity value the importer can verify.
+        // Hashing failure isn't fatal: store the bytes without a hash.
+        let sha256 = null;
+        try {
+          sha256 = sha256OfFile(file);
+        } catch (e) {
+          sha256 = null;
+        }
+        let entry;
+        if (sha256 && aSeenHashes && aSeenHashes[sha256]) {
+          // Identical content is already in the archive — reference the
+          // existing entry instead of storing the bytes again.
+          entry = aSeenHashes[sha256];
+        } else {
+          entry = aUserJsName + ".deps/" + index + "-"
+              + cleanFilename(file.leafName, "dependency");
+          _addEntryFromFile(aZipWriter, entry, file, aQueue);
+          if (sha256 && aSeenHashes) {
+            aSeenHashes[sha256] = entry;
+          }
+          index++;
+        }
         out.push({
           "kind": group.kind,
           "name": (group.kind == "resource") ? dep.name : null,
           "url": dep.downloadURL,
           "entry": entry,
+          "sha256": sha256,
           "mimetype": dep._mimetype || null,
           "charset": dep._charset || null,
         });
-        index++;
       } catch (e) {
         GM_util.logError(
             "Backup export: dependency skipped for " + aScript.id
@@ -920,15 +973,35 @@ function _installNext(aIdx, aKeys, aScripts, aDepFiles, aOpts, aResult, aDone) {
   if (options && Array.isArray(options.dependencies)) {
     for (let d = 0; d < options.dependencies.length; d++) {
       let dep = options.dependencies[d];
-      if (dep && dep.url && dep.entry
-          && aDepFiles && (dep.entry in aDepFiles)) {
-        prefetch = prefetch || {};
-        prefetch[dep.url] = {
-          "file": aDepFiles[dep.entry],
-          "mimetype": dep.mimetype || null,
-          "charset": dep.charset || null,
-        };
+      if (!dep || !dep.url || !dep.entry
+          || !aDepFiles || !(dep.entry in aDepFiles)) {
+        continue;
       }
+      let depFile = aDepFiles[dep.entry];
+      // Verify the extracted bytes against the recorded hash before
+      // trusting them: a corrupt or tampered dependency falls back to a
+      // fresh download rather than being installed silently (the import
+      // otherwise bypasses the normal install review).
+      if (dep.sha256) {
+        let actual = null;
+        try {
+          actual = sha256OfFile(depFile);
+        } catch (e) {
+          actual = null;
+        }
+        if (actual !== dep.sha256) {
+          aResult.errors.push(
+              key + ": dependency " + (dep.name || dep.url)
+              + " failed integrity check; re-downloading");
+          continue;
+        }
+      }
+      prefetch = prefetch || {};
+      prefetch[dep.url] = {
+        "file": depFile,
+        "mimetype": dep.mimetype || null,
+        "charset": dep.charset || null,
+      };
     }
   }
 
