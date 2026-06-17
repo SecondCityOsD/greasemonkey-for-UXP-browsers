@@ -164,6 +164,12 @@ pref("extensions.greasemonkey.newScript.template", "// ==UserScript==\n// @name 
 pref("extensions.greasemonkey.newScript.counter", 0);
 pref("extensions.greasemonkey.requireDisabledScriptsUpdates", false);
 pref("extensions.greasemonkey.requireSecureUpdates", true);
+// When true, @require / @resource dependencies must use a secure (https)
+// URL or the install/update is refused (an http dependency can be MITM'd
+// to inject code into the script sandbox; finding S5).  Default false to
+// keep legacy http dependencies working; integrity pinning (#sha256=) is
+// enforced regardless whenever a script declares it (finding S6).
+pref("extensions.greasemonkey.requireSecureDependencies", false);
 pref("extensions.greasemonkey.requireTimeoutUpdates", true);
 pref("extensions.greasemonkey.showGrantsWarning", true);
 pref("extensions.greasemonkey.sniffGrants", false);

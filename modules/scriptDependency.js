@@ -40,6 +40,7 @@ function ScriptDependency(aScript) {
   this._dataURI = null;
   this._downloadURL = null;
   this._filename = null;
+  this._integrity = null;
   this._mimetype = null;
   this._name = null;
   this._script = aScript || null;

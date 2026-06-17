@@ -62,6 +62,44 @@ const META_SEPARATOR = "\0";
 const SOMETHING_REGEXP = new RegExp(".+", "g");
 
 /**
+ * Parses Subresource-Integrity-style hashes from a parsed dependency URI's
+ * fragment, e.g. "...lib.js#sha256=<hex>" or "#sha256=<hex>,sha512=<hex>"
+ * (the Tampermonkey @require / @resource convention).  Returns the
+ * strongest recognized {algo, hex} pair, or null when no usable hash is
+ * present.  Hex digests only (the common UXP-era form); base64 SRI values
+ * are not parsed.
+ *
+ * @param {nsIURI} aUri - Parsed dependency URI.
+ * @returns {{algo: string, hex: string}|null}
+ */
+function integrityFromUri(aUri) {
+  let ref = "";
+  try {
+    ref = (aUri && aUri.ref) ? String(aUri.ref) : "";
+  } catch (e) {
+    ref = "";
+  }
+  if (!ref) {
+    return null;
+  }
+  let rank = { "sha256": 1, "sha384": 2, "sha512": 3 };
+  let best = null;
+  let parts = ref.split(/[,;]/);
+  for (let i = 0; i < parts.length; i++) {
+    let m = (/^\s*(sha256|sha384|sha512)[=:\-]([0-9a-fA-F]{32,})\s*$/)
+        .exec(parts[i]);
+    if (!m) {
+      continue;
+    }
+    let algo = m[1].toLowerCase();
+    if (!best || (rank[algo] > rank[best.algo])) {
+      best = { "algo": algo, "hex": m[2].toLowerCase() };
+    }
+  }
+  return best;
+}
+
+/**
  * Parses the source of a userscript and produces a populated Script object.
  *
  * If no ==UserScript== block is found and aFailWhenMissing is true, returns
@@ -271,6 +309,7 @@ function parse(aSource, aUri, aFailWhenMissing) {
             throw "";
           }
           scriptRequire._downloadURL = reqUri.spec;
+          scriptRequire._integrity = integrityFromUri(reqUri);
           script["_requires"].push(scriptRequire);
           script["_rawMeta"] += data.keyword + META_SEPARATOR
               + data.value + META_SEPARATOR;
@@ -327,6 +366,7 @@ function parse(aSource, aUri, aFailWhenMissing) {
             throw "";
           }
           scriptResource._downloadURL = resUri.spec;
+          scriptResource._integrity = integrityFromUri(resUri);
           script["_resources"].push(scriptResource);
           script["_rawMeta"] += data.keyword + META_SEPARATOR
               + name + META_SEPARATOR + resUri.spec + META_SEPARATOR;

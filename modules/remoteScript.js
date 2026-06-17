@@ -59,6 +59,7 @@ Cu.import("chrome://greasemonkey-modules/content/addons.js");
 Cu.import("chrome://greasemonkey-modules/content/GM_notification.js");
 Cu.import("chrome://greasemonkey-modules/content/script.js");
 Cu.import("chrome://greasemonkey-modules/content/scriptIcon.js");
+Cu.import("chrome://greasemonkey-modules/content/prefManager.js");
 Cu.import("chrome://greasemonkey-modules/content/util.js");
 
 
@@ -90,6 +91,53 @@ var gWindowsNameMaxLen = (240 - GM_util.scriptDir().path.length) / 2;
 function assertIsFunction(aFunc, aMessage) {
   if (typeof aFunc != typeof function () {}) {
     throw new Error(aMessage);
+  }
+}
+
+/**
+ * Computes the lowercase hex digest of a local file with the given
+ * algorithm ("sha256" | "sha384" | "sha512"), streaming it through the
+ * platform's native nsICryptoHash (no bytes buffered in JS).  Used to
+ * verify pinned @require / @resource integrity (findings S6/S16).  Mirrors
+ * backup.js sha256OfFile().
+ *
+ * @param {nsIFile} aFile - File to hash.
+ * @param {string}  aAlgo - "sha256" | "sha384" | "sha512".
+ * @returns {string} Lowercase hex digest.
+ */
+function hashFileHex(aFile, aAlgo) {
+  let algoConst;
+  switch (aAlgo) {
+    case "sha512":
+      algoConst = Ci.nsICryptoHash.SHA512;
+      break;
+    case "sha384":
+      algoConst = Ci.nsICryptoHash.SHA384;
+      break;
+    default:
+      algoConst = Ci.nsICryptoHash.SHA256;
+      break;
+  }
+  let istream = Cc["@mozilla.org/network/file-input-stream;1"]
+      .createInstance(Ci.nsIFileInputStream);
+  istream.init(aFile, 0x01 /* PR_RDONLY */, parseInt("444", 8), 0);
+  try {
+    let hasher = Cc["@mozilla.org/security/hash;1"]
+        .createInstance(Ci.nsICryptoHash);
+    hasher.init(algoConst);
+    hasher.updateFromStream(istream, 0xffffffff);
+    let binary = hasher.finish(false);
+    let hex = "";
+    for (let i = 0; i < binary.length; i++) {
+      hex += ("0" + binary.charCodeAt(i).toString(16)).slice(-2);
+    }
+    return hex;
+  } finally {
+    try {
+      istream.close();
+    } catch (e) {
+      // Best effort.
+    }
   }
 }
 
@@ -944,6 +992,23 @@ RemoteScript.prototype._downloadDependencies = function (aCompletionCallback) {
       this._tempDir, filenameFromUri(uri, GM_CONSTANTS.fileScriptName));
   dependency.setFilename(file);
 
+  // S5: optionally refuse insecure (http/ftp) @require / @resource
+  // downloads.  Off by default so legacy http dependencies keep working;
+  // when requireSecureDependencies is on, an insecure URL is refused
+  // because a network attacker could swap the bytes (and @require runs in
+  // the script sandbox).  An insecure @icon is non-fatal and just skipped.
+  if (GM_prefRoot.getValue("requireSecureDependencies", false)
+      && ((uri.scheme == "http") || (uri.scheme == "ftp"))) {
+    if (dependency instanceof ScriptIcon) {
+      this._downloadDependencies(aCompletionCallback);
+      return undefined;
+    }
+    this.cleanup("RemoteScript: refusing insecure dependency "
+        + uri.spec + " (requireSecureDependencies is enabled).");
+    aCompletionCallback(false, "dependency");
+    return undefined;
+  }
+
   // Backup import (format v2): when this dependency was archived, its
   // bytes were already streamed out of the zip into a temp file.  Copy
   // that file straight into the dependency's expected temp path with a
@@ -989,6 +1054,31 @@ RemoteScript.prototype._downloadDependencies = function (aCompletionCallback) {
     }
     if (dependency.setMimetype) {
       dependency.setMimetype(aChannel.contentType);
+    }
+    // S6/S16: when the script pinned an integrity hash for this dependency,
+    // verify the downloaded bytes before accepting them.  A mismatch means
+    // the file was tampered with (or the pinned hash is stale): fatal for
+    // @require/@resource (would otherwise run/serve attacker-controlled
+    // bytes); a bad @icon is simply dropped.  Icons never carry a pinned
+    // hash, so in practice only @require/@resource reach this check.
+    if (dependency._integrity) {
+      let matched = false;
+      try {
+        matched = (hashFileHex(file, dependency._integrity.algo)
+            === dependency._integrity.hex);
+      } catch (e) {
+        matched = false;
+        GM_util.logError("RemoteScript: integrity check could not run for "
+            + dependency.downloadURL + ": " + e, false);
+      }
+      if (!matched && !(dependency instanceof ScriptIcon)) {
+        this.cleanup("RemoteScript: integrity mismatch for "
+            + dependency.downloadURL + " (expected "
+            + dependency._integrity.algo + "=" + dependency._integrity.hex
+            + ").");
+        aCompletionCallback(false, "dependency");
+        return undefined;
+      }
     }
     this._downloadDependencies(aCompletionCallback);
   }
