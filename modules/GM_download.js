@@ -648,11 +648,50 @@ function createGMDownloadAPI(
       // accepts it.  Fall back to 9-arg only if 8-arg fails — covers
       // any future principal-required build without paying a noisy
       // throw on every download.
+      // Custom request headers (details.headers) -> the CRLF "Name: Value"
+      // string shape saveURI's aExtraHeaders slot expects.  details.headers
+      // is the script's X-ray-waived object; enumerate defensively
+      // (Object.keys, then for-in) because some UXP builds don't enumerate
+      // waived expandos, and read values by bracket access (which does
+      // work).  NOTE: the aExtraHeaders "in string" form and this
+      // enumeration both want on-device confirmation on Pale Moon 34 /
+      // Basilisk 52; a shape mismatch is caught by the try/fallback below
+      // and simply means a header-bearing download fails (normal downloads
+      // pass null and are unaffected).
+      let extraHeaders = null;
+      if (details.headers && (typeof details.headers === "object")) {
+        let names = [];
+        try {
+          names = Object.keys(details.headers);
+        } catch (e) {
+          // ignore — fall through to for-in.
+        }
+        if (!names.length) {
+          try {
+            for (let n in details.headers) {
+              names.push(n);
+            }
+          } catch (e) {
+            // ignore.
+          }
+        }
+        let headerLines = "";
+        for (let i = 0; i < names.length; i++) {
+          let v = details.headers[names[i]];
+          if ((v !== undefined) && (v !== null)) {
+            headerLines += names[i] + ": " + String(v) + "\r\n";
+          }
+        }
+        if (headerLines) {
+          extraHeaders = headerLines;
+        }
+      }
+
       let savedOk = false;
       let lastErr = null;
       try {
         persist.saveURI(
-            uri, null, referrer, 0, null, null,
+            uri, null, referrer, 0, null, extraHeaders,
             aTargetFile, loadContext);
         savedOk = true;
       } catch (e) {
@@ -661,7 +700,7 @@ function createGMDownloadAPI(
       if (!savedOk) {
         try {
           persist.saveURI(
-              uri, principal, null, referrer, 0, null, null,
+              uri, principal, null, referrer, 0, null, extraHeaders,
               aTargetFile, loadContext);
           savedOk = true;
         } catch (e) {
