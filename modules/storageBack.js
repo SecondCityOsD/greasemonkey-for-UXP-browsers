@@ -579,6 +579,31 @@ function invalidateCache(aKey) {
 }
 
 /**
+ * Clones a stored value into a script sandbox before it crosses the
+ * chrome -> sandbox boundary.  Primitives (string/number/boolean) and
+ * null/undefined cross compartments safely by value, so only objects and
+ * arrays take the Cu.cloneInto round-trip.  Mirrors the fast-path used by
+ * getValue()/listValues(); handing an un-cloned chrome-realm object to a
+ * sandbox callback is a cross-compartment escape foothold (finding S7).
+ *
+ * @param {*}       aValue   - Chrome-side value to hand to the sandbox.
+ * @param {Sandbox} aSandbox - Target script sandbox.
+ * @returns {*} A sandbox-owned copy (or the value itself if primitive).
+ */
+function cloneValueForSandbox(aValue, aSandbox) {
+  if ((aValue === null) || (typeof aValue === "undefined") || !aSandbox) {
+    return aValue;
+  }
+  let t = typeof aValue;
+  if ((t === "string") || (t === "number") || (t === "boolean")) {
+    return aValue;
+  }
+  return Cu.cloneInto(aValue, aSandbox, {
+    "wrapReflectors": true,
+  });
+}
+
+/**
  * Fires every listener registered for the given key.  Listeners whose
  * owning Front matches aSetterFront receive aRemote=false; listeners
  * owned by other Fronts (other sandboxes watching the same key) receive
@@ -601,8 +626,16 @@ function fireValueChangeListeners(aKey, aOldValue, aNewValue, aSetterFront) {
       return undefined;
     }
     let aRemote = entry.storageFront !== aSetterFront;
+    // Clone the values into the LISTENER's own sandbox before dispatch:
+    // aOldValue/aNewValue are chrome-realm objects (JSON.parse results from
+    // chrome scope), and handing those straight to a sandbox callback is a
+    // cross-compartment escape foothold (finding S7).  Different listeners
+    // may own different sandboxes, so this clones per-listener.
+    let targetSandbox = entry.storageFront && entry.storageFront._sandbox;
+    let oldForListener = cloneValueForSandbox(aOldValue, targetSandbox);
+    let newForListener = cloneValueForSandbox(aNewValue, targetSandbox);
     try {
-      entry.callback(entry.name, aOldValue, aNewValue, aRemote);
+      entry.callback(entry.name, oldForListener, newForListener, aRemote);
     } catch (e) {
       GM_util.logError(e, false, e.fileName, e.lineNumber);
     }
