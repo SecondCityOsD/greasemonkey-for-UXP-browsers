@@ -63,6 +63,7 @@ Cu.import("chrome://greasemonkey-modules/content/cspNonce.js");
 Cu.import("chrome://greasemonkey-modules/content/extractMeta.js");
 Cu.import("chrome://greasemonkey-modules/content/GM_openInTab.js");
 Cu.import("chrome://greasemonkey-modules/content/ipcScript.js");
+Cu.import("chrome://greasemonkey-modules/content/prefManager.js");
 Cu.import("chrome://greasemonkey-modules/content/sandbox.js");
 Cu.import("chrome://greasemonkey-modules/content/thirdParty/getChromeWinForContentWin.js");
 Cu.import("chrome://greasemonkey-modules/content/util.js");
@@ -85,6 +86,10 @@ const URL_USER_PASS_STRIP_REGEXP = new RegExp(
  * @type {WeakSet<Window>}
  */
 var gEarlyStartWindows = new WeakSet();
+
+// Content windows that already have a window.onurlchange monitor attached
+// (see setupUrlChangeMonitor); one per window, never double-attached.
+var gUrlChangeWindows = new WeakSet();
 
 /**
  * Idempotency flag for startScriptInjector().  Re-registering the
@@ -606,6 +611,10 @@ function contentObserver(aContentWin, aTopic) {
   aContentWin.addEventListener("DOMContentLoaded", contentLoad, true);
   aContentWin.addEventListener("load", contentLoad, true);
 
+  // window.onurlchange (SPA navigation events): announce support and begin
+  // the read-only location monitor before any document-start script runs.
+  setupUrlChangeMonitor(aContentWin);
+
   if (!gEarlyStartWindows.has(aContentWin)) {
     // Early did nothing — run all document-start scripts normally.
     runScripts("document-start", aContentWin);
@@ -738,6 +747,101 @@ function contentLoad(aEvent) {
   } catch (e) {
     // location access can throw on torn-down windows.
   }
+}
+
+
+/**
+ * Attaches a read-only URL-change monitor to a content window so scripts
+ * can observe SPA navigations via window.addEventListener("urlchange", fn)
+ * or the window.onurlchange property (Tampermonkey-compatible).  The
+ * support sentinel is `window.onurlchange === null` (undefined when the
+ * feature is disabled by pref).
+ *
+ * Implementation notes:
+ *   - Read-only: it never patches history.pushState, so it cannot break a
+ *     page's own navigation.  popstate / hashchange are handled at once;
+ *     a ~1s location poll catches pushState / replaceState routes.
+ *   - The poll self-stops once the window is gone (no leak); the whole
+ *     monitor is gated by the api.window.onurlchange pref.
+ *   - Single-process UXP: this chrome code touches the content window
+ *     directly through waived Xrays and dispatches a content-realm event.
+ *
+ * @param {Window} aContentWin
+ */
+function setupUrlChangeMonitor(aContentWin) {
+  if (!GM_prefRoot.getValue("api.window.onurlchange", true)) {
+    return undefined;
+  }
+  if (gUrlChangeWindows.has(aContentWin)) {
+    return undefined;
+  }
+  gUrlChangeWindows.add(aContentWin);
+
+  let waived;
+  try {
+    waived = Cu.waiveXrays(aContentWin);
+    // Support sentinel (TM detection: window.onurlchange === null).
+    if (typeof waived.onurlchange === "undefined") {
+      waived.onurlchange = null;
+    }
+  } catch (e) {
+    return undefined;
+  }
+
+  let lastHref;
+  try {
+    lastHref = aContentWin.location.href;
+  } catch (e) {
+    return undefined;
+  }
+
+  function fire() {
+    let href;
+    try {
+      href = aContentWin.location.href;
+    } catch (e) {
+      return undefined;
+    }
+    if (href === lastHref) {
+      return undefined;
+    }
+    lastHref = href;
+    try {
+      let ev = new aContentWin.CustomEvent("urlchange", {
+        "detail": Cu.cloneInto({ "url": href }, aContentWin),
+      });
+      aContentWin.dispatchEvent(ev);
+    } catch (e) {
+      // Best effort.
+    }
+    try {
+      let handler = waived.onurlchange;
+      if (typeof handler === "function") {
+        handler.call(waived, Cu.cloneInto({ "url": href }, aContentWin));
+      }
+    } catch (e) {
+      // Script handler threw; ignore.
+    }
+    return undefined;
+  }
+
+  try {
+    aContentWin.addEventListener("popstate", fire, true);
+    aContentWin.addEventListener("hashchange", fire, true);
+  } catch (e) {
+    // Best effort; the poll below still catches changes.
+  }
+
+  function pollTick() {
+    if (GM_util.windowIsClosed(aContentWin)) {
+      return undefined;
+    }
+    fire();
+    GM_util.timeout(pollTick, 1000);
+    return undefined;
+  }
+  GM_util.timeout(pollTick, 1000);
+  return undefined;
 }
 
 

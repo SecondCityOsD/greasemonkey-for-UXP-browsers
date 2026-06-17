@@ -15,6 +15,11 @@ pref("extensions.greasemonkey.api.GM_cookie.exposeHttpOnly", true);
 pref("extensions.greasemonkey.api.GM_download", true);
 pref("extensions.greasemonkey.api.object.polyfill", true);
 pref("extensions.greasemonkey.api.unsafeWindow.grant", false);
+// window.onurlchange (SPA navigation events): when true (default), a
+// read-only location monitor is attached per scripted window so scripts
+// can use window.addEventListener("urlchange", ...) or window.onurlchange.
+// Set false to disable the monitor entirely.
+pref("extensions.greasemonkey.api.window.onurlchange", true);
 // Backup export: compress entries on a background thread via nsIZipWriter's
 // async queue (no UI freeze).  Set false to force the synchronous path.
 pref("extensions.greasemonkey.backup.asyncExport", true);
