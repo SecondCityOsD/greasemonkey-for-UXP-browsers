@@ -181,6 +181,11 @@ pref("extensions.greasemonkey.view-sourceIsGreaseable", false);
 // (matching Violentmonkey/Tampermonkey).  Set true to restore the legacy
 // behavior where a missing @connect allowed requests to ALL hosts.
 pref("extensions.greasemonkey.xmlhttprequest.allowAllHostsWithoutConnect", false);
+// GM_xmlhttpRequest forced third-party cookies (security finding S3).  When
+// true (default, legacy behavior) a cross-origin request sends the user's
+// cookies even if the browser blocks third-party cookies; set false to
+// respect the browser's own third-party-cookie policy.
+pref("extensions.greasemonkey.xmlhttprequest.forceThirdPartyCookies", true);
 pref("services.sync.prefs.sync.extensions.greasemonkey.enableScriptRefreshing", true);
 pref("services.sync.prefs.sync.extensions.greasemonkey.globalExcludes", true);
 pref("services.sync.prefs.sync.extensions.greasemonkey.load.earlier", true);

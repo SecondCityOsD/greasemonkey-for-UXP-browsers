@@ -93,6 +93,56 @@ function GM_xmlHttpRequester(
 }
 
 /**
+ * Returns true if a host is a loopback, link-local, or RFC1918 private
+ * address (or a *.localhost / *.local name).  Such hosts are reachable
+ * only via an explicit @connect entry, never via "@connect *" or the
+ * legacy allow-all default, to blunt SSRF into intranet / loopback
+ * services (finding S11).  Literal-address check only; hostnames that
+ * resolve to internal IPs (DNS rebinding) are out of scope at this layer.
+ *
+ * @param {string} aHost - Request host (nsIURI.host; no brackets).
+ * @returns {boolean}
+ */
+GM_xmlHttpRequester.prototype._isInternalHost = function (aHost) {
+  if (!aHost) {
+    return false;
+  }
+  let host = String(aHost).toLowerCase();
+  if ((host.charAt(0) == "[") && (host.charAt(host.length - 1) == "]")) {
+    host = host.substring(1, host.length - 1);
+  }
+  if ((host == "localhost") || host.endsWith(".localhost")
+      || host.endsWith(".local") || (host == "0.0.0.0")) {
+    return true;
+  }
+  // IPv6 literals contain a colon; real hostnames never do.  Covers ::1
+  // (loopback), :: (unspecified), fc00::/7 (ULA), fe80::/10 (link-local).
+  if (host.indexOf(":") != -1) {
+    return (host == "::1") || (host == "::")
+        || (/^f[cd]/).test(host) || (/^fe[89ab]/).test(host);
+  }
+  // IPv4 dotted-quad loopback / private / link-local ranges.
+  let m = (/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/).exec(host);
+  if (m) {
+    let a = parseInt(m[1], 10);
+    let b = parseInt(m[2], 10);
+    if ((a == 127) || (a == 10) || (a == 0)) {
+      return true;
+    }
+    if ((a == 169) && (b == 254)) {
+      return true;
+    }
+    if ((a == 192) && (b == 168)) {
+      return true;
+    }
+    if ((a == 172) && (b >= 16) && (b <= 31)) {
+      return true;
+    }
+  }
+  return false;
+};
+
+/**
  * Checks whether a request URL is allowed by the script's @connect whitelist.
  *
  * Rules (Violentmonkey-compatible):
@@ -142,15 +192,18 @@ GM_xmlHttpRequester.prototype._isConnectAllowed = function (aRequestUri) {
   // (security finding S2).  A default-off pref restores the old permissive
   // behavior for legacy script collections that relied on it.
   if (this.connects.length == 0) {
-    return GM_prefRoot.getValue(
+    // Even the legacy "allow all" pref must not expose internal hosts
+    // (loopback / RFC1918); those require an explicit @connect (S11).
+    return (!this._isInternalHost(requestHost)) && GM_prefRoot.getValue(
         "xmlhttprequest.allowAllHostsWithoutConnect", false);
   }
 
   for (let i = 0; i < this.connects.length; i++) {
     let entry = this.connects[i];
-    // Wildcard — allow everything.
+    // Wildcard: allow any external host, but never internal hosts —
+    // those require an explicit @connect entry (finding S11).
     if (entry == "*") {
-      return true;
+      return !this._isInternalHost(requestHost);
     }
     // Same-origin.
     if (entry == "self") {
@@ -486,7 +539,14 @@ function (aSafeUrl, aDetails, aReq) {
 
   try {
     channel = aReq.channel.QueryInterface(Ci.nsIHttpChannelInternal);
-    channel.forceAllowThirdPartyCookie = true;
+    // Forcing third-party cookies lets a cross-origin GM_xmlhttpRequest
+    // send the user's cookies even when the browser is set to block
+    // third-party cookies (finding S3).  Left on by default for
+    // backwards compatibility; set this pref false to respect the
+    // browser's own third-party-cookie policy.  (Anonymous / mozAnon
+    // requests never send cookies regardless of this setting.)
+    channel.forceAllowThirdPartyCookie = GM_prefRoot.getValue(
+        "xmlhttprequest.forceThirdPartyCookies", true);
   } catch (e) {
     // Ignore.
     // e.g. ftp://
