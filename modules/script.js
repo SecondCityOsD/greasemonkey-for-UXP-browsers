@@ -1584,6 +1584,13 @@ Script.prototype.checkForRemoteUpdate = function (aCallback, aForced, aManual) {
     // This is how Violentmonkey handles update checks efficiently.
     req.setRequestHeader("Accept",
         "text/x-userscript-meta, application/javascript, text/plain, */*");
+    // Update checks must not be served a stale cached copy (which causes
+    // missed or phantom updates); ask the cache to revalidate with the
+    // origin.  A no-cache request header is used rather than the
+    // LOAD_BYPASS_CACHE channel flag (commented out below), because that
+    // flag triggered cache-directory bugs #2425 / #1824 on some builds.
+    req.setRequestHeader("Cache-Control", "no-cache");
+    req.setRequestHeader("Pragma", "no-cache");
   } catch (e) {
     return aCallback("noUpdateAvailable", {
       "name": this.localized.name,
@@ -1642,8 +1649,6 @@ Script.prototype.checkForRemoteUpdate = function (aCallback, aForced, aManual) {
       + "Private Browsing mode: " + req.channel.isChannelPrivate + "\n");
   */
 
-  // Let the server know we want a user script metadata block.
-  req.setRequestHeader("Accept", "text/x-userscript-meta");
   req.onload = this.checkRemoteVersion.bind(
       this, req, aCallback, aForced, aManual, usedMeta);
   req.onerror = aCallback.bind(null, "noUpdateAvailable", {
