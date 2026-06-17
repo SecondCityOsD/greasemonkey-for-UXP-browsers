@@ -1166,8 +1166,9 @@ Script.prototype.isModified = function () {
  * Conditions that prevent an update (unless aForced is true):
  *   - No updateURL is set.
  *   - Script is disabled AND the "requireDisabledScriptsUpdates" pref is off.
- *   - Download URL uses an unsafe scheme (about:, chrome:, file:, ftp:, http:
- *     when requireSecureUpdates is enabled).
+ *   - The update (metadata-probe) URL or the download URL uses an unsafe
+ *     scheme: about:/chrome:/file: always; ftp:/http: when the
+ *     requireSecureUpdates pref is enabled (finding S4).
  *
  * Note: local edits no longer block eligibility here; they instead flip
  * checkRemoteUpdates to AUTOUPDATE_DISABLE (see isModified()), so the user
@@ -1189,33 +1190,45 @@ Script.prototype.isRemoteUpdateAllowed = function (aForced) {
     }
   }
 
-  let scheme;
-  try {
-    scheme = GM_CONSTANTS.ioService.extractScheme(this.downloadURL);
-  } catch (e) {
-    // Invalid URL, probably an old legacy install.
-    // Do not update.
-    return false;
-  }
-
-  switch (scheme) {
-    case "about":
-    case "chrome":
-    case "file":
-      // These schemes are explicitly never OK.
+  // Validate BOTH the metadata-probe URL (updateURL) and the script-body
+  // URL (downloadURL).  The version is fetched from updateURL and the new
+  // source from downloadURL, so a plain-HTTP updateURL can be MITM'd to
+  // forge a higher @version even when downloadURL is https (finding S4).
+  let requireSecure = GM_prefRoot.getValue("requireSecureUpdates");
+  let urls = [this.updateURL, this.downloadURL];
+  for (let i = 0; i < urls.length; i++) {
+    if (!urls[i]) {
+      continue;
+    }
+    let scheme;
+    try {
+      scheme = GM_CONSTANTS.ioService.extractScheme(urls[i]);
+    } catch (e) {
+      // Invalid URL, probably an old legacy install.  Do not update.
       return false;
-    case "ftp":
-    case "http":
-      // These schemes are OK only if the user opts in.
-      return !GM_prefRoot.getValue("requireSecureUpdates");
-    case "https":
-      // HTTPs is always OK.
-      return true;
-      break;
-    default:
-      // Anything not listed: default to not allow.
-      return false;
+    }
+    switch (scheme) {
+      case "about":
+      case "chrome":
+      case "file":
+        // These schemes are explicitly never OK.
+        return false;
+      case "ftp":
+      case "http":
+        // Insecure: OK only when the user has not required secure updates.
+        if (requireSecure) {
+          return false;
+        }
+        break;
+      case "https":
+        // Always OK.
+        break;
+      default:
+        // Anything not listed: default to not allow.
+        return false;
+    }
   }
+  return true;
 };
 
 /**
