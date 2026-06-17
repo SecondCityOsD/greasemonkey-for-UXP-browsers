@@ -464,6 +464,15 @@ function createSandbox(aContentWin, aUrl, aScript, aRunAt) {
   // See #2129.
   Object.getOwnPropertyNames(sandbox).forEach(function (aProp) {
     if (aProp.indexOf(GM_CONSTANTS.addonAPIPrefix1) == 0) {
+      // Only re-clone CALLABLE GM_* APIs.  The GM_cookie methods-object is
+      // not a function: cloning it through the chrome Xray view strips its
+      // callable .list/.set/.delete expandos (XrayWrapper denies callable
+      // properties), which broke GM_cookie.* at runtime.  It is already a
+      // proper sandbox object (createObjectIn + exportFunction), so leave
+      // it untouched.
+      if (typeof sandbox[aProp] !== "function") {
+        return undefined;
+      }
       sandbox[aProp] = Cu.cloneInto(
           sandbox[aProp], sandbox, {
             "cloneFunctions": true,
