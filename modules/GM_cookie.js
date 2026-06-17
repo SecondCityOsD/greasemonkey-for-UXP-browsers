@@ -42,6 +42,7 @@ Cu.importGlobalProperties(["URL"]);
 Cu.import("resource://gre/modules/Services.jsm");
 
 Cu.import("chrome://greasemonkey-modules/content/util.js");
+Cu.import("chrome://greasemonkey-modules/content/prefManager.js");
 
 
 /**
@@ -204,7 +205,16 @@ function createGMCookieAPI(
    */
   function listImpl(aFilter, aCallback) {
     let raw = listCookiesForHost(aWrappedContentWin, pageHost);
+    // HttpOnly cookies are deliberately hidden from page JavaScript (an
+    // XSS defense).  GM_cookie runs with elevated privilege and CAN read
+    // them (matching Tampermonkey), but that exposes session-cookie VALUES
+    // to any script granted GM_cookie (finding S13).  When the pref
+    // api.GM_cookie.exposeHttpOnly is false, the cookie metadata is still
+    // returned but the secret value is redacted.
+    let exposeHttpOnly = GM_prefRoot.getValue(
+        "api.GM_cookie.exposeHttpOnly", true);
     let cookies = raw.map(function (aCookie) {
+      let redact = aCookie.isHttpOnly && !exposeHttpOnly;
       return {
         "creationTime": aCookie.creationTime,
         "expires":      aCookie.expires,
@@ -221,7 +231,7 @@ function createGMCookieAPI(
         "rawHost":      aCookie.rawHost,
         "sameSite":     aCookie.sameSite,
         "status":       aCookie.status,
-        "value":        aCookie.value,
+        "value":        redact ? "" : aCookie.value,
       };
     });
     let cloned = Cu.cloneInto(cookies, aSandbox);

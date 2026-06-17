@@ -4,6 +4,11 @@ pref("extensions.greasemonkey.api.@match.hash", true);
 // Phase 7b: GM_cookie is now a native methods-object built on
 // Services.cookies (see modules/GM_cookie.js).  Default true.
 pref("extensions.greasemonkey.api.GM_cookie", true);
+// When false, GM_cookie.list() redacts the value of HttpOnly cookies (still
+// reporting their presence and metadata) so a script granted GM_cookie
+// cannot read session-cookie secrets (security finding S13).  Default true
+// preserves the Tampermonkey-compatible behavior.
+pref("extensions.greasemonkey.api.GM_cookie.exposeHttpOnly", true);
 // Phase 7c: GM_download is now a native callable built on
 // nsIWebBrowserPersist + nsIFilePicker (see modules/GM_download.js),
 // replacing the script-side polyfill.  Default true.
