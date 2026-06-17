@@ -51,6 +51,7 @@ Cu.importGlobalProperties(["Blob"]);
 Cu.importGlobalProperties(["XMLHttpRequest"]);
 
 Cu.import("chrome://greasemonkey-modules/content/util.js");
+Cu.import("chrome://greasemonkey-modules/content/prefManager.js");
 
 
 // Cookies - reserved for possible future use (see also #2236) - part 1/2.
@@ -127,11 +128,22 @@ GM_xmlHttpRequester.prototype._isConnectAllowed = function (aRequestUri) {
     // gracefully (only explicit @connect entries will match).
   }
 
-  // No @connect declared → allow all (backwards compatible).
-  // Scripts that don't declare @connect should not be restricted,
-  // since most existing scripts predate @connect support.
-  if (this.connects.length == 0) {
+  // Same-origin requests are always allowed: a script can reach its own
+  // page's origin without declaring @connect (matches Violentmonkey /
+  // Tampermonkey).
+  if (originHost && (requestHost == originHost)) {
     return true;
+  }
+
+  // No @connect declared → same-origin only (allowed above).  Historically
+  // this returned true (allow ALL hosts), which contradicted both this
+  // function's own documented contract and every other userscript manager,
+  // and let any script silently read authenticated cross-origin resources
+  // (security finding S2).  A default-off pref restores the old permissive
+  // behavior for legacy script collections that relied on it.
+  if (this.connects.length == 0) {
+    return GM_prefRoot.getValue(
+        "xmlhttprequest.allowAllHostsWithoutConnect", false);
   }
 
   for (let i = 0; i < this.connects.length; i++) {

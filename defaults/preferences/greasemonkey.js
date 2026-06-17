@@ -176,6 +176,11 @@ pref("extensions.greasemonkey.update.intervalDays", 1);
 pref("extensions.greasemonkey.update.lastCheck", "0");
 pref("extensions.greasemonkey.version", "0.0");
 pref("extensions.greasemonkey.view-sourceIsGreaseable", false);
+// GM_xmlhttpRequest @connect default (security finding S2).  When a script
+// declares no @connect, requests are restricted to the page's own origin
+// (matching Violentmonkey/Tampermonkey).  Set true to restore the legacy
+// behavior where a missing @connect allowed requests to ALL hosts.
+pref("extensions.greasemonkey.xmlhttprequest.allowAllHostsWithoutConnect", false);
 pref("services.sync.prefs.sync.extensions.greasemonkey.enableScriptRefreshing", true);
 pref("services.sync.prefs.sync.extensions.greasemonkey.globalExcludes", true);
 pref("services.sync.prefs.sync.extensions.greasemonkey.load.earlier", true);
