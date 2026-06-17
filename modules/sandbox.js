@@ -241,7 +241,7 @@ function createSandbox(aContentWin, aUrl, aScript, aRunAt) {
       // up the object shape and mirrors it as GM.cookie (Promise-wrapped
       // methods).
       sandbox[_API1] = createGMCookieAPI(
-          aContentWin, sandbox, aScript.fileURL, aUrl);
+          aContentWin, sandbox, aScript.fileURL, aUrl, aScript.connects);
     }
   }
 

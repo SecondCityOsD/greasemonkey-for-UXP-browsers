@@ -2,8 +2,9 @@
  * @file GM_cookie.js
  * @overview Native chrome-side GM_cookie / GM.cookie implementation.
  *
- * Exposes three operations on the page's cookies, scoped to the script's
- * page host (CURRENT_HOST_ONLY):
+ * Exposes three operations on the page's cookies.  Operations default to
+ * the script's own page host; cross-domain access is permitted only for
+ * hosts the script names explicitly in @connect (see hostAllowed()):
  *
  *   GM_cookie.list({}, callback)        — synchronous result + optional callback
  *   GM_cookie.set(details, callback)
@@ -45,12 +46,9 @@ Cu.import("chrome://greasemonkey-modules/content/util.js");
 Cu.import("chrome://greasemonkey-modules/content/prefManager.js");
 
 
-/**
- * Security default: every operation is scoped to the page's own host.
- * Setting/deleting cookies on third-party domains is gated off; flip
- * this only after a real audit of the implications.
- */
-const CURRENT_HOST_ONLY = true;
+// Cross-domain cookie access is gated per script by its @connect list (see
+// hostAllowed() in createGMCookieAPI); the page's own host is always
+// allowed.  There is no global host-lock constant anymore.
 
 /**
  * Default expiration for set() when no `expirationDate` / `expiration` is
@@ -154,7 +152,7 @@ function listCookiesForHost(aContentWin, aHost) {
  * @returns {object} Sandbox-side cookie API object with list/set/delete.
  */
 function createGMCookieAPI(
-    aWrappedContentWin, aSandbox, aFileURL, aPageUrl) {
+    aWrappedContentWin, aSandbox, aFileURL, aPageUrl, aConnects) {
   let cookiesService;
   try {
     cookiesService = Services.cookies;
@@ -178,6 +176,77 @@ function createGMCookieAPI(
   }
 
   let pageHost = sanitizeHost(getHostFromUrl(aPageUrl));
+  let connects = aConnects || [];
+
+  /**
+   * Whether the script may touch cookies for aHost.  The page's own host is
+   * always allowed.  Cross-domain access is gated by @connect and is
+   * deliberately STRICTER than GM_xmlhttpRequest: only hosts named
+   * explicitly (exact, subdomain, *.domain, or localhost) qualify --
+   * "@connect *" and "@connect self" do NOT grant blanket access to other
+   * sites' cookies, since cookies routinely carry credentials.
+   *
+   * @param {string|null} aHost
+   * @returns {boolean}
+   */
+  function hostAllowed(aHost) {
+    let host = sanitizeHost(aHost);
+    if (!host) {
+      return false;
+    }
+    if (pageHost && (host === pageHost)) {
+      return true;
+    }
+    for (let i = 0; i < connects.length; i++) {
+      let entry = String(connects[i]).toLowerCase();
+      if ((entry === "*") || (entry === "self")) {
+        continue;
+      }
+      if (entry === "localhost") {
+        if ((host === "localhost") || (host === "127.0.0.1")) {
+          return true;
+        }
+        continue;
+      }
+      if (entry.startsWith("*.")) {
+        let bare = entry.substr(2);
+        if ((host === bare) || host.endsWith("." + bare)) {
+          return true;
+        }
+        continue;
+      }
+      if ((host === entry) || host.endsWith("." + entry)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Resolves the target host for an operation from its details: an explicit
+   * .host, .domain (leading dot stripped), or .url field, else the page's
+   * own host.  Returns null when a named cross-domain host is not permitted
+   * by @connect (callers turn that into a thrown Error).
+   *
+   * @param {object} aDetails
+   * @returns {string|null}
+   */
+  function resolveHost(aDetails) {
+    let want = null;
+    if (aDetails) {
+      if (aDetails.host) {
+        want = sanitizeHost(String(aDetails.host));
+      } else if (aDetails.domain) {
+        want = sanitizeHost(String(aDetails.domain).replace(/^\./, ""));
+      } else if (aDetails.url) {
+        want = sanitizeHost(getHostFromUrl(String(aDetails.url)));
+      }
+    }
+    if (!want || (want === pageHost)) {
+      return pageHost;
+    }
+    return hostAllowed(want) ? want : null;
+  }
 
   /**
    * Resolves a callback safely — never lets a script-side throw escape
@@ -198,13 +267,22 @@ function createGMCookieAPI(
   /**
    * GM_cookie.list(filter, callback)
    *
-   * Returns an array of cookie records (cloned into the sandbox) for the
-   * page's current host.  filter is currently ignored beyond the default
-   * host-scope (CURRENT_HOST_ONLY).  The optional callback is invoked
-   * with (cookies, null).
+   * Returns an array of cookie records (cloned into the sandbox).  The
+   * target host defaults to the page's own host; a filter.domain /
+   * filter.url / filter.host naming a different host is honored only when
+   * that host is permitted by the script's @connect.  The optional
+   * callback is invoked with (cookies, null).
    */
   function listImpl(aFilter, aCallback) {
-    let raw = listCookiesForHost(aWrappedContentWin, pageHost);
+    let host = resolveHost(aFilter);
+    if (host === null) {
+      let err = new aWrappedContentWin.Error(
+          "GM_cookie.list: cross-domain access to that host is not "
+          + "permitted by the script's @connect.", aFileURL, null);
+      safeCall(aCallback, null, err);
+      throw err;
+    }
+    let raw = listCookiesForHost(aWrappedContentWin, host);
     // HttpOnly cookies are deliberately hidden from page JavaScript (an
     // XSS defense).  GM_cookie runs with elevated privilege and CAN read
     // them (matching Tampermonkey), but that exposes session-cookie VALUES
@@ -262,9 +340,13 @@ function createGMCookieAPI(
       throw err;
     }
 
-    let host = pageHost;
-    if (!CURRENT_HOST_ONLY && aDetails.domain) {
-      host = "." + String(aDetails.domain);
+    let host = resolveHost(aDetails);
+    if (host === null) {
+      let err = new aWrappedContentWin.Error(
+          "GM_cookie.set: cross-domain access to that host is not "
+          + "permitted by the script's @connect.", aFileURL, null);
+      safeCall(aCallback, null, err);
+      throw err;
     }
     let path     = aDetails.path     ? String(aDetails.path)  : "/";
     let name     = aDetails.name     ? String(aDetails.name)  : undefined;
@@ -323,9 +405,10 @@ function createGMCookieAPI(
   /**
    * GM_cookie.delete(details, callback)
    *
-   * Removes one or more cookies matching details.name (and optional .path)
-   * on the page's current host.  Callback receives (count, null) where
-   * count is the number of cookies actually removed.
+   * Removes one or more cookies matching details.name (and optional .path).
+   * Defaults to the page's own host; a details.domain / .url / .host naming
+   * a different host is honored only when permitted by @connect.  Callback
+   * receives (count, null) where count is the number of cookies removed.
    */
   function deleteImpl(aDetails, aCallback) {
     let name = (aDetails && aDetails.name) ? String(aDetails.name) : undefined;
@@ -343,9 +426,18 @@ function createGMCookieAPI(
       throw err;
     }
 
+    let host = resolveHost(aDetails);
+    if (host === null) {
+      let err = new aWrappedContentWin.Error(
+          "GM_cookie.delete: cross-domain access to that host is not "
+          + "permitted by the script's @connect.", aFileURL, null);
+      safeCall(aCallback, null, err);
+      throw err;
+    }
+
     let count = 0;
     try {
-      let raw = listCookiesForHost(aWrappedContentWin, pageHost);
+      let raw = listCookiesForHost(aWrappedContentWin, host);
       for (let i = 0; i < raw.length; i++) {
         let cookie = raw[i];
         if (cookie.name !== name) continue;
