@@ -230,6 +230,22 @@ function parse(aSource, aUri, aFailWhenMissing) {
         }
         break;
 
+      case "icon64":
+        // @icon64 (Tampermonkey) is a high-DPI icon URL.  The fork keeps a
+        // single icon slot, so @icon64 is used only as a fallback when no
+        // @icon was supplied; an explicit @icon always wins (its case sets
+        // the icon unconditionally, so order in the metadata doesn't matter).
+        try {
+          if (!script.icon._downloadURL && !script.icon._dataURI) {
+            script.icon.setMetaVal(data.value);
+          }
+          script["_rawMeta"] += data.keyword + META_SEPARATOR
+              + data.value + META_SEPARATOR;
+        } catch (e) {
+          script.parseErrors.push(e.message);
+        }
+        break;
+
       case "include":
         script["_includes"].push(data.value);
         break;

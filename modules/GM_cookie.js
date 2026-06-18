@@ -86,6 +86,37 @@ function sanitizeHost(aHost) {
 }
 
 /**
+ * Normalizes a script-supplied sameSite value to the nsICookie sameSite
+ * integer (0 = unset/none, 1 = lax, 2 = strict).  Accepts the string forms
+ * ("lax" / "strict" / "none") or a number.  Returns null when unspecified,
+ * so set() can skip the sameSite argument entirely on builds whose add()
+ * signature does not accept it.
+ *
+ * @param {string|number|undefined} aValue
+ * @returns {number|null}
+ */
+function sameSiteToInt(aValue) {
+  if ((aValue === undefined) || (aValue === null) || (aValue === "")) {
+    return null;
+  }
+  if (typeof aValue === "number") {
+    return aValue;
+  }
+  switch (String(aValue).toLowerCase()) {
+    case "lax":
+      return 1;
+    case "strict":
+      return 2;
+    case "none":
+    case "no_restriction":
+    case "unspecified":
+      return 0;
+    default:
+      return null;
+  }
+}
+
+/**
  * Tests whether an nsICookie2 record applies to a given page host.
  * Mirrors the matching the platform performs internally:
  *   - dot-prefixed cookie host ".example.com" matches sub.example.com
@@ -324,7 +355,8 @@ function createGMCookieAPI(
    * fields:
    *   name (required), value (required), path, secure, httpOnly,
    *   session, expiration / expirationDate (seconds since epoch),
-   *   sameSite (currently captured but not forwarded — see comment).
+   *   sameSite ("lax" / "strict" / "none" or 0/1/2; applied when the
+   *   platform's cookie add() accepts it, otherwise ignored).
    * Callback receives (true, null) on success or (null, error) on failure.
    */
   function setImpl(aDetails, aCallback) {
@@ -383,15 +415,30 @@ function createGMCookieAPI(
       throw err;
     }
 
+    let sameSite = sameSiteToInt(aDetails.sameSite);
     try {
-      // sameSite is captured into details above for forward-compat but
-      // is not forwarded here — UXP's nsICookieManager2.add signature
-      // varies by version on the trailing arg.  Adding it can be done
-      // in a follow-up without breaking callers.
-      cookiesService.add(
-          host, path, name, value,
-          secure, httpOnly, session, expiry,
-          aWrappedContentWin.document.nodePrincipal.originAttributes);
+      let oa = aWrappedContentWin.document.nodePrincipal.originAttributes;
+      let added = false;
+      // Newer nsICookieManager2.add() signatures take sameSite after the
+      // originAttributes argument.  Try that first when the script asked
+      // for a sameSite, and fall back to the classic 9-arg form if this
+      // build's add() rejects the extra argument (the cookie is still set,
+      // just without the SameSite flag).
+      if (sameSite !== null) {
+        try {
+          cookiesService.add(
+              host, path, name, value,
+              secure, httpOnly, session, expiry, oa, sameSite);
+          added = true;
+        } catch (eSameSite) {
+          added = false;
+        }
+      }
+      if (!added) {
+        cookiesService.add(
+            host, path, name, value,
+            secure, httpOnly, session, expiry, oa);
+      }
       safeCall(aCallback, true, null);
       return true;
     } catch (e) {

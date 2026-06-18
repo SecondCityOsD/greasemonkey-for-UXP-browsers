@@ -453,16 +453,57 @@ function recomputeFind(aQuery) {
   gFindMatches = [];
   gFindIdx = -1;
   if (aQuery && gCMInstance) {
-    let hay = gCMInstance.getValue().toLowerCase();
-    let needle = aQuery.toLowerCase();
-    let from = 0;
-    let at;
-    while ((at = hay.indexOf(needle, from)) !== -1) {
-      gFindMatches.push(at);
-      from = at + (needle.length || 1);
+    let text = gCMInstance.getValue();
+    // A /pattern/flags query is treated as a regular expression; anything
+    // else is a plain case-insensitive substring search.  Each match is
+    // stored as {index, length} so variable-length regex matches select
+    // correctly.
+    let re = parseRegexQuery(aQuery);
+    if (re) {
+      let m;
+      while ((m = re.exec(text)) !== null) {
+        gFindMatches.push({ "index": m.index, "length": m[0].length });
+        // Guard against an infinite loop on a zero-width match.
+        if (m.index === re.lastIndex) {
+          re.lastIndex++;
+        }
+      }
+    } else {
+      let hay = text.toLowerCase();
+      let needle = aQuery.toLowerCase();
+      let from = 0;
+      let at;
+      while ((at = hay.indexOf(needle, from)) !== -1) {
+        gFindMatches.push({ "index": at, "length": needle.length });
+        from = at + (needle.length || 1);
+      }
     }
   }
   updateFindCount();
+}
+
+/**
+ * Parses a /pattern/flags find query into a global RegExp, or returns null
+ * when the query is not in /.../ form (so it's a plain substring search) or
+ * the pattern doesn't compile.
+ *
+ * @param {string} aQuery
+ * @returns {RegExp|null}
+ */
+function parseRegexQuery(aQuery) {
+  let m = (/^\/(.+)\/([gimsuy]*)$/).exec(aQuery);
+  if (!m) {
+    return null;
+  }
+  let flags = m[2];
+  if (flags.indexOf("g") === -1) {
+    flags += "g";
+  }
+  try {
+    return new RegExp(m[1], flags);
+  } catch (e) {
+    return null;
+  }
 }
 
 function gotoMatch(aDir) {
@@ -472,11 +513,9 @@ function gotoMatch(aDir) {
   }
   let len = gFindMatches.length;
   gFindIdx = ((gFindIdx + aDir) % len + len) % len;
-  let start = gFindMatches[gFindIdx];
-  let input = document.getElementById("gm-sv-find-input");
-  let qlen = input ? input.value.length : 0;
-  let from = gCMInstance.posFromIndex(start);
-  let to = gCMInstance.posFromIndex(start + qlen);
+  let match = gFindMatches[gFindIdx];
+  let from = gCMInstance.posFromIndex(match.index);
+  let to = gCMInstance.posFromIndex(match.index + match.length);
   gCMInstance.setSelection(from, to);
   gCMInstance.scrollIntoView({ "from": from, "to": to }, 40);
   updateFindCount();
