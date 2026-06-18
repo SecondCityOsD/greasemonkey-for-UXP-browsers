@@ -59,6 +59,34 @@
   each is SHA-256-verified on import; a corrupt or tampered dependency is
   re-downloaded instead of installed.
 
+**New script APIs**
+* `window.onurlchange` — react to in-page (single-page-app) navigations.
+* `GM_getTab` / `GM_saveTab` / `GM_getTabs` — small per-tab storage that
+  persists while the tab is open.
+* `GM_cookie` — cross-domain access (for hosts declared in `@connect`) and
+  `sameSite` on `set()`.
+* `GM_download` — custom request headers; the filename filter now allows any
+  non-executable type (it no longer rejects `.json`, `.pdf`, etc.).
+* `GM_xmlhttpRequest` — per-request cookies.
+* `@icon64` is now recognised, and the source viewer gains regular-expression
+  (`/pattern/`) find.
+
+**Behaviour & hardening**
+* A script that declares no `@connect` is now limited to its own origin (it
+  could previously reach any host); loopback / intranet addresses require an
+  explicit `@connect`.  A pref restores the old behaviour for legacy script
+  collections.
+* Update checks now require a secure URL for both the update and download
+  locations; `@require` / `@resource` can optionally be restricted to HTTPS
+  and pinned with a `#sha256=` hash.
+* HttpOnly cookie values can be hidden from scripts, and forced third-party
+  cookies made optional.
+
+**Fixes**
+* `GM_cookie` now works at runtime (including the `GM.cookie` promise form).
+* Update checks no longer accept a stale cached response; removed a duplicate
+  request header.
+
 #### 3.8.1 — Hotfix
 
 * **Fixed:** opening a script's **Preferences** failed with an "XML Parser
