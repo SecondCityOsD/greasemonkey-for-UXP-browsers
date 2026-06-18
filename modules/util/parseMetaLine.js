@@ -621,7 +621,14 @@ var _GM_parseMetaLine = /*
                   if (peg$silentFails === 0) { peg$fail(peg$c25); }
                 }
                 if (s1 === peg$FAILED) {
-                  if (input.substr(peg$currPos, 4) === peg$c26) {
+                  if (input.substr(peg$currPos, 6) === "icon64") {
+                    // @icon64 must be tried before @icon: "icon" matches the
+                    // first 4 chars of "icon64" and would then fail on "64",
+                    // dropping the line.  (Hand-added to the generated PEG
+                    // parser; keyword handled in parseScript.js.)
+                    s1 = "icon64";
+                    peg$currPos += 6;
+                  } else if (input.substr(peg$currPos, 4) === peg$c26) {
                     s1 = peg$c26;
                     peg$currPos += 4;
                   } else {

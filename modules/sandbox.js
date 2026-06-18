@@ -839,7 +839,11 @@ function runScriptInSandbox(aSandbox, aScript) {
           && (typeof aSandbox.GM_cookie === "object")) {
         let cookieGmObj = Cu.createObjectIn(gmObj, { "defineAs": "cookie" });
         ["list", "set", "delete"].forEach(function (aMethod) {
-          let method = aSandbox.GM_cookie[aMethod];
+          // Read the methods through a waived Xray: the cookie object's
+          // .list/.set/.delete are callable expandos that the chrome Xray
+          // view denies ("value is callable"), so a direct read would see
+          // undefined and GM.cookie.* would never be built.
+          let method = Cu.waiveXrays(aSandbox.GM_cookie)[aMethod];
           if (typeof method !== "function") return;
           let wrapper = (function (fn) {
             return function gmCookieAsyncWrapper() {
