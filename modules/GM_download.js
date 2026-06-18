@@ -82,31 +82,17 @@ Cu.importGlobalProperties(["URL"]);
 
 
 /**
- * Filename-extension policy carried over from the polyfill so existing
- * scripts that pass the polyfill's checks continue to pass here.
- *
- * Whitelist is always enforced; blacklist is gated on
- * BLACKLIST_ENFORCED.  The blacklist is intended as defence-in-depth
- * against trivially-executable extensions; it is off by default to
- * preserve script compatibility, matching the polyfill's default.
+ * Filename-extension policy.  GM_download uses a DENY-list only: known
+ * dangerous, trivially-executable extensions are refused; everything else
+ * is allowed.  Violentmonkey and Tampermonkey impose no allow-list, and the
+ * former narrow whitelist here rejected common, safe types (.json, .pdf,
+ * .csv, .js, .html, ...), so the allow-list was removed.
  */
-const BLACKLIST_ENFORCED = false;
-
 const NAME_EXTENSION_BLACKLIST = [
   "bat", "com", "crx", "exe", "scr", "sh",
 ];
 
 const NAME_EXTENSION_BLACKLIST_REGEXP = [
-];
-
-const NAME_EXTENSION_WHITELIST = [
-  "7z", "avi", "bin", "divx", "gif", "ico", "idx", "iso",
-  "jpe", "jpeg", "mkv", "mp3", "mp4", "mpe", "mpeg",
-  "png", "rar", "srt", "sub", "txt", "wav", "webm", "zip",
-];
-
-const NAME_EXTENSION_WHITELIST_REGEXP = [
-  "r(ar|[0-9]{2,2})",
 ];
 
 const DEFAULT_FILENAME = "filename.bin";
@@ -127,26 +113,16 @@ const ERROR = {
 function checkExtension(aName) {
   let lower = String(aName).toLowerCase();
 
-  if (BLACKLIST_ENFORCED) {
-    let hitBlack = NAME_EXTENSION_BLACKLIST.some(function (aExt) {
-      return lower.endsWith("." + aExt.toLowerCase());
-    });
-    let hitBlackRe = NAME_EXTENSION_BLACKLIST_REGEXP.some(function (aRe) {
-      return (new RegExp("\\." + aRe + "$", "i")).test(aName);
-    });
-    if (hitBlack || hitBlackRe) {
-      return ERROR.BLACKLISTED;
-    }
-  }
-
-  let hitWhite = NAME_EXTENSION_WHITELIST.some(function (aExt) {
+  // Deny-list only: refuse known-dangerous executable extensions; allow
+  // anything else (matching Violentmonkey / Tampermonkey).
+  let hitBlack = NAME_EXTENSION_BLACKLIST.some(function (aExt) {
     return lower.endsWith("." + aExt.toLowerCase());
   });
-  let hitWhiteRe = NAME_EXTENSION_WHITELIST_REGEXP.some(function (aRe) {
+  let hitBlackRe = NAME_EXTENSION_BLACKLIST_REGEXP.some(function (aRe) {
     return (new RegExp("\\." + aRe + "$", "i")).test(aName);
   });
-  if (!hitWhite && !hitWhiteRe) {
-    return ERROR.NOT_WHITELISTED;
+  if (hitBlack || hitBlackRe) {
+    return ERROR.BLACKLISTED;
   }
   return null;
 }
