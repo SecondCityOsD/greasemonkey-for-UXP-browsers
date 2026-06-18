@@ -24,10 +24,12 @@
  * inherits the content window's privacy mode and userContextId.
  *
  * Notes:
- *   - Cookie forwarding (aDetails.cookies) is reserved for future use
- *     (see bug #2236).
- *   - Basic-Auth header injection (aDetails.user/password) partial support
- *     is commented out pending resolution of bugs #1945 and #2008.
+ *   - Per-request cookies (aDetails.cookies) are sent verbatim as a Cookie
+ *     request header for this one request; the destination is already
+ *     @connect-gated and the browser cookie store is not modified.
+ *   - Basic-Auth uses aDetails.user / aDetails.password (passed to open())
+ *     or a script-supplied Authorization header; no browser-wide auth cache
+ *     is touched.
  *   - The minimum supported platform is Pale Moon 28+ / Basilisk current.
  *     The mozAnon constructor option is honoured directly, so no
  *     LOAD_ANONYMOUS channel-flag fallback is needed.
@@ -54,17 +56,6 @@ Cu.import("chrome://greasemonkey-modules/content/util.js");
 Cu.import("chrome://greasemonkey-modules/content/prefManager.js");
 
 
-// Cookies - reserved for possible future use (see also #2236) - part 1/2.
-/*
-const COOKIES_SERVICE = Cc["@mozilla.org/cookieService;1"].getService()
-    .QueryInterface(Ci.nsICookieService);
-*/
-
-// See #1945, #2008 - part 1/3.
-/*
-const AUTHORIZATION_USER_PASSWORD_REGEXP = new RegExp(
-    "^([^:]+):([^:]+)$", "");
-*/
 
 /**
  * Per-request helper that bridges the content security context (script) and
@@ -403,86 +394,11 @@ function (aSafeUrl, aDetails, aReq) {
 
   aReq.mozBackgroundRequest = !!aDetails.mozBackgroundRequest;
 
-  // See #1945, #2008 - part 2/3.
-  /*
-  let safeUrlTmp = new this.wrappedContentWin.URL(aSafeUrl);
-  var headersArr = [];
-  var authorization = {
-    "contrains": false,
-    "method": "Basic",
-    "password": "",
-    "string": "Authorization",
-    "user": "",
-  };
-  let authenticationComponent = Cc["@mozilla.org/network/http-auth-manager;1"]
-      .getService(Ci.nsIHttpAuthManager);
-  var authorizationRegexp = new RegExp(
-      "^\\s*" + authorization.method + "\\s*([^\\s]+)\\s*$", "i");
-
-  if (aDetails.headers) {
-    var headers = aDetails.headers;
-
-    for (var prop in headers) {
-      if (Object.prototype.hasOwnProperty.call(headers, prop)) {
-        headersArr.push({
-          "prop": prop,
-          "value": headers[prop],
-        });
-        if (prop.toString().toLowerCase()
-            == authorization.string.toLowerCase()) {
-          let authorizationValue = headers[prop].match(authorizationRegexp);
-          if (authorizationValue) {
-            authorizationValue = atob(authorizationValue[1]);
-            let authorizationUserPassword = authorizationValue.match(
-                AUTHORIZATION_USER_PASSWORD_REGEXP);
-            if (authorizationUserPassword) {
-              authorization.contrains = true;
-              authorization.user = authorizationUserPassword[1];
-              authorization.password = authorizationUserPassword[2];
-            }
-          }
-        }
-      }
-    }
-  }
-
-  if ((authorization.user || authorization.password)
-      || (aDetails.user || aDetails.password)) {
-    authenticationComponent.setAuthIdentity(
-        safeUrlTmp.protocol,
-        safeUrlTmp.hostname,
-        (safeUrlTmp.port || ""),
-        ((authorization.contrains)
-          ? authorization.method : ""),
-        "",
-        "",
-        "",
-        (authorization.user
-          || aDetails.user || ""),
-        (authorization.password
-          || aDetails.password || ""));
-  } else {
-    let authorizationDomain = {};
-    let authorizationUser = {};
-    let authorizationPassword = {};
-    try {
-      authenticationComponent.getAuthIdentity(
-          safeUrlTmp.protocol,
-          safeUrlTmp.hostname,
-          (safeUrlTmp.port || ""),
-          "",
-          "",
-          "",
-          authorizationDomain,
-          authorizationUser,
-          authorizationPassword);
-      aDetails.user = authorizationUser.value || "";
-      aDetails.password = authorizationPassword.value || "";
-    } catch (e) {
-      // Ignore.
-    }
-  }
-  */
+  // Basic-Auth is handled by the open() user / password arguments below (a
+  // script may also set its own Authorization header).  The former
+  // nsIHttpAuthManager path was removed: it wrote into the browser-wide
+  // HTTP auth cache, leaking the script's credentials to other requests to
+  // that origin and persisting them (bugs #1945 / #2008).
 
   // See #2423.
   // http://bugzil.la/1275746
@@ -575,32 +491,20 @@ function (aSafeUrl, aDetails, aReq) {
     }
   }
 
-  // Cookies - reserved for possible future use (see also #2236) - part 2/2.
-  /*
+  // Per-request cookies: send the script-supplied cookie string verbatim
+  // as a Cookie request header (Violentmonkey / Tampermonkey semantics).
+  // The destination is already @connect-gated (contentStartRequest), this
+  // affects only THIS request, and it does NOT write to the browser cookie
+  // store.  Use mozAnon/anonymous to suppress the user's own cookies.
   if (aDetails.cookies) {
     try {
-      let _cookiesOrig = COOKIES_SERVICE.getCookieString(
-          GM_util.getUriFromUrl(this.originUrl), aReq.channel);
-
-      let _cookies = (_cookiesOrig === null) ? "" : _cookiesOrig;
-
-      COOKIES_SERVICE.setCookieString(
-          GM_util.getUriFromUrl(aSafeUrl), null, _cookies, aReq.channel);
+      aReq.setRequestHeader("Cookie", String(aDetails.cookies));
     } catch (e) {
-      throw new this.wrappedContentWin.Error(
-          "GM_xmlhttpRequest():"
-          + "\n" + e,
-          this.fileURL, null);
+      // Some builds may treat Cookie as a forbidden header; ignore so the
+      // request still proceeds without the override.
     }
   }
-  */
 
-  // See #1945, #2008 - part 3/3.
-  /*
-  for (let i = 0, iLen = headersArr.length; i < iLen; i++) {
-    aReq.setRequestHeader(headersArr[i].prop, headersArr[i].value);
-  }
-  */
   let body = aDetails.data ? aDetails.data : null;
 
   // Identify the body shape once so both the header loop (below) and
