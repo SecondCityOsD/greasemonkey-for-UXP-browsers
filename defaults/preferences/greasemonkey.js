@@ -13,6 +13,9 @@ pref("extensions.greasemonkey.api.GM_cookie.exposeHttpOnly", true);
 // nsIWebBrowserPersist + nsIFilePicker (see modules/GM_download.js),
 // replacing the script-side polyfill.  Default true.
 pref("extensions.greasemonkey.api.GM_download", true);
+// GM_getTab / GM_saveTab / GM_getTabs: per-tab, per-script session store
+// (Tampermonkey / ScriptCat).  Default true; set false to remove the trio.
+pref("extensions.greasemonkey.api.GM_getTab", true);
 pref("extensions.greasemonkey.api.object.polyfill", true);
 pref("extensions.greasemonkey.api.unsafeWindow.grant", false);
 // window.onurlchange (SPA navigation events): when true (default), a

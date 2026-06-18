@@ -91,6 +91,7 @@ Cu.import("chrome://greasemonkey-modules/content/storageBack.js");
 Cu.import("chrome://greasemonkey-modules/content/thirdParty/getChromeWinForContentWin.js");
 Cu.import("chrome://greasemonkey-modules/content/GM_cookie.js");
 Cu.import("chrome://greasemonkey-modules/content/GM_download.js");
+Cu.import("chrome://greasemonkey-modules/content/GM_tab.js");
 Cu.import("chrome://greasemonkey-modules/content/util.js");
 Cu.import("chrome://greasemonkey-modules/content/xmlHttpRequester.js");
 
@@ -344,6 +345,42 @@ function createSandbox(aContentWin, aUrl, aScript, aRunAt) {
           getChromeWinForContentWin(aContentWin), aContentWin, sandbox,
           aScript.fileURL, aScript.localized.name);
       sandbox[_API1] = _notifier.contentStart.bind(_notifier);
+    }
+  }
+
+  // GM_getTab / GM_saveTab / GM_getTabs: per-tab, per-script in-memory
+  // store (Tampermonkey / ScriptCat).  Plain callables, so GM.getTab /
+  // GM.saveTab / GM.getTabs are wrapped automatically by buildGMObject.
+  if (GM_prefRoot.getValue("api.GM_getTab", true)) {
+    let gmTabId;
+    try {
+      gmTabId = GM_util.windowId(aContentWin.top, "outer");
+    } catch (e) {
+      try {
+        gmTabId = GM_util.windowId(aContentWin, "outer");
+      } catch (e2) {
+        gmTabId = 0;
+      }
+    }
+    let gmTabApi = createGMTabAPI(
+        aContentWin, sandbox, aScript.fileURL, aScript.uuid, gmTabId);
+    _API1 = "GM_getTab";
+    _API2 = _API1.replace(
+        API_PREFIX_REGEXP, GM_CONSTANTS.addonAPIPrefix2 + "$2");
+    if (hasGrant(_API1, _API2)) {
+      sandbox[_API1] = gmTabApi.getTab;
+    }
+    _API1 = "GM_saveTab";
+    _API2 = _API1.replace(
+        API_PREFIX_REGEXP, GM_CONSTANTS.addonAPIPrefix2 + "$2");
+    if (hasGrant(_API1, _API2)) {
+      sandbox[_API1] = gmTabApi.saveTab;
+    }
+    _API1 = "GM_getTabs";
+    _API2 = _API1.replace(
+        API_PREFIX_REGEXP, GM_CONSTANTS.addonAPIPrefix2 + "$2");
+    if (hasGrant(_API1, _API2)) {
+      sandbox[_API1] = gmTabApi.getTabs;
     }
   }
 
