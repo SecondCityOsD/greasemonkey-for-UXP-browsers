@@ -87,6 +87,58 @@
 * Update checks no longer accept a stale cached response; removed a duplicate
   request header.
 
+**Notes & preferences**
+
+* **How "New User Script" works now.**  Both the toolbar **New User Script…**
+  and the about:addons **Create new userscript** button skip the old
+  name/namespace dialog: they create a script immediately — auto-named
+  "New User Script N" with the `Greasemonkey` namespace, pre-scoped to the
+  active tab's site — and open it straight in your configured editor (or the
+  browser's Scratchpad).  You rename it just by editing `@name`; the on-disk
+  folder and the script's internal id never change, so renaming never loses
+  the script's `GM_setValue` data.  Prefer the old flow?  Set
+  `extensions.greasemonkey.manager.newScript.classicDialog.enabled` to `true`
+  and both entry points fall back to the name/namespace dialog.
+
+* **Heads-up — `@connect` is now enforced.**  A userscript that calls
+  `GM_xmlhttpRequest` against another domain **without** declaring it in
+  `@connect` is now blocked (requests are limited to the page's own origin),
+  matching Violentmonkey / Tampermonkey.  If an older script stops making
+  cross-site requests, add the right `// @connect host` line — or, to restore
+  the previous "allow any host" behaviour globally, set
+  `extensions.greasemonkey.xmlhttprequest.allowAllHostsWithoutConnect` to
+  `true`.  Loopback / intranet addresses (`localhost`, `127.0.0.1`, `10.x`, …)
+  always require an explicit `@connect`, even with that pref on.
+
+* **Dependency pinning.**  `@require` / `@resource` URLs may carry a
+  Subresource-Integrity hash — e.g.
+  `// @require https://cdn/lib.js#sha256=<hex>` (also `sha384` / `sha512`) —
+  and the downloaded file is verified against it; a mismatch is refused.  Set
+  `extensions.greasemonkey.requireSecureDependencies` to `true` to additionally
+  refuse plain-`http://` dependencies.
+
+* **New about:config preferences** (all under `extensions.greasemonkey.`,
+  default in parentheses):
+  * `update.intervalDays` (`1`) — days between automatic script-update checks;
+    `0` disables them.  `update.lastCheck` records the last sweep.
+  * `manager.newScript.classicDialog.enabled` (`false`) — restore the classic
+    name/namespace dialog for new scripts (see above).
+  * `xmlhttprequest.allowAllHostsWithoutConnect` (`false`) — restore the old
+    "no `@connect` = reach any host" behaviour (see above).
+  * `xmlhttprequest.forceThirdPartyCookies` (`true`) — set `false` so a
+    cross-origin `GM_xmlhttpRequest` respects the browser's third-party-cookie
+    policy instead of always sending them.
+  * `requireSecureDependencies` (`false`) — require HTTPS for `@require` /
+    `@resource` (see above).
+  * `api.GM_cookie.exposeHttpOnly` (`true`) — set `false` to hide HttpOnly
+    cookie values from `GM_cookie.list`.
+  * `api.window.onurlchange` (`true`) — the SPA-navigation monitor; set `false`
+    to disable it.
+  * `api.GM_getTab` (`true`) — the `GM_getTab` / `GM_saveTab` / `GM_getTabs`
+    APIs; set `false` to remove them.
+  * `backup.asyncExport` (`true`) — set `false` to force the older synchronous
+    (UI-blocking) backup export.
+
 #### 3.8.1 — Hotfix
 
 * **Fixed:** opening a script's **Preferences** failed with an "XML Parser
