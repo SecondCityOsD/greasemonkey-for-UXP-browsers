@@ -850,7 +850,15 @@ function runScriptInSandbox(aSandbox, aScript) {
               let args = arguments;
               return new aSandbox.Promise(function (resolve, reject) {
                 try {
-                  resolve(fn.apply(null, args));
+                  // Clone the result into the sandbox before resolving: it
+                  // arrives here as a chrome-side (privileged) object, and
+                  // resolving with it directly makes the script's property
+                  // access ("value.length" etc.) hit the security wrapper.
+                  // Primitives (set -> true, delete -> count) pass through.
+                  let result = fn.apply(null, args);
+                  resolve(((result !== null) && (typeof result === "object"))
+                      ? Cu.cloneInto(result, aSandbox)
+                      : result);
                 } catch (e) {
                   reject(e);
                 }
