@@ -847,7 +847,14 @@ function runScriptInSandbox(aSandbox, aScript) {
           if (typeof method !== "function") return;
           let wrapper = (function (fn) {
             return function gmCookieAsyncWrapper() {
-              let args = arguments;
+              // Build the argument list as a sandbox-side array.  Passing the
+              // chrome `arguments` object straight to the sandbox method made
+              // it read `.length` off a privileged object (the security-
+              // wrapper warning).  slice.call runs in chrome (chrome reading
+              // chrome); the result is then cloned into the sandbox.
+              let args = Cu.cloneInto(
+                  Array.prototype.slice.call(arguments), aSandbox,
+                  { "cloneFunctions": true });
               return new aSandbox.Promise(function (resolve, reject) {
                 try {
                   // Clone the result into the sandbox before resolving: it
