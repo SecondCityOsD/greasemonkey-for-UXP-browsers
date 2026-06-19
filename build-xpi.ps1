@@ -6,15 +6,20 @@
 # Reads the version from install.rdf and writes
 # greasemonkey-<version>.xpi alongside this script.
 #
-# Excludes development-only directories and files that shouldn't ship:
-#   - .git/, .github/      — version control
-#   - _attic/              — parked work (e.g. editor-draft)
-#   - docs/                — architecture / inventory / runbooks
-#   - tests/               — smoke-test set
-#   - node_modules/        — never used here, defensive
-#   - *.xpi                — don't include previous builds
-#   - .gitignore, README.md, CLAUDE.md, update.rdf, build-xpi.ps1
-#                          — repo-only files
+# Windows counterpart to build.sh; it packages the SAME members.  Both
+# scripts use an explicit ALLOW-LIST ($includeTop below / the `cp -r` list in
+# build.sh) rather than a blacklist of exclusions.  That choice is
+# deliberate: a blacklist fails open — a new top-level repo file (release
+# notes, a CI manifest, another helper script) silently ships inside every
+# install until someone notices.  An allow-list fails closed: anything not
+# named is left out, and a genuinely new runtime member is caught the moment
+# the extension fails to load.  Keep $includeTop in sync with build.sh.
+#
+# Intentionally NOT shipped: .git/.github, _attic/, docs/, tests/, tools/,
+# README.md, CHANGELOG.md, Contributing.md, CLAUDE.md, .editorconfig,
+# .gitignore, the build scripts themselves, previous *.xpi builds, and
+# update.rdf (a server-side auto-update manifest the browser reaches via the
+# <em:updateURL> in install.rdf — not a package member).
 
 Add-Type -AssemblyName System.IO.Compression
 Add-Type -AssemblyName System.IO.Compression.FileSystem
@@ -52,19 +57,25 @@ if ($rdfText -match '<em:version>([^<]+)</em:version>') {
 $out = Join-Path $src "greasemonkey-$version.xpi"
 if (Test-Path $out) { Remove-Item $out -Force }
 
-# Top-level dirs that must never appear in the XPI.
-$excludeDirs = @(
-    '_attic',
-    '.git',
-    '.github',
-    'docs',
-    'tests',
-    'node_modules',
-    'tools'
+# Canonical XPI member set — MUST match the `cp -r` whitelist in build.sh.
+# A top-level entry (file or directory) ships only if its name is here.
+$includeTop = @(
+    'chrome.manifest',
+    'components',
+    'content',
+    'defaults',
+    'install.rdf',
+    'LICENSE',
+    'locale',
+    'modules',
+    'skin'
 )
 
-# File-name patterns that must never appear in the XPI.
-$excludeFilesPattern = '\.xpi$|^\.gitignore$|^README\.md$|^CLAUDE\.md$|^update\.rdf$|^build-xpi\.ps1$'
+# Editor / Photoshop leftovers that build.sh strips from the build tree
+# (find ... -name '*~' / '#*' / '*.psd').  Skip them here too so both
+# builds produce the same file set even if such a file slips into a
+# whitelisted directory.
+$excludeLeaf = '(~$)|(^#)|(\.psd$)'
 
 $zip = [System.IO.Compression.ZipFile]::Open($out, 'Create')
 $count = 0
@@ -73,8 +84,8 @@ try {
     foreach ($f in $files) {
         $rel = $f.FullName.Substring($src.Length + 1).Replace('\', '/')
         $top = $rel.Split('/')[0]
-        if ($excludeDirs -contains $top) { continue }
-        if ($rel -match $excludeFilesPattern) { continue }
+        if ($includeTop -notcontains $top) { continue }
+        if ($f.Name -match $excludeLeaf) { continue }
         [void][System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile(
             $zip, $f.FullName, $rel,
             [System.IO.Compression.CompressionLevel]::Optimal)
