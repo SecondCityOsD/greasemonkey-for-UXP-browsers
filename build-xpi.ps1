@@ -42,6 +42,43 @@ if ($nodeCmd) {
     Write-Warning "node not found - skipping locale DTD completeness/well-formedness check."
 }
 
+# Source-integrity guard: modules/util.js must register exactly one lazy
+# module getter per file in modules/util/.  build.sh regenerates that block on
+# every build (via util.sh); build-xpi.ps1 ships the committed file as-is, so
+# verify it is in sync here.  Without this, a util added/removed on Windows
+# would ship with a mismatched util.js and fail to load at runtime.
+$utilDir = Join-Path $src 'modules/util'
+$utilJs  = Join-Path $src 'modules/util.js'
+if ((Test-Path $utilDir) -and (Test-Path $utilJs)) {
+    Write-Host "Checking modules/util.js is in sync with modules/util/ ..."
+    $onDisk = @(Get-ChildItem -Path $utilDir -Filter '*.js' -File |
+        ForEach-Object { $_.BaseName } | Sort-Object -Unique)
+    $registered = [System.Collections.Generic.List[string]]::new()
+    foreach ($line in Get-Content $utilJs) {
+        if ($line -match 'defineLazyModuleGetter\(GM_util,\s*"([^"]+)",\s*"chrome://greasemonkey-modules/content/util/') {
+            [void]$registered.Add($matches[1])
+        }
+    }
+    $registered = @($registered | Sort-Object -Unique)
+    $missing = @($onDisk     | Where-Object { $registered -notcontains $_ })
+    $orphan  = @($registered | Where-Object { $onDisk     -notcontains $_ })
+    if ($missing.Count -or $orphan.Count) {
+        if ($missing.Count) {
+            Write-Host ("  files in modules/util/ with no getter in util.js: {0}" -f ($missing -join ', '))
+        }
+        if ($orphan.Count) {
+            Write-Host ("  getters in util.js with no file in modules/util/: {0}" -f ($orphan -join ', '))
+        }
+        throw ("modules/util.js is out of sync with modules/util/ " +
+            "($($missing.Count) file(s) missing a getter, $($orphan.Count) orphan getter(s)). " +
+            "Regenerate it (run ./util.sh on a POSIX shell, or add/remove the matching " +
+            "XPCOMUtils.defineLazyModuleGetter line) before building.")
+    }
+    Write-Host "  OK - $($onDisk.Count) util modules, all registered."
+} else {
+    Write-Warning "modules/util or modules/util.js not found - skipping util.js sync check."
+}
+
 # Read version from install.rdf so the filename always matches.
 $installRdf = Join-Path $src 'install.rdf'
 if (-not (Test-Path $installRdf)) {
