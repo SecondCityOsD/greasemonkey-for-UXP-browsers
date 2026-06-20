@@ -9,6 +9,9 @@
   matching Violentmonkey / Tampermonkey.  Set
   `extensions.greasemonkey.manager.newScript.classicDialog.enabled` to true to
   restore the classic metadata dialog.
+* When you have no user scripts installed, the empty-pane **Get user scripts**
+  button is now a drop-down listing the script-hosting sites (GreasyFork,
+  OpenUserJS, Gist) instead of opening the hosting wiki.
 
 **Toolbar menu**
 * **New User Script…** now uses the same editor-jump flow as about:addons
