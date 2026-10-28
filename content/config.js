@@ -294,7 +294,7 @@ Config.prototype._load = function () {
       //   - Disable the script (so it doesn't try to inject with a
       //     broken file set and throw at first @require fetch).
       //   - KEEP the entry in config.xml.  Next startup will retry
-      //     allFilesExist; if the files came back, clearBroken()
+      //     allFilesExistResult; if the files came back, clearBroken()
       //     above fires and the script recovers automatically.
       //
       // The user sees the script in the User Scripts panel marked
