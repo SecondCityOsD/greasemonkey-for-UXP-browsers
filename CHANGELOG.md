@@ -1,6 +1,6 @@
 ## Changelog
 
-#### 3.9.1 (unreleased)
+#### 3.10 (unreleased)
 
 **Script updates**
 * **Updates no longer install without your consent.** After a manual
