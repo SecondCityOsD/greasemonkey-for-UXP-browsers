@@ -67,7 +67,7 @@
   - `@exclude-match` rules, with the other pages it doesn't run on;
   - its `@run-at`, when that isn't the usual document-end.
 * **The Install button is ready sooner.**
-  - Its countdown is now one second instead of two and a half, but it
+  - Its countdown is now 0.8 seconds instead of two and a half, but it
     starts again whenever the install window loses the focus.  That
     restart is what stops a page from popping the window up under your
     cursor and timing a click onto Install.
@@ -78,12 +78,12 @@
     one after another.  The first one that fails still stops the install,
     and cancels the rest.
   - The countdown is the `extensions.greasemonkey.installDelay` setting,
-    in half-second steps; `0` turns it off.
+    in steps of 0.4 seconds; `0` turns it off.
 * Backups now save only the Greasemonkey settings you have changed.  They
   used to save every listed setting, so restoring one turned that day's
   defaults into fixed choices.  A 3.9 backup still brings back the old
-  2.5-second countdown (`installDelay` 5), which you can reset in
-  about:config.
+  countdown setting (`installDelay` 5, now 2 seconds), which you can
+  reset in about:config.
 * When Windows briefly locked a new script's folder during the install,
   the retry meant for that case crashed itself.  The script was then
   listed, but its files were left behind in a temporary folder.  The

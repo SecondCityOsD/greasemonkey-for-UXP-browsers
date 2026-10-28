@@ -15,11 +15,11 @@ Cu.import("chrome://greasemonkey-modules/content/util.js");
 const HTML_NS = "http://www.w3.org/1999/xhtml";
 
 // The Install button unlocks once the window has had the focus for
-// installDelay ticks (default 2: one second).  Losing the focus starts the
+// installDelay ticks (default 2: 0.8 seconds).  Losing the focus starts the
 // count again, so a page can't pop this window up under the cursor and
 // time a click onto Install; that, not the length, is what the delay is
 // for.
-const TIMER_TICK_MS = 500;
+const TIMER_TICK_MS = 400;
 
 var gRemoteScript = window.arguments[0].wrappedJSObject[0];
 var gBrowser = window.arguments[0].wrappedJSObject[1];
