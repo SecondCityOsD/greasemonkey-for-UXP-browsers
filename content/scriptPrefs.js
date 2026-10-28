@@ -219,7 +219,10 @@ function populateMetadataSection() {
   setLabel("meta-namespace",   gScript.namespace      || "");
   setLabel("meta-version",     gScript.version        || "—");
   setLabel("meta-author",      gScript.author         || "");
-  setLabel("meta-updateurl",   gScript.updateURL      || "");
+  // "none" is what the metadata says for an old copy that must not update
+  // (updateURL is null then; see Script.updatesDisabled).
+  setLabel("meta-updateurl",   gScript.updatesDisabled
+      ? "none" : (gScript.updateURL || ""));
   setLabel("meta-downloadurl", gScript.downloadURL    || "");
 
   // Description can be multi-line; use a <description> instead of a
@@ -237,8 +240,8 @@ function populateMetadataSection() {
 
   // Timestamps come back as ms-since-epoch numbers (or null for very
   // old configs).  Format with the user's locale conventions.
-  let installDate = gScript.installTime
-      ? new Date(gScript.installTime).toLocaleString()
+  let installDate = gScript._installTime
+      ? new Date(gScript._installTime).toLocaleString()
       : "—";
   let lastUpdate = gScript.modifiedDate
       ? gScript.modifiedDate.toLocaleString()
@@ -378,6 +381,37 @@ function populateBehaviourSection() {
     default:                              autoVal = "default"; break;
   }
   autoRadio.value = autoVal;
+
+  // A script that can never update has nothing to choose here: say why
+  // instead, as the Add-ons Manager hides its own Automatic Updates control
+  // then.  (Forced, so that merely being disabled doesn't count.)
+  let cannotUpdate = !gScript.isRemoteUpdateAllowed(true);
+  let never = document.getElementById("behave-autoupdate-never");
+  autoRadio.hidden = cannotUpdate;
+  never.hidden = !cannotUpdate;
+  if (cannotUpdate) {
+    let bundle = GM_CONSTANTS.localeStringBundle.createBundle(
+        GM_CONSTANTS.localeGreasemonkeyProperties);
+    let text;
+    if (gScript.updatesDisabled) {
+      try {
+        text = bundle.GetStringFromName("scriptPrefs.autoUpdate.oldVersion");
+      } catch (e) {
+        text = "Never: this is an old version of the script (its"
+            + " @downloadURL is \"none\").  To get updates, install the"
+            + " current version from the script's page.";
+      }
+    } else {
+      try {
+        text = bundle.GetStringFromName(
+            "scriptPrefs.autoUpdate.notUpdatable");
+      } catch (e) {
+        text = "Never: the script has no web address it can be updated"
+            + " from.";
+      }
+    }
+    setLabel("behave-autoupdate-never", text);
+  }
 
   // Position dropdown — populate "1 of N" through "N of N", select the
   // current index.  This is the TM-style "Execution position" control.
