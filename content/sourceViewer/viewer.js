@@ -1,6 +1,7 @@
 /**
- * @file sourceViewer.js
+ * @file sourceViewer/viewer.js
  * @overview Read-only, syntax-highlighted viewer for user-script source.
+ *   Colours live in theme.js, loaded first.
  *
  * Loaded as a chrome XHTML document in a browser tab via
  *   chrome://greasemonkey/content/sourceViewer.xhtml?path=<encoded OS path>
@@ -96,7 +97,7 @@ function GM_sourceViewerLoad() {
     gBundle = null;
   }
 
-  applyViewerTheme(document.body);
+  SvTheme.init(document.body, svString);
 
   let path = readPathFromQuery();
   if (!path) {
@@ -119,7 +120,7 @@ function GM_sourceViewerLoad() {
   let pathLabel = document.getElementById("gm-sv-path");
   if (pathLabel) {
     pathLabel.textContent = path;
-    document.getElementById("gm-sv-status").removeAttribute("hidden");
+    pathLabel.title = path;
   }
 
   // Read the file as UTF-8, then render.  OS.File works in the chrome
@@ -261,31 +262,6 @@ function mountTextareaFallback(aText, aHighlighterMissing) {
 }
 
 /**
- * Resolves a theme ("light"/"dark") and applies it as a class on the target.
- * "auto" follows the host prefers-color-scheme when the build supports it,
- * otherwise it defaults to light.
- * @param {Element} aTarget
- * @returns {void}
- */
-function applyViewerTheme(aTarget) {
-  if (!aTarget) {
-    return;
-  }
-  let resolved = "light";
-  try {
-    let mql = window.matchMedia("(prefers-color-scheme: dark)");
-    if (mql && mql.matches) {
-      resolved = "dark";
-    }
-  } catch (e) {
-    resolved = "light";
-  }
-  aTarget.classList.remove("theme-light");
-  aTarget.classList.remove("theme-dark");
-  aTarget.classList.add("theme-" + resolved);
-}
-
-/**
  * Shows a short message in the status strip's note slot (and reveals the
  * strip if it was hidden).
  * @param {string} aMessage
@@ -373,7 +349,7 @@ function setupFind() {
   input.setAttribute("placeholder",
       svString("sourceViewer.find.placeholder", "Find"));
 
-  // A visible "Find" button in the status strip is the reliable way to open
+  // A visible "Find" button in the toolbar is the reliable way to open
   // the bar: in a chrome page hosted in a tab, Ctrl+F may be claimed by the
   // browser's own (CodeMirror-blind) findbar, so we don't depend on it.
   let openBtn = document.getElementById("gm-sv-find-open");

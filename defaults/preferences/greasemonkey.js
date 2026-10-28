@@ -184,6 +184,9 @@ pref("extensions.greasemonkey.requireTimeoutUpdates", true);
 pref("extensions.greasemonkey.showGrantsWarning", true);
 pref("extensions.greasemonkey.sniffGrants", false);
 pref("extensions.greasemonkey.sortBy", "uiState,name");
+// Source viewer colours: "auto" (follow the browser's toolbars), "light" or
+// "dark".  Set from the viewer's toolbar.
+pref("extensions.greasemonkey.sourceViewer.theme", "auto");
 pref("extensions.greasemonkey.sync.enabled", true);
 pref("extensions.greasemonkey.sync.values", false);
 pref("extensions.greasemonkey.sync.values.deleteNonExistentValues", false);

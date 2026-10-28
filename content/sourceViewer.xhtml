@@ -8,11 +8,11 @@
 
   XHTML (not XUL) so CodeMirror's document.createElement() calls produce HTML
   elements and it can render.  All visible text is set at runtime from
-  sourceViewer.js (with English fallbacks), so this file needs no DTD.
+  sourceViewer/*.js (with English fallbacks), so this file needs no DTD.
 
   The first stylesheet is the browser's own CodeMirror structural CSS (same
-  chrome path on Pale Moon 34 and Basilisk 52); sourceViewer.css layers the
-  light/dark token colours on top.
+  chrome path on Pale Moon 35 and Basilisk); sourceViewer.css layers the
+  light/dark colours on top.
 -->
 <html xmlns="http://www.w3.org/1999/xhtml">
 <head>
@@ -23,30 +23,44 @@
   <link rel="stylesheet" type="text/css"
     href="chrome://greasemonkey/skin/sourceViewer.css"/>
   <script type="application/javascript"
-    src="chrome://greasemonkey/content/sourceViewer.js"></script>
+    src="chrome://greasemonkey/content/sourceViewer/theme.js"></script>
+  <script type="application/javascript"
+    src="chrome://greasemonkey/content/sourceViewer/viewer.js"></script>
 </head>
 <body class="theme-light">
-  <!-- CodeMirror (or the textarea fallback) is mounted into this div. -->
-  <div id="gm-sv-host"></div>
-
-  <!-- Find bar (overlay, top-right).  Opened with Ctrl+F when CodeMirror is
-       active; sourceViewer.js searches the full document model and drives the
-       selection (CodeMirror virtualises its DOM, so the browser's native find
-       can't see off-screen lines).  The placeholder text is set at runtime. -->
-  <div id="gm-sv-find" hidden="hidden">
-    <input id="gm-sv-find-input" type="text"/>
-    <span id="gm-sv-find-count"></span>
-    <button id="gm-sv-find-prev" type="button" title="Previous">&#x25B2;</button>
-    <button id="gm-sv-find-next" type="button" title="Next">&#x25BC;</button>
-    <button id="gm-sv-find-close" type="button" title="Close">&#x2715;</button>
+  <!-- Toolbar: what is shown, Find, and the Auto / Light / Dark switch. -->
+  <div id="gm-sv-toolbar">
+    <span id="gm-sv-path"></span>
+    <button id="gm-sv-find-open" type="button" hidden="hidden"></button>
+    <span id="gm-sv-theme" role="group">
+      <button type="button" data-mode="auto" aria-pressed="false"></button>
+      <button type="button" data-mode="light" aria-pressed="false"></button>
+      <button type="button" data-mode="dark" aria-pressed="false"></button>
+    </span>
   </div>
 
-  <!-- Thin status strip; hidden until there is something to show (the path,
-       or a "plain text" / read-error note). -->
+  <div id="gm-sv-main">
+    <!-- CodeMirror (or the textarea fallback) is mounted into this div. -->
+    <div id="gm-sv-host"></div>
+
+    <!-- Find bar (overlay, top-right of the code).  Opened with Ctrl+F or
+         the toolbar's Find button when CodeMirror is active; viewer.js
+         searches the full document model and drives the selection
+         (CodeMirror virtualises its DOM, so the browser's native find can't
+         see off-screen lines).  The placeholder text is set at runtime. -->
+    <div id="gm-sv-find" hidden="hidden">
+      <input id="gm-sv-find-input" type="text"/>
+      <span id="gm-sv-find-count"></span>
+      <button id="gm-sv-find-prev" type="button" title="Previous">&#x25B2;</button>
+      <button id="gm-sv-find-next" type="button" title="Next">&#x25BC;</button>
+      <button id="gm-sv-find-close" type="button" title="Close">&#x2715;</button>
+    </div>
+  </div>
+
+  <!-- Thin status strip; hidden until there is a note to show ("plain
+       text", a read error). -->
   <div id="gm-sv-status" hidden="hidden">
-    <span id="gm-sv-path"></span>
     <span id="gm-sv-note"></span>
-    <button id="gm-sv-find-open" type="button" hidden="hidden"></button>
   </div>
 </body>
 </html>
