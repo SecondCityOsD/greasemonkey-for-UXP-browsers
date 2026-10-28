@@ -102,6 +102,23 @@
 * Messages about ignored metadata no longer garble values that contain
   `%2`-like sequences, such as URLs with `%20`.
 
+**Source viewer**
+* **A dark theme that follows the browser.**  The viewer's dark colours
+  were tied to Pale Moon's "Web Page Color Scheme" setting, which themes
+  don't change, so they almost never showed.  When they did, most of the
+  code kept its light-theme colours and the find bar stayed light.
+  - A new toolbar has **Auto / Light / Dark** buttons.  Auto follows the
+    browser's own toolbars, so a dark complete or lightweight theme makes
+    the viewer dark, and it switches as soon as the theme does.
+  - The choice is remembered (`extensions.greasemonkey.sourceViewer.theme`)
+    and applies to every open viewer.
+  - Both colour sets are complete (VS Code's Light+ and Dark+), scrollbars
+    included: the viewer now draws its own, since this browser can't
+    recolour native ones and they stayed light in Dark.
+* The file's location moved from the bottom strip to the new toolbar,
+  next to Find.  The strip now only appears for a note, such as "shown as
+  plain text".
+
 **about:addons "User Scripts" pane**
 * **Homepage links go to the right pages.**  For a script that declares no
   homepage, Greasemonkey guessed one.  It tried the `@namespace` first,
