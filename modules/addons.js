@@ -210,15 +210,21 @@ function ScriptAddonFactoryById(aId) {
 function ScriptAddon(aScript) {
   this._script = aScript;
 
+  // The Homepage link goes to the script's page on its host (GreasyFork
+  // etc.), where its versions and feedback live; the author's name links to
+  // their own site: the declared homepage, else a web-address @namespace.
+  // With neither, the Add-ons Manager links the name to homepageURL.
   if (this._script.author) {
     this.creator = {
       "name": this._script.author,
-      "url": this._script.homepageURL,
+      "url": this._script.declaredHomepageURL || this._script.namespaceURL,
     };
   }
+  // The detail pane shows its own Contribute button for this.
+  this.contributionURL = this._script.contributionURL;
   this.description = this._script.localized.description;
   this.forceUpdate = false;
-  this.homepageURL = this._script.homepageURL;
+  this.homepageURL = this._script.scriptPageURL || this._script.homepageURL;
   this.iconURL = this._script.icon && this._script.icon.fileURL;
   this.id = aScript.id + GM_CONSTANTS.scriptIDSuffix;
   this.name = this._script.localized.name;
@@ -253,6 +259,7 @@ ScriptAddon.prototype.type = GM_CONSTANTS.scriptAddonType;
 ScriptAddon.prototype.version = null;
 
 // Optional attributes.
+ScriptAddon.prototype.contributionURL = null;
 ScriptAddon.prototype.description = null;
 
 // Private and custom attributes.
