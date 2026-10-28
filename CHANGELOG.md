@@ -69,6 +69,18 @@
   `false`) came back as `null`, and a context holding a Promise stopped the
   callback from running at all.
 
+**Dependencies and backups**
+* **`@require` / `@resource` / `@icon` addresses survive a restart.**
+  Greasemonkey saved only each dependency's file name.  After a restart,
+  the Options window showed "—" for `@require`, and **backups left out
+  every dependency file**, so the 3.9 offline restore only worked until
+  the first restart.  config.xml now also keeps each dependency's address
+  and pinned hash.
+* The first start fills them in for scripts you already have, from each
+  script's own metadata.  A script whose dependency lines changed after
+  its dependencies were downloaded is skipped; its next update fills them
+  in.  Older versions ignore the new attributes.
+
 **Compatibility**
 * Pale Moon 35 is now within the declared compatibility range
   (`maxVersion 35.*`).

@@ -65,6 +65,43 @@ Cu.import("chrome://greasemonkey-modules/content/util.js");
 
 const UPDATE_META_STATUS_FAIL = "fail";
 
+// A dependency's pinned hash as kept in config.xml: "<algo>=<hex>".
+const INTEGRITY_ATTRIBUTE_REGEXP = /^(sha256|sha384|sha512)=([0-9a-f]+)$/;
+
+/**
+ * Writes a @require / @resource dependency's download URL and pinned hash
+ * onto its config.xml node.  Without them, a restart left the Options
+ * window, backups and later integrity checks with only a file name.
+ * Older versions ignore these attributes.
+ *
+ * @param {Element}          aNode       - The <Require> / <Resource> node.
+ * @param {ScriptDependency} aDependency
+ */
+function setDependencyAttributes(aNode, aDependency) {
+  if (aDependency._downloadURL) {
+    aNode.setAttribute("url", aDependency._downloadURL);
+  }
+  if (aDependency._integrity) {
+    aNode.setAttribute("integrity",
+        aDependency._integrity.algo + "=" + aDependency._integrity.hex);
+  }
+}
+
+/**
+ * Reads back what setDependencyAttributes() wrote; a missing or unknown
+ * value leaves the field empty.
+ *
+ * @param {ScriptDependency} aDependency
+ * @param {Element}          aNode       - The <Require> / <Resource> node.
+ */
+function getDependencyAttributes(aDependency, aNode) {
+  aDependency._downloadURL = aNode.getAttribute("url") || null;
+  let integrity = INTEGRITY_ATTRIBUTE_REGEXP.exec(
+      aNode.getAttribute("integrity") || "");
+  aDependency._integrity = integrity
+      ? { "algo": integrity[1], "hex": integrity[2] } : null;
+}
+
 var gGreasemonkeyVersion = "unknown";
 Cu.import("resource://gre/modules/AddonManager.jsm");
 AddonManager.getAddonByID(GM_CONSTANTS.addonGUID, function (aAddon) {
@@ -835,6 +872,7 @@ Script.prototype._fromConfigNode = function (aNode) {
       case "Require":
         let scriptRequire = new ScriptRequire(this);
         scriptRequire._filename = childNode.getAttribute("filename");
+        getDependencyAttributes(scriptRequire, childNode);
         this._requires.push(scriptRequire);
         break;
       case "Resource":
@@ -843,6 +881,7 @@ Script.prototype._fromConfigNode = function (aNode) {
         scriptResource._filename = childNode.getAttribute("filename");
         scriptResource._mimetype = childNode.getAttribute("mimetype");
         scriptResource._name = childNode.getAttribute("name");
+        getDependencyAttributes(scriptResource, childNode);
         this._resources.push(scriptResource);
         break;
       case "UserExclude":
@@ -880,6 +919,70 @@ Script.prototype._fromConfigNode = function (aNode) {
   this.author = aNode.getAttribute("author") || "";
   this.copyright = aNode.getAttribute("copyright") || null;
   this.icon.fileURL = aNode.getAttribute("icon");
+  this.icon._downloadURL = aNode.getAttribute("iconurl") || null;
+
+  this._backfillDependencyUrls();
+};
+
+/**
+ * One-time migration for config.xml written before 3.10, which kept only
+ * each dependency's file name.  Restores the @require / @resource download
+ * URLs and pinned hashes, and the @icon URL, from the installed file's
+ * metadata block.
+ *
+ * Only when that block still describes exactly the installed dependencies,
+ * i.e. its hash equals the stored dependhash (set whenever dependencies are
+ * downloaded).  Otherwise the file was edited, or the hash predates a
+ * parser change (@icon64 joining it, for one).  Either way the next
+ * re-parse or update downloads the dependencies again, URLs included.
+ */
+Script.prototype._backfillDependencyUrls = function () {
+  let needed = this._requires.concat(this._resources).some(
+      function (aDependency) {
+        return !aDependency._downloadURL;
+      })
+      || (this.icon._filename && !this.icon._downloadURL);
+  if (!needed) {
+    return undefined;
+  }
+
+  let scope = {};
+  Cu.import("chrome://greasemonkey-modules/content/parseScript.js", scope);
+  let parsedScript = scope.parse(
+      this.textContent, GM_util.getUriFromUrl(this.downloadURL));
+  if (!parsedScript
+      || (GM_util.hash(parsedScript._rawMeta) != this._dependhash)) {
+    return undefined;
+  }
+
+  let changed = false;
+  function copyFrom(aTarget, aSource) {
+    if (aSource && aSource._downloadURL && !aTarget._downloadURL) {
+      aTarget._downloadURL = aSource._downloadURL;
+      aTarget._integrity = aSource._integrity;
+      changed = true;
+    }
+  }
+  // Same metadata, so the same @require order.
+  if (parsedScript._requires.length == this._requires.length) {
+    for (let i = 0, iLen = this._requires.length; i < iLen; i++) {
+      copyFrom(this._requires[i], parsedScript._requires[i]);
+    }
+  }
+  let parsedResources = Object.create(null);
+  parsedScript._resources.forEach(function (aResource) {
+    parsedResources[aResource._name] = aResource;
+  });
+  this._resources.forEach(function (aResource) {
+    copyFrom(aResource, parsedResources[aResource._name]);
+  });
+  if (this.icon._filename) {
+    copyFrom(this.icon, parsedScript.icon);
+  }
+
+  if (changed) {
+    this._changed("modified", null);
+  }
 };
 
 /**
@@ -943,6 +1046,7 @@ Script.prototype.toConfigNode = function (aDoc) {
     let requireNode = aDoc.createElement("Require");
 
     requireNode.setAttribute("filename", require._filename);
+    setDependencyAttributes(requireNode, require);
 
     scriptNode.appendChild(aDoc.createTextNode("\n\t\t"));
     scriptNode.appendChild(requireNode);
@@ -958,6 +1062,7 @@ Script.prototype.toConfigNode = function (aDoc) {
     resourceNode.setAttribute("filename", resource._filename);
     resourceNode.setAttribute("mimetype", resource._mimetype);
     resourceNode.setAttribute("name", resource._name);
+    setDependencyAttributes(resourceNode, resource);
 
     scriptNode.appendChild(aDoc.createTextNode("\n\t\t"));
     scriptNode.appendChild(resourceNode);
@@ -1018,6 +1123,10 @@ Script.prototype.toConfigNode = function (aDoc) {
   }
   if (this.icon.filename) {
     scriptNode.setAttribute("icon", this.icon.filename);
+  }
+  if (this.icon._downloadURL) {
+    // Where a downloaded @icon came from (see setDependencyAttributes).
+    scriptNode.setAttribute("iconurl", this.icon._downloadURL);
   }
   if (this.updateURL) {
     scriptNode.setAttribute("updateurl", this.updateURL);
