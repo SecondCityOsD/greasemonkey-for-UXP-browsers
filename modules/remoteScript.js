@@ -176,7 +176,7 @@ function cleanFilename(aFilename, aDefault) {
               GM_CONSTANTS.localeGreasemonkeyProperties)
               .GetStringFromName("error.remoteScript.notMakeValidFileName"));
     }
-    
+
     let match = filename.match(FILENAME_REGEXP);
     if (match) {
       filename = match[1].substr(0, gWindowsNameMaxLen) + match[2];
@@ -207,7 +207,7 @@ function filenameFromUri(aUri, aDefault) {
     url = aUri.QueryInterface(Ci.nsIURL);
     filename = url.fileName;
   } catch (e) {
-    dump("remoteScript - filenameFromUri:" + "\n" + e + "\n");
+    // Not a URL with a file name (data:): aDefault is used.
   }
 
   return cleanFilename(filename, aDefault);
@@ -398,23 +398,8 @@ DownloadListener.prototype = {
           + httpChannel.responseStatusText + "."
           + ((_headers != "") ? "\n" + _headers : "");
     } catch (e) {
-      try {
-        aRequest.QueryInterface(Ci.nsIFileChannel);
-        // No-op.
-        // If it got this far, aStatus is accurate.
-      } catch (e) {
-        dump("remoteScript - DownloadListener - onStopRequest" + "\n"
-            + "- aRequest is neither http nor file channel:" + "\n"
-            + aRequest + "\n");
-        for (let i in Ci) {
-          try {
-            aRequest.QueryInterface(Ci[i]);
-            dump("it is a: " + i + "\n");
-          } catch (e) {
-            // Ignore.
-          }
-        }
-      }
+      // Not an HTTP channel (a file: one, say): aStatusCode alone tells
+      // whether it worked.
     }
 
     if (error && this._errorsAreFatal) {
@@ -661,7 +646,6 @@ RemoteScript.prototype.install = function (aOldScript, aOnlyDependencies) {
 
     // Part 1/2 (script.js - Part 2/2).
     // The fix update icon in the AOM (after a change in the editor).
-    // ScriptAddonFactoryByScript(this.script, true);
     this.script._changed("modified", this.script.id);
   } else {
     // Completely install the new script.
@@ -689,7 +673,6 @@ RemoteScript.prototype.install = function (aOldScript, aOnlyDependencies) {
     this._baseName = file.leafName;
 
     this.script.setFilename(this._baseName, this._scriptFile.leafName);
-    // this._tempDir.moveTo(GM_util.scriptDir(), this._baseName);
     /*
     Part 3/3 (install.js - Part 1/3, remoteScript.js - Part 2/3).
     See #1919.
@@ -1269,8 +1252,6 @@ RemoteScript.prototype._downloadScriptCb = function (
     }
 
     if (!this.script) {
-      dump("RemoteScript._downloadScriptCb:" + " "
-          + "Finishing with error because no script was found." + "\n");
       // If we STILL don't have a script, this is a fatal error.
       return aCompletionCallback(false, "script", aStatus, aHeaders);
     }
@@ -1291,9 +1272,8 @@ RemoteScript.prototype._downloadScriptCb = function (
 
 /**
  * Reads the downloaded script file from disk and calls parseScript() on its
- * contents.  Called after onStopRequest confirms the download is complete.
- *
- * @returns {null} Always returns null (result goes via parseScript side effects).
+ * contents.  Called after onStopRequest confirms the download is complete;
+ * the result is left in this.script / this.errorMessage.
  */
 RemoteScript.prototype._parseScriptFile = function () {
   if (this.done) {
@@ -1301,16 +1281,14 @@ RemoteScript.prototype._parseScriptFile = function () {
   }
   let source = GM_util.getContents(this._scriptFile, null, true);
   if (!source) {
-    return null;
+    return undefined;
   }
-  let script = null;
   try {
     this.parseScript(source, false);
   } catch (e) {
-    dump("RemoteScript._parseScriptFile:" + "\n" + e + "\n");
+    GM_util.logError("RemoteScript._parseScriptFile: " + e, false,
+        e.fileName, e.lineNumber);
   }
-
-  return script;
 };
 
 /**
