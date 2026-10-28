@@ -54,7 +54,9 @@
     with the site in bold.  The tooltip shows the whole address and, when
     the script pins a hash for it, that the download is checked against
     it.  A line on top names the other sites it runs code from, since that
-    code gets all of the script's permissions;
+    code gets all of the script's permissions.  Each line ends in "…"
+    while its file downloads, then in its size.  Clicking a downloaded
+    code or text file opens it in the source viewer;
   - its `@antifeature` declarations (ads, tracking, mining…);
   - metadata it had to ignore, such as an unusable `@match`;
   - `@exclude-match` rules, with the other pages it doesn't run on;
@@ -67,6 +69,9 @@
   - You can click Install before the script's `@require` and `@resource`
     files have finished downloading.  The button then reads
     "Installing…", and the script installs as soon as they are all in.
+  - Those files, and the `@icon`, now download four at a time instead of
+    one after another.  The first one that fails still stops the install,
+    and cancels the rest.
   - The countdown is the `extensions.greasemonkey.installDelay` setting,
     in half-second steps; `0` turns it off.
 * Backups now save only the Greasemonkey settings you have changed.  They
@@ -74,6 +79,10 @@
   defaults into fixed choices.  A 3.9 backup still brings back the old
   2.5-second countdown (`installDelay` 5), which you can reset in
   about:config.
+* When Windows briefly locked a new script's folder during the install,
+  the retry meant for that case crashed itself.  The script was then
+  listed, but its files were left behind in a temporary folder.  The
+  retry now works.
 * **An unusable `@match` no longer stops the install.**  A pattern such as
   `@match https://example.com` (no path) used to abort it, even though the
   message said it was being ignored.  The same went for a bad

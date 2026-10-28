@@ -53,6 +53,21 @@
   word-wrap: break-word;
 }
 
+/* "…" while a dependency downloads, then its size. */
+.dependency-status {
+  margin-left: 0.5em;
+  color: GrayText;
+  font-style: normal;
+}
+
+/* A downloaded code or text dependency opens in the source viewer. */
+.dependency[viewable="true"] {
+  cursor: pointer;
+}
+.dependency[viewable="true"]:hover {
+  text-decoration: underline;
+}
+
 /* Every bit of text inside the textfield-styled #item-box uses the field
    text colour, so nothing goes invisible under a theme (the matches list
    was disappearing on some themes by inheriting an unset colour). */

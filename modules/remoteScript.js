@@ -13,7 +13,9 @@
  *     (@require, @resource, @icon) over HTTP.  The download is intentionally
  *     asynchronous and callback-driven.  Key methods:
  *       download(cb)        — fetch the .user.js then all dependencies
+ *                             (several at a time)
  *       downloadScript(cb)  — fetch only the .user.js
+ *       onDependency(cb)    — each dependency's download state
  *       parseScript(src)    — parse script source, discover dependencies
  *       install(old)        — move temp files into the scripts directory
  *       setScript(s, file)  — attach an existing Script for dependency re-fetch
@@ -64,6 +66,9 @@ Cu.import("chrome://greasemonkey-modules/content/util.js");
 
 
 const CALLBACK_IS_NOT_FUNCTION = "callback is not a function.";
+
+// How many @require / @resource / @icon files download at the same time.
+const DEPENDENCY_DOWNLOADS_AT_ONCE = 4;
 
 const TIMEOUT = 500;
 
@@ -457,11 +462,12 @@ function RemoteScript(aUrl) {
   this._cancelled = false;
   this._channels = [];
   this._dependencies = [];
-  this._metadata = null;
+  this._dependencyCallbacks = [];
+  this._dependencyReports = [];
   this._prefetchedDeps = null;
-  this._progress = [0, 0];
+  // Download progress per file, [0, 1]: the script, then each dependency.
+  this._progress = [0];
   this._progressCallbacks = [];
-  this._progressIndex = 0;
   this._scriptFile = null;
   this._scriptMetaCallbacks = [];
   this._silent = false;
@@ -583,7 +589,8 @@ RemoteScript.prototype.downloadScript = function (aCompletionCallback) {
 
   this._downloadFile(this._uri, this._scriptFile,
       this._downloadScriptCb.bind(this, aCompletionCallback),
-      true); // aErrorsAreFatal.
+      true, // aErrorsAreFatal.
+      0); // aProgressSlot.
 };
 
 /**
@@ -682,16 +689,19 @@ RemoteScript.prototype.install = function (aOldScript, aOnlyDependencies) {
         remoteScript.js
     */
     let _baseName = this._baseName;
+    // A local: the retry below runs without `this`, after this._tempDir
+    // has been cleared.
+    let tempDir = this._tempDir;
     try {
-      this._tempDir.moveTo(GM_util.scriptDir(), _baseName);
+      tempDir.moveTo(GM_util.scriptDir(), _baseName);
     } catch (e if (e.name == "NS_ERROR_FILE_IS_LOCKED")) {
       GM_util.timeout(function () {
         try {
-          this._tempDir.moveTo(GM_util.scriptDir(), _baseName);
+          tempDir.moveTo(GM_util.scriptDir(), _baseName);
         } catch (e) {
           throw new Error(
               "RemoteScript.install:" + "\n"
-              + e.description + "\n"
+              + e.message + "\n"
               + 'tempDir.moveTo: "' + _baseName + '"',
               e.fileName, e.lineNumber);
         }
@@ -763,6 +773,24 @@ RemoteScript.prototype.onProgress = function (aCallback) {
 RemoteScript.prototype.onScriptMeta = function (aCallback) {
   assertIsFunction(aCallback, "Script meta " + CALLBACK_IS_NOT_FUNCTION);
   this._scriptMetaCallbacks.push(aCallback);
+};
+
+/**
+ * Registers a callback for each dependency's download state, called with
+ * (remoteScript, "dependency", {dependency, file, size, state}).  state is
+ * "downloading", "done" (file: the temp copy, size: in bytes) or "skipped"
+ * (an @icon that couldn't be had).  States reported before the call are
+ * replayed to it at once, so a late caller (the install window opens while
+ * downloads run) misses none.
+ *
+ * @param {function} aCallback
+ */
+RemoteScript.prototype.onDependency = function (aCallback) {
+  assertIsFunction(aCallback, "Dependency " + CALLBACK_IS_NOT_FUNCTION);
+  for (let i = 0, iLen = this._dependencyReports.length; i < iLen; i++) {
+    aCallback(this, "dependency", this._dependencyReports[i]);
+  }
+  this._dependencyCallbacks.push(aCallback);
 };
 
 /**
@@ -927,7 +955,7 @@ RemoteScript.prototype.toString = function () {
 /**
  * Invokes all registered callbacks of the given type.
  *
- * @param {string} aType - "progress" or "scriptMeta".
+ * @param {string} aType - "progress", "scriptMeta" or "dependency".
  * @param {*}      aData - Data to pass as the third argument to each callback.
  * @throws {Error} If aType is not a recognised callback list name.
  */
@@ -958,37 +986,109 @@ RemoteScript.prototype.setPrefetchedDependencies = function (aMap) {
 };
 
 /**
- * Downloads the next pending dependency in sequence.
- * Called recursively until all dependencies are fetched, then invokes
- * aCompletionCallback(true, "dependencies").
+ * Downloads the dependencies, DEPENDENCY_DOWNLOADS_AT_ONCE at a time.
+ * Calls aCompletionCallback exactly once: (true, "dependencies") when all
+ * are in, or (false, "dependency") after the first fatal failure (which
+ * cleans up and so cancels the others) or a cancel().  The success call is
+ * always asynchronous, so a caller needn't special-case a script with no
+ * dependencies.
  *
- * @param {function} aCompletionCallback - Called when all dependencies are done.
+ * @param {function} aCompletionCallback
  */
 RemoteScript.prototype._downloadDependencies = function (aCompletionCallback) {
   if (this.done) {
     return undefined;
   }
 
-  this._progressIndex++;
-  if (this._progressIndex > this._dependencies.length) {
+  // Progress slot 0 is the script itself.
+  let queue = this._dependencies.map(function (aDependency, aIndex) {
+    return { "dependency": aDependency, "slot": aIndex + 1 };
+  });
+  let running = 0;
+  let completed = false;
+
+  let complete = function (aSuccess) {
+    if (completed) {
+      return undefined;
+    }
+    completed = true;
+    if (!aSuccess) {
+      aCompletionCallback(false, "dependency");
+      return undefined;
+    }
     this.done = true;
-    // Always call the callback asynchronously.
-    // That way, the caller doesn't have to take special care of the case
-    // where this is called synchronously when there is nothing to download.
     GM_util.timeout(function () {
       this._dispatchCallbacks("progress", 1);
       aCompletionCallback(true, "dependencies");
     }.bind(this), 0);
-    return undefined;
-  }
+  }.bind(this);
 
-  // Because _progressIndex includes the base script at 0,
-  // subtract one to get the dependency index.
-  var dependency = this._dependencies[this._progressIndex - 1];
-  let uri = GM_util.getUriFromUrl(dependency.downloadURL);
+  let onDependencyDone = function (aErrorMessage) {
+    running--;
+    if (this.done) {
+      // Cancelled, or another dependency failed (and cleaned up) first.
+      complete(false);
+    } else if (aErrorMessage) {
+      this.cleanup(aErrorMessage);
+      complete(false);
+    } else if ((queue.length == 0) && (running == 0)) {
+      complete(true);
+    } else {
+      startMore();
+    }
+  }.bind(this);
+
+  let startMore = function () {
+    while ((running < DEPENDENCY_DOWNLOADS_AT_ONCE) && (queue.length > 0)
+        && !this.done) {
+      let item = queue.shift();
+      running++;
+      this._downloadDependency(item.dependency, item.slot, onDependencyDone);
+    }
+  }.bind(this);
+
+  if (queue.length == 0) {
+    complete(true);
+  } else {
+    startMore();
+  }
+};
+
+/**
+ * Fetches one dependency into the temp directory (for a backup import,
+ * copies its archived bytes instead) and checks any pinned hash.  Reports
+ * its "dependency" events (see onDependency), then calls aDone(null), or
+ * aDone(message) for a fatal failure.  An @icon is never fatal: one that
+ * can't be had is skipped.
+ *
+ * @param {ScriptDependency} aDependency
+ * @param {number}           aSlot - Its slot in this._progress.
+ * @param {function}         aDone
+ */
+RemoteScript.prototype._downloadDependency = function (
+    aDependency, aSlot, aDone) {
+  let isIcon = aDependency instanceof ScriptIcon;
+  let uri = GM_util.getUriFromUrl(aDependency.downloadURL);
   let file = GM_util.getTempFile(
       this._tempDir, filenameFromUri(uri, GM_CONSTANTS.fileScriptName));
-  dependency.setFilename(file);
+  aDependency.setFilename(file);
+
+  let report = function (aState) {
+    let size = null;
+    if (aState == "done") {
+      try {
+        size = file.fileSize;
+      } catch (e) {
+        // Unknown size.
+      }
+    }
+    this._reportDependency({
+      "dependency": aDependency,
+      "file": file,
+      "size": size,
+      "state": aState,
+    });
+  }.bind(this);
 
   // S5: optionally refuse insecure (http/ftp) @require / @resource
   // downloads.  Off by default so legacy http dependencies keep working;
@@ -997,13 +1097,13 @@ RemoteScript.prototype._downloadDependencies = function (aCompletionCallback) {
   // the script sandbox).  An insecure @icon is non-fatal and just skipped.
   if (GM_prefRoot.getValue("requireSecureDependencies", false)
       && ((uri.scheme == "http") || (uri.scheme == "ftp"))) {
-    if (dependency instanceof ScriptIcon) {
-      this._downloadDependencies(aCompletionCallback);
+    if (isIcon) {
+      report("skipped");
+      aDone(null);
       return undefined;
     }
-    this.cleanup("RemoteScript: refusing insecure dependency "
+    aDone("RemoteScript: refusing insecure dependency "
         + uri.spec + " (requireSecureDependencies is enabled).");
-    aCompletionCallback(false, "dependency");
     return undefined;
   }
 
@@ -1014,44 +1114,50 @@ RemoteScript.prototype._downloadDependencies = function (aCompletionCallback) {
   // spike memory) — no network, and long-dead URLs keep working.  Any
   // failure falls through to a normal download.
   let prefetched = this._prefetchedDeps
-      && this._prefetchedDeps[dependency.downloadURL];
+      && this._prefetchedDeps[aDependency.downloadURL];
   if (prefetched && prefetched.file && prefetched.file.exists()) {
     try {
       if (file.exists()) {
         file.remove(false);
       }
       prefetched.file.copyTo(file.parent, file.leafName);
-      if (dependency.setCharset) {
-        dependency.setCharset(prefetched.charset || null);
+      if (aDependency.setCharset) {
+        aDependency.setCharset(prefetched.charset || null);
       }
-      if (dependency.setMimetype && prefetched.mimetype) {
-        dependency.setMimetype(prefetched.mimetype);
+      if (aDependency.setMimetype && prefetched.mimetype) {
+        aDependency.setMimetype(prefetched.mimetype);
       }
-      this._downloadDependencies(aCompletionCallback);
+      report("done");
+      aDone(null);
       return undefined;
     } catch (e) {
       GM_util.logError(
           "RemoteScript: archived dependency restore failed for "
-          + dependency.downloadURL + " - falling back to download: " + e,
+          + aDependency.downloadURL + " - falling back to download: " + e,
           false);
     }
   }
 
-  function dependencyDownloadComplete(aChannel, aSuccess, aErrorMessage) {
+  let downloadComplete = function (aChannel, aSuccess, aErrorMessage) {
+    if (this.done) {
+      // Cancelled meanwhile; the temp files are going away.
+      aDone(null);
+      return undefined;
+    }
     if (!aSuccess) {
-      if (dependency instanceof ScriptIcon) {
-        // Ignore the failure to download the icon.
+      if (isIcon) {
+        report("skipped");
+        aDone(null);
       } else {
-        this.cleanup(aErrorMessage);
-        aCompletionCallback(aSuccess, "dependency");
-        return undefined;
+        aDone(aErrorMessage);
       }
+      return undefined;
     }
-    if (dependency.setCharset) {
-      dependency.setCharset(aChannel.contentCharset || null);
+    if (aDependency.setCharset) {
+      aDependency.setCharset(aChannel.contentCharset || null);
     }
-    if (dependency.setMimetype) {
-      dependency.setMimetype(aChannel.contentType);
+    if (aDependency.setMimetype) {
+      aDependency.setMimetype(aChannel.contentType);
     }
     // S6/S16: when the script pinned an integrity hash for this dependency,
     // verify the downloaded bytes before accepting them.  A mismatch means
@@ -1059,22 +1165,22 @@ RemoteScript.prototype._downloadDependencies = function (aCompletionCallback) {
     // @require/@resource (would otherwise run/serve attacker-controlled
     // bytes); a bad @icon is simply dropped.  Icons never carry a pinned
     // hash, so in practice only @require/@resource reach this check.
-    if (dependency._integrity) {
+    if (aDependency._integrity) {
       let matched = false;
       try {
-        matched = (hashFileHex(file, dependency._integrity.algo)
-            === dependency._integrity.hex);
+        matched = (hashFileHex(file, aDependency._integrity.algo)
+            === aDependency._integrity.hex);
       } catch (e) {
         matched = false;
         GM_util.logError("RemoteScript: integrity check could not run for "
-            + dependency.downloadURL + ": " + e, false);
+            + aDependency.downloadURL + ": " + e, false);
       }
-      if (!matched && !(dependency instanceof ScriptIcon)) {
+      if (!matched && !isIcon) {
         // The technical detail goes to the console; the user gets a
         // sentence.  (%2 is filled first so a "%2x" in the URL survives.)
         GM_util.logError("RemoteScript: integrity mismatch for "
-            + dependency.downloadURL + " (expected "
-            + dependency._integrity.algo + "=" + dependency._integrity.hex
+            + aDependency.downloadURL + " (expected "
+            + aDependency._integrity.algo + "=" + aDependency._integrity.hex
             + ").", false);
         let message;
         try {
@@ -1087,19 +1193,34 @@ RemoteScript.prototype._downloadDependencies = function (aCompletionCallback) {
               + " on its server; the script's author needs to update the"
               + " pin.";
         }
-        this.cleanup(message
-            .replace("%2", dependency._integrity.algo)
-            .replace("%1", dependency.downloadURL));
-        aCompletionCallback(false, "dependency");
+        aDone(message
+            .replace("%2", aDependency._integrity.algo)
+            .replace("%1", aDependency.downloadURL));
         return undefined;
       }
     }
-    this._downloadDependencies(aCompletionCallback);
-  }
+    report("done");
+    aDone(null);
+  }.bind(this);
 
-  this._downloadFile(
-      uri, file, dependencyDownloadComplete.bind(this),
-      !(dependency instanceof ScriptIcon)); // aErrorsAreFatal.
+  report("downloading");
+  this._downloadFile(uri, file, downloadComplete, !isIcon, aSlot);
+  if (this.done) {
+    // _downloadFile refused the URL (unsafe scheme) and cleaned up without
+    // starting a download, so no callback will report back.
+    aDone(null);
+  }
+};
+
+/**
+ * Records a dependency's state for onDependency() callers, present and to
+ * come, and tells the present ones.
+ *
+ * @param {object} aReport - {dependency, file, size, state}.
+ */
+RemoteScript.prototype._reportDependency = function (aReport) {
+  this._dependencyReports.push(aReport);
+  this._dispatchCallbacks("dependency", aReport);
 };
 
 /**
@@ -1115,9 +1236,11 @@ RemoteScript.prototype._downloadDependencies = function (aCompletionCallback) {
  * @param {nsIFile}  aFile               - Destination temp file.
  * @param {function} aCompletionCallback - Called with (channel, success, errMsg, status, headers).
  * @param {boolean}  aErrorsAreFatal     - Passed through to the DownloadListener.
+ * @param {number}   aProgressSlot       - Its slot in this._progress: 0 for
+ *   the script itself, which is also parsed as it arrives.
  */
 RemoteScript.prototype._downloadFile = function (
-    aUri, aFile, aCompletionCallback, aErrorsAreFatal) {
+    aUri, aFile, aCompletionCallback, aErrorsAreFatal, aProgressSlot) {
   aUri = aUri.QueryInterface(Ci.nsIURI);
   aFile = aFile.QueryInterface(Ci.nsIFile);
   aCompletionCallback = aCompletionCallback || function () {};
@@ -1181,8 +1304,8 @@ RemoteScript.prototype._downloadFile = function (
   }
   this._channels.push(channel);
   let dsl = new DownloadListener(
-      this._progressIndex == 0, // aTryToParse.
-      this._downloadFileProgress.bind(this),
+      aProgressSlot == 0, // aTryToParse.
+      this._downloadFileProgress.bind(this, aProgressSlot),
       aCompletionCallback,
       aFile,
       aUri,
@@ -1196,12 +1319,13 @@ RemoteScript.prototype._downloadFile = function (
  * Updates the per-file progress slot and dispatches the aggregate progress
  * (mean of all slots) to registered progress callbacks.
  *
+ * @param {number}     aSlot         - The file's slot in this._progress.
  * @param {nsIChannel} aChannel      - The channel that reported progress (unused).
  * @param {number}     aFileProgress - Progress fraction [0, 1] for this file.
  */
 RemoteScript.prototype._downloadFileProgress = function (
-    aChannel, aFileProgress) {
-  this._progress[this._progressIndex] = aFileProgress;
+    aSlot, aChannel, aFileProgress) {
+  this._progress[aSlot] = aFileProgress;
   let progress = this._progress.reduce(function (a, b) {
     return a + b;
   }) / this._progress.length;
@@ -1297,8 +1421,9 @@ RemoteScript.prototype._parseScriptFile = function () {
  */
 RemoteScript.prototype._postParseScript = function () {
   this._dependencies = this.script.dependencies;
-  this._progress = [];
+  // Slot 0, the script, keeps its progress: this runs while it downloads.
+  this._progress = [this._progress[0] || 0];
   for (let i = 0, iLen = this._dependencies.length; i < iLen; i++) {
-    this._progress[i] = 0;
+    this._progress.push(0);
   }
 };
