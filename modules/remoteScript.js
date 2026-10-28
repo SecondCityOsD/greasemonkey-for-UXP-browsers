@@ -894,8 +894,10 @@ RemoteScript.prototype.showSource = function (aBrowser) {
   // rather than the browser's raw file:// view, so the user gets syntax
   // highlighting, line numbers and find while reviewing before install.  The
   // viewer falls back to plain read-only text if CodeMirror can't load.
+  // Its toolbar shows the address the script came from.
   let viewerUrl = "chrome://greasemonkey/content/sourceViewer.xhtml?path="
-      + encodeURIComponent(this._scriptFile.path);
+      + encodeURIComponent(this._scriptFile.path)
+      + "&url=" + encodeURIComponent(this._url);
   let tab = tabBrowser.addTab(viewerUrl);
   tabBrowser.selectedTab = tab;
 

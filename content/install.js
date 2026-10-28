@@ -185,7 +185,7 @@ function onDependency(aRemoteScript, aEventType, aReport) {
       entry.line.setAttribute("tooltiptext", entry.tooltip + "\n"
           + installString("install.dependency.view", "Click to view it."));
       entry.line.addEventListener("click", function () {
-        viewDependencyFile(aReport.file);
+        viewDependencyFile(aReport.file, aReport.dependency.downloadURL);
       }, false);
     }
   }
@@ -195,8 +195,10 @@ function onDependency(aRemoteScript, aEventType, aReport) {
  * Opens a downloaded dependency in the source viewer, in a tab of the
  * browser window, which comes to the front.  (This window keeps its
  * place, and its countdown starts again when it gets the focus back.)
+ * @param {nsIFile} aFile - The downloaded copy.
+ * @param {string} aUrl - Where it was downloaded from, for the toolbar.
  */
-function viewDependencyFile(aFile) {
+function viewDependencyFile(aFile, aUrl) {
   let browserWindow = GM_util.getBrowserWindow();
   if (!browserWindow) {
     return undefined;
@@ -204,7 +206,8 @@ function viewDependencyFile(aFile) {
   let tabBrowser = browserWindow.gBrowser;
   tabBrowser.selectedTab = tabBrowser.addTab(
       "chrome://greasemonkey/content/sourceViewer.xhtml?path="
-      + encodeURIComponent(aFile.path));
+      + encodeURIComponent(aFile.path)
+      + "&url=" + encodeURIComponent(aUrl));
   browserWindow.focus();
 }
 

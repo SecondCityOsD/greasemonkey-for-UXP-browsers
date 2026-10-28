@@ -30,9 +30,12 @@
     src="chrome://greasemonkey/content/sourceViewer/viewer.js"></script>
 </head>
 <body class="theme-light">
-  <!-- Toolbar: what is shown, Find, and the Auto / Light / Dark switch. -->
+  <!-- Toolbar: the script's name and version, the address it came from,
+       Find, and the Auto / Light / Dark switch. -->
   <div id="gm-sv-toolbar">
-    <span id="gm-sv-path"></span>
+    <span id="gm-sv-name"></span>
+    <span id="gm-sv-version"></span>
+    <span id="gm-sv-source"></span>
     <button id="gm-sv-find-open" type="button" hidden="hidden"></button>
     <span id="gm-sv-theme" role="group">
       <button type="button" data-mode="auto" aria-pressed="false"></button>
