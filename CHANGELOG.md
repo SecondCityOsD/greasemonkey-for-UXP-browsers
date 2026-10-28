@@ -49,6 +49,26 @@
 * Messages about ignored metadata no longer garble values that contain
   `%2`-like sequences, such as URLs with `%20`.
 
+**about:addons "User Scripts" pane**
+* **Options now opens for disabled scripts, from the list as well.**  The
+  Options button on a disabled script's row did nothing, and the detail
+  pane only worked through a separate stand-in button.  Both now use the
+  Add-ons Manager's own Options button, which opens the script's
+  Options window whether the script is enabled or not.
+
+**Script APIs**
+* **`GM_xmlhttpRequest` upload callbacks work.**  `upload.onload`,
+  `upload.onloadend`, `upload.onabort` and `upload.ontimeout` threw before
+  reaching the script; only `upload.onprogress` and `upload.onerror`
+  worked.  `upload.onloadstart` is now supported too.  Each upload callback
+  gets `loaded` / `total` / `lengthComputable` (the same fix as
+  Greasemonkey 4.14).
+* **`GM_xmlhttpRequest` returns `context` as the same object you passed**,
+  as Tampermonkey, Violentmonkey and Greasemonkey 4.14 do.  It used to be a
+  copy: class methods and identity were lost, a falsy context (`0`, `""`,
+  `false`) came back as `null`, and a context holding a Promise stopped the
+  callback from running at all.
+
 **Compatibility**
 * Pale Moon 35 is now within the declared compatibility range
   (`maxVersion 35.*`).

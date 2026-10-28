@@ -32,7 +32,6 @@
   <command id="cmd_userscript_execute_sooner" />
   <command id="cmd_userscript_execute_later" />
   <command id="cmd_userscript_execute_last" />
-  <command id="cmd_userscript_showItemPreferences" />
   <command id="cmd_userscript_manualFindItemUpdates" />
   <command id="cmd_userscript_forcedFindItemUpdates" />
   <command id="cmd_userscript_remove" />
@@ -214,29 +213,9 @@
   the user's configured external editor.
 -->
 <hbox id="detail-controls">
-  <!-- Greasemonkey-owned Options button.  Placed right after the AOM's
-       built-in #detail-prefs-btn.  We hide the AOM button for user
-       scripts and show this one instead, because the AOM button has
-       internal short-circuits (e.g. for `isActive == false`) that we
-       repeatedly tried and failed to override from the outside.  This
-       button has its own command + handler with no AOM dependence, so
-       the dialog opens for disabled scripts too.
-
-       NOTE: deliberately NOT in the .addon-control class.  Pale Moon's
-       extensions.js iterates `.addon-control` elements in the detail
-       pane and sets `disabled=true` on every one of them when the
-       currently-viewed add-on is inactive (userDisabled / softDisabled).
-       Even if we win every CSS battle and force the button visible, a
-       `disabled=true` button silently swallows clicks at the platform
-       level — which is why prior fixes still resulted in "the button
-       does nothing" for disabled scripts.  Dropping the class makes
-       AOM's iterator skip us entirely.  We use an explicit onclick
-       (instead of command=) for the same reason — command dispatch
-       is suppressed on disabled buttons even if our class were back. -->
-  <button id="gm-detail-prefs-btn" insertafter="detail-prefs-btn"
-    class="greasemonkey" hidden="true"
-    onclick="if (event.button == 0) gmDetailPrefsClicked(event);" />
-  <button id="gm-detail-edit-btn" insertafter="gm-detail-prefs-btn"
+  <!-- The built-in #detail-prefs-btn works for disabled scripts too: the
+       cmd_showItemPreferences override in addonsOverlay.js enables it. -->
+  <button id="gm-detail-edit-btn" insertafter="detail-prefs-btn"
     class="addon-control greasemonkey" hidden="true"
     label="&edit;" accesskey="&edit.accesskey;"
     tooltiptext="&edit.tooltip;"

@@ -384,12 +384,13 @@ function (aSafeUrl, aDetails, aReq) {
   setupRequestEvent(aReq, "readystatechange", waivedDetails);
   setupRequestEvent(aReq, "timeout", waivedDetails);
   if (waivedUpload) {
-    setupRequestEvent(aReq.upload, "abort", waivedUpload);
-    setupRequestEvent(aReq.upload, "error", waivedUpload);
-    setupRequestEvent(aReq.upload, "load", waivedUpload);
-    setupRequestEvent(aReq.upload, "loadend", waivedUpload);
-    setupRequestEvent(aReq.upload, "progress", waivedUpload);
-    setupRequestEvent(aReq.upload, "timeout", waivedUpload);
+    setupRequestEvent(aReq, "abort", waivedDetails, waivedUpload);
+    setupRequestEvent(aReq, "error", waivedDetails, waivedUpload);
+    setupRequestEvent(aReq, "load", waivedDetails, waivedUpload);
+    setupRequestEvent(aReq, "loadend", waivedDetails, waivedUpload);
+    setupRequestEvent(aReq, "loadstart", waivedDetails, waivedUpload);
+    setupRequestEvent(aReq, "progress", waivedDetails, waivedUpload);
+    setupRequestEvent(aReq, "timeout", waivedDetails, waivedUpload);
   }
 
   aReq.mozBackgroundRequest = !!aDetails.mozBackgroundRequest;
@@ -578,8 +579,8 @@ function (aSafeUrl, aDetails, aReq) {
 
 /**
  * Attaches a DOM event listener to aReq (or aReq.upload) for the given event
- * type, wired to call the corresponding "on<event>" callback from aDetails in
- * the content security context.
+ * type, wired to call the corresponding "on<event>" callback from aDetails
+ * (or aUpload) in the content security context.
  *
  * Security:
  *   - Xray wrappers are waived to read callback properties from aDetails.
@@ -591,6 +592,8 @@ function (aSafeUrl, aDetails, aReq) {
  * The responseState object passed to the callback mirrors the GM4 spec:
  *   { context, finalUrl, lengthComputable, loaded, readyState, response,
  *     responseHeaders, responseText, responseXML, status, statusText, total }
+ * It always describes the request itself (aReq), also for upload events,
+ * which additionally carry lengthComputable / loaded / total.
  *
  * responseXML is cloned into a new content-scoped Document so the script can
  * use DOM APIs on it.
@@ -598,17 +601,22 @@ function (aSafeUrl, aDetails, aReq) {
  * @param {Window}       aWrappedContentWin - Content window (for setTimeout/Error).
  * @param {Sandbox}      aSandbox           - Script sandbox (for Cu.cloneInto).
  * @param {string}       aFileURL           - Script URL (for Error objects).
- * @param {XMLHttpRequest|XMLHttpRequestUpload} aReq
- *   - The XHR (or upload object) to add the listener to.
+ * @param {XMLHttpRequest} aReq             - The request.  The listener goes on
+ *   aReq.upload when aUpload is given.
  * @param {string}       aEvent             - Event name (e.g. "load", "progress").
- * @param {object}       aDetails           - GM_xmlhttpRequest details object.
+ * @param {object}       aDetails           - GM_xmlhttpRequest details object
+ *   (pre-waived): url, context, and the request's callbacks.
+ * @param {object}       [aUpload]          - details.upload (pre-waived), for
+ *   an upload event; its callback is used instead of aDetails'.
  */
 GM_xmlHttpRequester.prototype.setupRequestEvent = function (
-    aWrappedContentWin, aSandbox, aFileURL, aReq, aEvent, aDetails) {
-  // aDetails arrives pre-waived from chromeStartRequest's call site;
-  // the redundant waive that used to live here ran once per event-
-  // type setup (8x for the main XHR, 6x for upload).  Hoisted out.
-  var eventCallback = aDetails["on" + aEvent];
+    aWrappedContentWin, aSandbox, aFileURL, aReq, aEvent, aDetails, aUpload) {
+  // aDetails / aUpload arrive pre-waived from chromeStartRequest's call
+  // site; the redundant waive that used to live here ran once per event-
+  // type setup (8x for the main XHR, 7x for upload).  Hoisted out.
+  let callbacks = aUpload || aDetails;
+  let callbackName = (aUpload ? "upload.on" : "on") + aEvent;
+  var eventCallback = callbacks["on" + aEvent];
   if (!eventCallback) {
     return undefined;
   }
@@ -618,7 +626,7 @@ GM_xmlHttpRequester.prototype.setupRequestEvent = function (
             GM_CONSTANTS.localeGreasemonkeyProperties)
             .GetStringFromName("error.xmlhttpRequest.callbackIsNotFunction")
             .replace("%1", aDetails.url)
-            .replace("%2", "on" + aEvent),
+            .replace("%2", callbackName),
         aFileURL, null);
   }
 
@@ -629,9 +637,14 @@ GM_xmlHttpRequester.prototype.setupRequestEvent = function (
     return undefined;
   }
 
-  aReq.addEventListener(aEvent, function (aEvt) {
+  // Handed back by reference, as Tampermonkey / Violentmonkey (and GM
+  // 4.14) do: identity, class instances and falsy values survive.  The
+  // structured clone used before lost them, and threw on a Promise, so
+  // the callback never ran.
+  let context = aDetails.context;
+
+  (aUpload ? aReq.upload : aReq).addEventListener(aEvent, function (aEvt) {
     var responseState = {
-      "context": aDetails.context || null,
       "finalUrl": null,
       "lengthComputable": null,
       "loaded": null,
@@ -698,42 +711,25 @@ GM_xmlHttpRequester.prototype.setupRequestEvent = function (
       }
     }
 
-    switch (aEvent) {
-      case "progress":
-        responseState.lengthComputable = aEvt.lengthComputable;
-        responseState.loaded = aEvt.loaded;
-        responseState.total = aEvt.total;
-        break;
-      case "error":
-        break;
-      default:
-        if (2 > aReq.readyState) {
-          break;
-        }
-        responseState.finalUrl = aReq.channel.URI.spec;
-        responseState.responseHeaders = aReq.getAllResponseHeaders();
-        responseState.status = aReq.status;
-        responseState.statusText = aReq.statusText;
-        break;
+    if (aUpload || (aEvent == "progress")) {
+      // Every upload event is a ProgressEvent, as is the request's own
+      // "progress".
+      responseState.lengthComputable = aEvt.lengthComputable;
+      responseState.loaded = aEvt.loaded;
+      responseState.total = aEvt.total;
+    } else if ((aEvent != "error") && (aReq.readyState >= 2)) {
+      responseState.finalUrl = aReq.channel.URI.spec;
+      responseState.responseHeaders = aReq.getAllResponseHeaders();
+      responseState.status = aReq.status;
+      responseState.statusText = aReq.statusText;
     }
 
-    responseState = Cu.cloneInto({
-      "context": responseState.context,
-      "finalUrl": responseState.finalUrl,
-      "lengthComputable": responseState.lengthComputable,
-      "loaded": responseState.loaded,
-      "readyState": responseState.readyState,
-      "response": responseState.response,
-      "responseHeaders": responseState.responseHeaders,
-      "responseText": responseState.responseText,
-      "responseXML": responseState.responseXML,
-      "status": responseState.status,
-      "statusText": responseState.statusText,
-      "total": responseState.total,
-    }, aSandbox, {
-      "cloneFunctions": true,
+    responseState = Cu.cloneInto(responseState, aSandbox, {
       "wrapReflectors": true,
     });
+    // Set after the clone, through the waiver, so the script gets its own
+    // object back rather than a copy (see `context` above).
+    Cu.waiveXrays(responseState).context = context;
 
     if (GM_util.windowIsClosed(aWrappedContentWin)) {
       try {
@@ -753,7 +749,7 @@ GM_xmlHttpRequester.prototype.setupRequestEvent = function (
     // which can be abused to get increased privileges.
     new XPCNativeWrapper(aWrappedContentWin, "setTimeout()")
       .setTimeout(function () {
-        eventCallback.call(aDetails, responseState);
+        eventCallback.call(callbacks, responseState);
       }, 0);
   }, false);
 };
