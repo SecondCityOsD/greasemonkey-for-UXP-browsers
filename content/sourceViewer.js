@@ -8,19 +8,20 @@
  * Opened from:
  *   - RemoteScript.showSource()  — the install-time "Show Script Source"
  *     preview (replaces the old raw file:// tab).
- *   - [Phase 2] the Add-ons Manager "View Source" command for an already
- *     installed user script.
+ *   - the install window's @require / @resource lines (install.js
+ *     viewDependencyFile), once that file has downloaded.
  *
  * Engine
  * ------
- * Reuses the browser's *bundled* CodeMirror directly.  Both supported
- * targets ship it at the same chrome path (verified against the installed
- * binaries):
- *   - Pale Moon 34 — packed in browser/palemoon.res
- *   - Basilisk 52  — browser/omni.ja
+ * Reuses the browser's *bundled* CodeMirror (5.16) directly.  Both
+ * supported targets ship it at the same chrome path (verified against the
+ * installed binaries, 2026-10-29):
+ *   - Pale Moon 35 — packed in browser/palemoon.res
+ *   - Basilisk     — browser/omni.ja
  *     chrome://devtools/content/sourceeditor/codemirror/codemirror.bundle.js
- * That bundle defines a global `CodeMirror` with the JavaScript mode baked
- * in, so we load it with the script loader and call CodeMirror() ourselves.
+ * Neither ships the split lib/codemirror.js layout.  The bundle defines a
+ * global `CodeMirror` with the JavaScript mode baked in, so we load it with
+ * the script loader and call CodeMirror() ourselves.
  * We deliberately do NOT use the DevTools `Editor` wrapper: it is a CommonJS
  * module (loadable only through the devtools `require()` loader) and drags in
  * toolbox dependencies that assume a DevTools host — neither of which we
@@ -61,19 +62,13 @@ Cu.import("resource://gre/modules/osfile.jsm");
 Cu.import("chrome://greasemonkey-modules/content/constants.js");
 Cu.import("chrome://greasemonkey-modules/content/util.js");
 
-/** Candidate URLs for the CodeMirror core.  The first that defines a global
- *  `CodeMirror` wins.  The bundle (Pale Moon 34 / Basilisk 52) ships the JS
- *  mode inside it; the split `lib/codemirror.js` fallback needs the mode
- *  loaded separately (handled below). */
-const CM_CORE_URLS = [
-  "chrome://devtools/content/sourceeditor/codemirror/codemirror.bundle.js",
-  "chrome://devtools/content/sourceeditor/codemirror/lib/codemirror.js",
-];
+/** The browser's CodeMirror bundle, JavaScript mode included. */
+const CM_BUNDLE_URL =
+    "chrome://devtools/content/sourceeditor/codemirror/codemirror.bundle.js";
 
-/** JS-mode URL, only needed when the split (non-bundle) core was loaded. */
-const CM_MODE_URLS = [
-  "chrome://devtools/content/sourceeditor/codemirror/mode/javascript/javascript.js",
-];
+/** Above this source size (chars), skip CodeMirror and use the textarea —
+ *  CodeMirror's per-line DOM gets sluggish on huge / minified files. */
+const SV_MAX_CM_BYTES = 1500000;
 
 /** The resolved CodeMirror constructor (or null when it couldn't load). */
 var gCM = null;
@@ -217,39 +212,20 @@ function renderSource(aText) {
 }
 
 /**
- * Loads the CodeMirror core (and, for the split layout, the JS mode) into
- * the page's global scope via the script loader.
+ * Loads the CodeMirror bundle into the page's global scope via the script
+ * loader.
  * @returns {boolean} true when a global CodeMirror is available.
  */
 function loadCodeMirror() {
-  if (gCM) {
-    return true;
-  }
-  for (let i = 0, iLen = CM_CORE_URLS.length; i < iLen; i++) {
-    try {
-      Services.scriptloader.loadSubScript(CM_CORE_URLS[i], window);
-      if (window.CodeMirror) {
-        gCM = window.CodeMirror;
-        break;
-      }
-    } catch (e) {
-      // Not at this URL on this build — try the next candidate.
-    }
-  }
   if (!gCM) {
-    return false;
-  }
-  // The bundle already includes the JS mode; only the split core needs it.
-  try {
-    if (gCM.modes && !gCM.modes.javascript) {
-      for (let j = 0, jLen = CM_MODE_URLS.length; j < jLen; j++) {
-        try {
-          Services.scriptloader.loadSubScript(CM_MODE_URLS[j], window);
-        } catch (e) { /* mode not present at this URL — try the next */ }
-      }
+    try {
+      Services.scriptloader.loadSubScript(CM_BUNDLE_URL, window);
+      gCM = window.CodeMirror || null;
+    } catch (e) {
+      // A build without DevTools: the textarea fallback takes over.
     }
-  } catch (e) { /* modes table not exposed — leave as-is */ }
-  return true;
+  }
+  return gCM !== null;
 }
 
 /**
@@ -344,10 +320,6 @@ function svString(aKey, aFallback) {
     return aFallback;
   }
 }
-
-/** Above this source size (chars), skip CodeMirror and use the textarea —
- *  CodeMirror's per-line DOM gets sluggish on huge / minified files. */
-const SV_MAX_CM_BYTES = 1500000;
 
 /**
  * True iff aPath is inside the user-scripts directory or the OS temp area —
