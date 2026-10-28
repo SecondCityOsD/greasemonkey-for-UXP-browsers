@@ -1,5 +1,29 @@
 ## Changelog
 
+#### 3.9.1 (unreleased)
+
+**Script updates**
+* **Updates no longer install without your consent.** After a manual
+  **Check for Updates** listed an update, Greasemonkey's own update check
+  (the scheduled one, or **Check now** in Greasemonkey Preferences) could
+  later install it anyway.  That included scripts whose Automatic Updates
+  was **Off**, and scripts with local edits, which were overwritten.
+  Greasemonkey's checks now install only what the browser's own rule
+  allows: the script's Automatic Updates setting, or **Update Add-ons
+  Automatically** when it's set to Default.  Anything else stays listed
+  under Available Updates.  This corrects the 3.9 entry below, which said
+  these protections applied unchanged.
+* **Update Now asks before overwriting a script you edited**, unless you
+  already agreed, either by switching its Automatic Updates back on (which
+  warns you) or by confirming "Overwrite with remote contents?" when finding
+  updates.  Cancelling keeps your edits, and the update stays available.
+* Update checks now notice edits made in an external editor straight away.
+  Before, they were only noticed on the next page load, so an update check
+  in between could overwrite them.
+* Scheduled checks are skipped while the browser-wide
+  `extensions.update.enabled` switch is off, just like the browser's own
+  add-on checks.  **Check now** still works.
+
 #### 3.9
 
 **about:addons "User Scripts" pane**

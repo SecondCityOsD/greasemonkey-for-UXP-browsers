@@ -16,14 +16,19 @@
  *
  * The scheduler ticks hourly (first tick a few minutes after startup, so it
  * never competes with session restore) and runs a sweep once the interval
- * has elapsed.  Sweeps drive the SAME pipeline as the Add-ons Manager
- * (ScriptAddon.findUpdates → Script.checkForRemoteUpdate), so per-script
- * "Automatic Updates" radios, the disabled-scripts / secure-scheme gates,
- * and the edited-script safety (local edits flip auto-update off) all keep
- * working unchanged.  ScriptAddon.findUpdates suppresses the AOM's own
- * periodic sweep so scripts aren't checked on two cadences; scheduler-driven
- * checks pass through via the _gmScheduledCheck flag, which is only ever set
- * around the synchronous portion of the findUpdates call below.
+ * has elapsed, unless the browser-wide extensions.update.enabled switch is
+ * off.  Sweeps drive the SAME check pipeline as the Add-ons Manager
+ * (ScriptAddon.findUpdates → Script.checkForRemoteUpdate), so the
+ * disabled-scripts / secure-scheme gates apply.  A found update is
+ * installed only under the platform's own background-update rule
+ * (PERM_CAN_UPGRADE + AddonManager.shouldAutoUpdate, i.e. the per-script
+ * "Automatic Updates" radio), and never over local edits the user hasn't
+ * agreed to lose.  Anything else stays listed in about:addons for the user.
+ *
+ * ScriptAddon.findUpdates suppresses the AOM's own periodic sweep so
+ * scripts aren't checked on two cadences; scheduler-driven checks pass
+ * through via the _gmScheduledCheck flag, which is only ever set around the
+ * synchronous portion of the findUpdates call below.
  *
  * Lifecycle: started from the service's profile-after-change startup and
  * stopped from its quit-application shutdown (components/greasemonkey.js).
@@ -93,9 +98,16 @@ var GM_updateScheduler = {
   /**
    * Hourly heartbeat: runs a sweep when the configured interval has
    * elapsed since the last one.  intervalDays <= 0 (or junk) disables
-   * scheduled checking entirely.
+   * scheduled checking entirely, and so does the browser-wide
+   * extensions.update.enabled switch, as it does for the platform's own
+   * background update check.  lastCheck isn't stamped while disabled, so
+   * re-enabling catches up on the next tick.
    */
   "tick": function () {
+    if (!AddonManager.updateEnabled) {
+      return undefined;
+    }
+
     let days = parseInt(GM_prefRoot.getValue("update.intervalDays", 1), 10);
     if (isNaN(days) || (days <= 0)) {
       return undefined;
@@ -121,10 +133,29 @@ var GM_updateScheduler = {
   /**
    * Stamps update.lastCheck and sweeps every installed script through the
    * standard update pipeline immediately.  Also called directly by the
-   * "Check now" button in the options dialog.
+   * "Check now" button in the options dialog.  That click is an explicit
+   * request, so it isn't subject to extensions.update.enabled, but it
+   * installs under exactly the same rule as a scheduled sweep.
    */
   "checkNow": function () {
     GM_prefRoot.setValue("update.lastCheck", String(Date.now()));
+
+    // The platform's background updater installs only when
+    // PERM_CAN_UPGRADE && AddonManager.shouldAutoUpdate(); mirror it.  An
+    // update that doesn't qualify stays listed in about:addons, where the
+    // user decides.  Local edits are checked too: ScriptInstall.install()
+    // would ask before overwriting them, and a timer must never prompt.
+    // findUpdates() has already switched Automatic Updates Off for any
+    // edit made since the last page load, so this is belt and braces.
+    let listener = {
+      "onUpdateAvailable": function (aAddon, aInstall) {
+        if ((aAddon.permissions & AddonManager.PERM_CAN_UPGRADE)
+            && AddonManager.shouldAutoUpdate(aAddon)
+            && !aAddon._script.hasUnacceptedLocalEdits()) {
+          aInstall.install();
+        }
+      },
+    };
 
     AddonManager.getAddonsByTypes(
         [GM_CONSTANTS.scriptAddonType],
@@ -136,15 +167,6 @@ var GM_updateScheduler = {
             if (!(addon.permissions & AddonManager.PERM_CAN_UPGRADE)) {
               continue;
             }
-            // Auto-install like the AOM background sweep would; every
-            // per-script gate (Automatic Updates radio, disabled-scripts
-            // pref, https-only) already ran inside checkForRemoteUpdate
-            // before onUpdateAvailable can fire.
-            let listener = {
-              "onUpdateAvailable": function (aAddon, aInstall) {
-                aInstall.install();
-              },
-            };
             addon._gmScheduledCheck = true;
             try {
               addon.findUpdates(

@@ -111,6 +111,9 @@ function Script(aConfigNode) {
   this._excludeMatches = [];
   this._matches = [];
   this._modifiedTime = null;
+  // File time the user agreed to lose to a remote copy (see
+  // acceptLocalEditsLoss()); in memory only.
+  this._editsLossAcceptedTime = null;
   this._name = GM_CONSTANTS.scriptType;
   this._namespace = "";
   this._noframes = false;
@@ -1161,6 +1164,83 @@ Script.prototype.isModified = function () {
 };
 
 /**
+ * @returns {number} The script file's current last-modified time, or the
+ *   last observed one if the file is missing.
+ */
+Script.prototype._fileModifiedTime = function () {
+  return this.fileExists(this.file)
+      ? this.file.lastModifiedTime : this._modifiedTime;
+};
+
+/**
+ * Reports whether the script file was changed after it was installed,
+ * without side effects.  Update code must use this rather than
+ * isModified(): that call consumes the change signal that
+ * Config.updateModifiedScripts() relies on to re-parse an edited script.
+ *
+ * @returns {string} "none"; "noticed" when isModified() has seen the
+ *   current file (and switched Automatic Updates Off at that moment); or
+ *   "unnoticed" when the file changed after isModified() last ran.
+ *   isModified() only runs on page loads, so an external editor can get
+ *   ahead of it.
+ */
+Script.prototype.localEditState = function () {
+  let fileTime = this._fileModifiedTime();
+  if (Math.max(fileTime, this._modifiedTime) <= this._installTime) {
+    return "none";
+  }
+  return (fileTime == this._modifiedTime) ? "noticed" : "unnoticed";
+};
+
+/**
+ * Whether replacing this script with a downloaded copy would discard
+ * local edits the user hasn't agreed to lose.  The user agrees by either:
+ *   - switching Automatic Updates back on after the edit was noticed (that
+ *     radio warns that the edits will be overwritten), or
+ *   - confirming a forced update check for the file as it is now
+ *     (acceptLocalEditsLoss()).
+ *
+ * @returns {boolean}
+ */
+Script.prototype.hasUnacceptedLocalEdits = function () {
+  let state = this.localEditState();
+  if (state == "none") {
+    return false;
+  }
+  if (this._editsLossAcceptedTime === this._fileModifiedTime()) {
+    return false;
+  }
+  return (state == "unnoticed")
+      || (this.checkRemoteUpdates == AddonManager.AUTOUPDATE_DISABLE);
+};
+
+/**
+ * Records that the user agreed to overwrite the current file with a
+ * remote copy.  Any later edit makes the agreement void.
+ */
+Script.prototype.acceptLocalEditsLoss = function () {
+  this._editsLossAcceptedTime = this._fileModifiedTime();
+};
+
+/**
+ * Applies isModified()'s rule (an edit switches Automatic Updates Off) to
+ * an edit isModified() hasn't seen yet, so no automatic update can replace
+ * it.  _modifiedTime is left alone, so the re-parse still happens on the
+ * next page load.
+ *
+ * @returns {boolean} True if the setting was changed.
+ */
+Script.prototype.switchOffAutoUpdateForUnnoticedEdits = function () {
+  if ((this.localEditState() != "unnoticed")
+      || (this.checkRemoteUpdates == AddonManager.AUTOUPDATE_DISABLE)) {
+    return false;
+  }
+  this.checkRemoteUpdates = AddonManager.AUTOUPDATE_DISABLE;
+  this._changed("modified", null);
+  return true;
+};
+
+/**
  * Determines whether a remote update check is permitted for this script.
  *
  * Conditions that prevent an update (unless aForced is true):
@@ -1504,10 +1584,14 @@ Script.prototype.shouldAutoUpdate = function () {
  * Initiates an asynchronous remote update check for this script.
  *
  * Short-circuits early (calling aCallback synchronously) when:
- *   - An update is already cached in this.availableUpdate.
  *   - No updateURL is set.
- *   - shouldAutoUpdate() returns false and aForced is false.
- *   - isRemoteUpdateAllowed(aForced) returns false.
+ *   - shouldAutoUpdate() returns false and neither aForced nor aManual is
+ *     set.
+ *   - An update is already cached in this.availableUpdate.
+ *
+ * The cached update is returned only after the auto-update gate.  An
+ * automatic caller (the update scheduler) must never be handed an update
+ * that an earlier manual check listed for the user to review.
  *
  * Otherwise fetches the .meta.js (or falls back to .user.js) via XHR and
  * delegates version comparison to checkRemoteVersion().
@@ -1518,10 +1602,6 @@ Script.prototype.shouldAutoUpdate = function () {
  * @param {boolean}  aManual   - If true, bypasses auto-update check only.
  */
 Script.prototype.checkForRemoteUpdate = function (aCallback, aForced, aManual) {
-  if (this.availableUpdate) {
-    return aCallback("updateAvailable");
-  }
-
   if (!this.updateURL || (this.updateURL == "null")
       || this.updateURL.trim().toLowerCase() === "none"
       || /\/none$/.test(this.updateURL)) {
@@ -1545,6 +1625,10 @@ Script.prototype.checkForRemoteUpdate = function (aCallback, aForced, aManual) {
       "updateStatus": "UPDATE_STATUS_NO_ERROR",
       "log": false,
     });
+  }
+
+  if (this.availableUpdate) {
+    return aCallback("updateAvailable");
   }
 
   let uri = GM_util.getUriFromUrl(this.updateURL).clone();
