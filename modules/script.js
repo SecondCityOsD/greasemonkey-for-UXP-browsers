@@ -65,6 +65,10 @@ Cu.import("chrome://greasemonkey-modules/content/util.js");
 
 const UPDATE_META_STATUS_FAIL = "fail";
 
+// Version of a <Script> entry's layout in config.xml; see _upgradeConfig().
+// 1: 3.10 (dependency URLs and hashes, updatesDisabled).
+const SCRIPT_CONFIG_VERSION = 1;
+
 // A dependency's pinned hash as kept in config.xml: "<algo>=<hex>".
 const INTEGRITY_ATTRIBUTE_REGEXP = /^(sha256|sha384|sha512)=([0-9a-f]+)$/;
 
@@ -172,6 +176,8 @@ function Script(aConfigNode) {
   this._broken = false;
   this._brokenMissingFiles = [];
   this._updateMetaStatus = "unknown";
+  // "@downloadURL none": this copy must never update (see updateURL).
+  this._updatesDisabled = false;
   this._updateURL = null;
   this._userExcludes = [];
   this._userIncludes = [];
@@ -640,12 +646,37 @@ Object.defineProperty(Script.prototype, "updateIsSecure", {
   "enumerable": true,
 });
 
+/**
+ * True when the script's metadata says this copy must not update
+ * ("@downloadURL none": GreasyFork serves old versions that way).
+ *
+ * @type {boolean}
+ */
+Object.defineProperty(Script.prototype, "updatesDisabled", {
+  "get": function Script_getUpdatesDisabled() {
+    return this._updatesDisabled;
+  },
+  "enumerable": true,
+});
+
+/**
+ * Where update checks look: the @updateURL, else the download URL.  Null
+ * when updatesDisabled, so every update path (isRemoteUpdateAllowed,
+ * checkForRemoteUpdate, the Add-ons Manager's PERM_CAN_UPGRADE) treats
+ * the script as not updatable, while downloadURL keeps the install URL.
+ *
+ * @type {string|null}
+ */
 Object.defineProperty(Script.prototype, "updateURL", {
   "get": function Script_getUpdateURL() {
+    if (this._updatesDisabled) {
+      return null;
+    }
     return this._updateURL || this.downloadURL;
   },
   "set": function Script_setUpdateURL(aUrl) {
-    this._updateURL = "" + aUrl;
+    // Not "" + aUrl: that stored the string "null" for a missing URL.
+    this._updateURL = aUrl ? "" + aUrl : null;
   },
   "configurable": true,
   "enumerable": true,
@@ -776,7 +807,9 @@ Script.prototype._fromConfigNode = function (aNode) {
   this.copyright = aNode.getAttribute("copyright") || null;
   this.downloadURL = aNode.getAttribute("installurl") || null;
   this.homepageURL = aNode.getAttribute("homepageurl") || null;
-  this.updateURL = aNode.getAttribute("updateurl") || null;
+  let updateURL = aNode.getAttribute("updateurl");
+  // Older versions could save the string "null" (see the updateURL setter).
+  this.updateURL = (updateURL != "null") ? updateURL : null;
 
   if (!this.fileExists(this.baseDirFile)) {
     return undefined;
@@ -920,68 +953,75 @@ Script.prototype._fromConfigNode = function (aNode) {
   this.copyright = aNode.getAttribute("copyright") || null;
   this.icon.fileURL = aNode.getAttribute("icon");
   this.icon._downloadURL = aNode.getAttribute("iconurl") || null;
+  this._updatesDisabled = aNode.getAttribute("updatesDisabled") == "true";
 
-  this._backfillDependencyUrls();
+  let configVersion = parseInt(aNode.getAttribute("configVersion"), 10) || 0;
+  if (configVersion < SCRIPT_CONFIG_VERSION) {
+    this._upgradeConfig(configVersion);
+  }
 };
 
 /**
- * One-time migration for config.xml written before 3.10, which kept only
- * each dependency's file name.  Restores the @require / @resource download
- * URLs and pinned hashes, and the @icon URL, from the installed file's
- * metadata block.
+ * Brings a config.xml entry written by an older version up to
+ * SCRIPT_CONFIG_VERSION.  Version 1 (3.10) re-reads the installed file's
+ * metadata block for what older versions didn't store:
+ *   - "@downloadURL none" (updatesDisabled);
+ *   - the dependency URLs and pinned hashes (see _copyDependencyUrlsFrom).
+ * The entry is saved afterwards with the new version, so this runs once.
  *
- * Only when that block still describes exactly the installed dependencies,
- * i.e. its hash equals the stored dependhash (set whenever dependencies are
- * downloaded).  Otherwise the file was edited, or the hash predates a
- * parser change (@icon64 joining it, for one).  Either way the next
- * re-parse or update downloads the dependencies again, URLs included.
+ * @param {number} aFromVersion - The entry's configVersion (0 if absent).
  */
-Script.prototype._backfillDependencyUrls = function () {
-  let needed = this._requires.concat(this._resources).some(
-      function (aDependency) {
-        return !aDependency._downloadURL;
-      })
-      || (this.icon._filename && !this.icon._downloadURL);
-  if (!needed) {
-    return undefined;
-  }
-
+Script.prototype._upgradeConfig = function (aFromVersion) {
   let scope = {};
   Cu.import("chrome://greasemonkey-modules/content/parseScript.js", scope);
   let parsedScript = scope.parse(
       this.textContent, GM_util.getUriFromUrl(this.downloadURL));
-  if (!parsedScript
-      || (GM_util.hash(parsedScript._rawMeta) != this._dependhash)) {
+  if (parsedScript && (aFromVersion < 1)) {
+    this._updatesDisabled = parsedScript._updatesDisabled;
+    this._copyDependencyUrlsFrom(parsedScript);
+  }
+  this._changed("modified", null);
+};
+
+/**
+ * Fills in missing @require / @resource download URLs and pinned hashes,
+ * and the @icon URL, from a fresh parse of this script's own file.
+ *
+ * Only when the parsed block still describes exactly the installed
+ * dependencies, i.e. its hash equals the stored dependhash (set whenever
+ * dependencies are downloaded).  Otherwise the file was edited, or the
+ * hash predates a parser change (@icon64 joining it, for one).  Either way
+ * the next re-parse or update downloads the dependencies again, URLs
+ * included.
+ *
+ * @param {Script} aParsedScript - parse() of this script's file.
+ */
+Script.prototype._copyDependencyUrlsFrom = function (aParsedScript) {
+  if (GM_util.hash(aParsedScript._rawMeta) != this._dependhash) {
     return undefined;
   }
 
-  let changed = false;
   function copyFrom(aTarget, aSource) {
     if (aSource && aSource._downloadURL && !aTarget._downloadURL) {
       aTarget._downloadURL = aSource._downloadURL;
       aTarget._integrity = aSource._integrity;
-      changed = true;
     }
   }
   // Same metadata, so the same @require order.
-  if (parsedScript._requires.length == this._requires.length) {
+  if (aParsedScript._requires.length == this._requires.length) {
     for (let i = 0, iLen = this._requires.length; i < iLen; i++) {
-      copyFrom(this._requires[i], parsedScript._requires[i]);
+      copyFrom(this._requires[i], aParsedScript._requires[i]);
     }
   }
   let parsedResources = Object.create(null);
-  parsedScript._resources.forEach(function (aResource) {
+  aParsedScript._resources.forEach(function (aResource) {
     parsedResources[aResource._name] = aResource;
   });
   this._resources.forEach(function (aResource) {
     copyFrom(aResource, parsedResources[aResource._name]);
   });
   if (this.icon._filename) {
-    copyFrom(this.icon, parsedScript.icon);
-  }
-
-  if (changed) {
-    this._changed("modified", null);
+    copyFrom(this.icon, aParsedScript.icon);
   }
 };
 
@@ -1114,6 +1154,10 @@ Script.prototype.toConfigNode = function (aDoc) {
   scriptNode.setAttribute("userOverride", this._userOverride);
   scriptNode.setAttribute("uuid", this._uuid);
   scriptNode.setAttribute("version", this._version);
+  scriptNode.setAttribute("configVersion", SCRIPT_CONFIG_VERSION);
+  if (this._updatesDisabled) {
+    scriptNode.setAttribute("updatesDisabled", "true");
+  }
 
   if (this.downloadURL) {
     scriptNode.setAttribute("installurl", this.downloadURL);
@@ -1429,6 +1473,7 @@ Script.prototype.updateFromNewScript = function (
   this._supportURL = newScript._supportURL;
   this._unwrap = newScript._unwrap;
   this._version = newScript._version;
+  this._updatesDisabled = newScript._updatesDisabled;
   this.downloadURL = newScript.downloadURL;
   this.homepageURL = newScript.homepageURL;
   this.updateURL = newScript.updateURL;
@@ -1661,7 +1706,9 @@ Script.prototype.shouldAutoUpdate = function () {
  * @param {boolean}  aManual   - If true, bypasses auto-update check only.
  */
 Script.prototype.checkForRemoteUpdate = function (aCallback, aForced, aManual) {
-  if (!this.updateURL || (this.updateURL == "null")
+  // "none" / ".../none": URLs saved by versions that resolved "none"
+  // instead of disabling updates (see parseScript.js).
+  if (!this.updateURL
       || this.updateURL.trim().toLowerCase() === "none"
       || /\/none$/.test(this.updateURL)) {
     return aCallback("noUpdateAvailable", {
