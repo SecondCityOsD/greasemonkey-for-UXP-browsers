@@ -209,12 +209,18 @@
               </row>
               <row align="center">
                 <label class="prefs-meta-key" value="&scriptPrefs.label.autoUpdate;"/>
-                <radiogroup id="behave-autoupdate" orient="horizontal"
-                  oncommand="onAutoUpdateChange();">
-                  <radio value="default" label="&scriptPrefs.autoUpdate.default;"/>
-                  <radio value="enable"  label="&scriptPrefs.autoUpdate.on;"/>
-                  <radio value="disable" label="&scriptPrefs.autoUpdate.off;"/>
-                </radiogroup>
+                <hbox align="center">
+                  <radiogroup id="behave-autoupdate" orient="horizontal"
+                    oncommand="onAutoUpdateChange();">
+                    <radio value="default" label="&scriptPrefs.autoUpdate.default;"/>
+                    <radio value="enable"  label="&scriptPrefs.autoUpdate.on;"/>
+                    <radio value="disable" label="&scriptPrefs.autoUpdate.off;"/>
+                  </radiogroup>
+                  <!-- Shown instead of the radios for a script that can
+                       never update; text set by scriptPrefs.js. -->
+                  <description id="behave-autoupdate-never" flex="1"
+                    hidden="true"/>
+                </hbox>
               </row>
               <row align="center">
                 <label class="prefs-meta-key" value="&scriptPrefs.label.position;"/>

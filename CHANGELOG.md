@@ -23,6 +23,17 @@
 * Scheduled checks are skipped while the browser-wide
   `extensions.update.enabled` switch is off, just like the browser's own
   add-on checks.  **Check now** still works.
+* **Old versions installed from GreasyFork are no longer treated as
+  updatable.**  GreasyFork serves an older version with `@downloadURL none`.
+  Greasemonkey ignored that line, so the copy used the old version's own
+  address as its update URL and was checked against itself forever.  Such
+  a copy now counts as not updatable, as in Violentmonkey: no automatic
+  checks, no Find Updates and no Automatic Updates setting.  Its Options
+  window shows the Update URL as "none" and says why the script won't
+  update.  Copies you already have are recognised on the first start.
+* A script without an update address could store the text "null" as its
+  update URL.  That no longer happens, and stored ones are cleaned up on
+  start.
 
 **Script injection**
 * **Back/Forward no longer runs scripts a second time.**  Since 3.7.0, a
@@ -50,6 +61,11 @@
   `%2`-like sequences, such as URLs with `%20`.
 
 **about:addons "User Scripts" pane**
+* A script's Options window offers no Automatic updates choice when the
+  script can't update at all.  For example, it has no web address to
+  update from.  The window says why instead.
+* The **Installed** date in a script's Options window always showed "—".
+  It now shows when the script was installed.
 * **Options now opens for disabled scripts, from the list as well.**  The
   Options button on a disabled script's row did nothing, and the detail
   pane only worked through a separate stand-in button.  Both now use the
