@@ -67,7 +67,70 @@ const UPDATE_META_STATUS_FAIL = "fail";
 
 // Version of a <Script> entry's layout in config.xml; see _upgradeConfig().
 // 1: 3.10 (dependency URLs and hashes, updatesDisabled).
-const SCRIPT_CONFIG_VERSION = 1;
+// 2: 3.10 (homepageurl holds only a declared homepage; contributionurl).
+const SCRIPT_CONFIG_VERSION = 2;
+
+/**
+ * Derives the human-readable page of a script from the URL it is
+ * downloaded from, for the hosts that have one; mirrors Violentmonkey's
+ * inferScriptHome():
+ *
+ *   raw.githubusercontent.com/<user>/<repo>/...   -> github.com/<user>/<repo>
+ *   gist.githubusercontent.com/<user>/<id>/...    -> gist.github.com/<user>/<id>
+ *   gist.github.com/<user>/<id>/raw/...           -> gist.github.com/<user>/<id>
+ *   github.com/<user>/<repo>/raw/...              -> github.com/<user>/<repo>
+ *   update.greasyfork.org/scripts/<id>/...        -> greasyfork.org/scripts/<id>
+ *   greasyfork.org[/<locale>]/scripts/<slug>/...  -> greasyfork.org/scripts/<slug>
+ *   (and the same two for sleazyfork.org)
+ *   openuserjs.org/install/<user>/<slug>.user.js  -> openuserjs.org/scripts/<user>/<slug>
+ *
+ * @param {string} aUrl - The script's download URL.
+ * @returns {string|null} The script's page, or null for other hosts.  The
+ *   download URL itself is no page: opening it just reinstalls the script.
+ */
+function inferScriptPageURL(aUrl) {
+  if (!aUrl) {
+    return null;
+  }
+  let m;
+  m = aUrl.match(
+      /^https?:\/\/raw\.githubusercontent\.com\/([^\/]+)\/([^\/]+)\//i);
+  if (m) {
+    return "https://github.com/" + m[1] + "/" + m[2];
+  }
+  m = aUrl.match(
+      /^https?:\/\/gist\.githubusercontent\.com\/([^\/]+)\/([^\/]+)\//i);
+  if (m) {
+    return "https://gist.github.com/" + m[1] + "/" + m[2];
+  }
+  m = aUrl.match(
+      /^(https?:\/\/gist\.github\.com\/[^\/]+\/[^\/]+)\/raw(?:\/|$)/i);
+  if (m) {
+    return m[1];
+  }
+  m = aUrl.match(/^(https?:\/\/github\.com\/[^\/]+\/[^\/]+)\/raw\//i);
+  if (m) {
+    return m[1];
+  }
+  // The update host GreasyFork puts in @downloadURL / @updateURL, also for
+  // a pinned old version (/scripts/<id>/<version id>/<file>).
+  m = aUrl.match(
+      /^https?:\/\/update\.(greasy|sleazy)fork\.org\/scripts\/([^\/]+)/i);
+  if (m) {
+    return "https://" + m[1] + "fork.org/scripts/" + m[2];
+  }
+  m = aUrl.match(
+      /^https?:\/\/(greasy|sleazy)fork\.org\/(?:[^\/]+\/)?scripts\/([^\/]+)/i);
+  if (m) {
+    return "https://" + m[1] + "fork.org/scripts/" + m[2];
+  }
+  m = aUrl.match(
+      /^https?:\/\/openuserjs\.org\/install\/([^\/]+)\/(.+?)\.user\.js$/i);
+  if (m) {
+    return "https://openuserjs.org/scripts/" + m[1] + "/" + m[2];
+  }
+  return null;
+}
 
 // A dependency's pinned hash as kept in config.xml: "<algo>=<hex>".
 const INTEGRITY_ATTRIBUTE_REGEXP = /^(sha256|sha384|sha512)=([0-9a-f]+)$/;
@@ -138,7 +201,9 @@ function Script(aConfigNode) {
   this._filename = null;
   this._connects = [];
   this._grants = [];
+  // Declared homepage only; see the homepageURL getter.
   this._homepageURL = null;
+  this._contributionURL = null;
   this._injectInto = "auto";
   this._icon = new ScriptIcon(this);
   this._id = null;
@@ -412,12 +477,79 @@ Object.defineProperty(Script.prototype, "grants", {
   "enumerable": true,
 });
 
+/**
+ * The page to show as the script's homepage: the declared one (@homepageURL
+ * and its aliases), else the script's page on its host (scriptPageURL),
+ * else a URL-shaped @namespace.  That is Violentmonkey's order.  Setting
+ * it sets the declared homepage, the only one stored (config.xml keeps
+ * the others derivable).
+ *
+ * @type {string|null}
+ */
 Object.defineProperty(Script.prototype, "homepageURL", {
   "get": function Script_getHomepageUrl() {
-    return this._homepageURL;
+    return this._homepageURL || this.scriptPageURL || this.namespaceURL;
   },
   "set": function Script_setHomepageUrl(aVal) {
-    this._homepageURL = aVal ? "" + aVal : "";
+    this._homepageURL = aVal ? "" + aVal : null;
+  },
+  "configurable": true,
+  "enumerable": true,
+});
+
+/**
+ * The homepage the script declares, or null.
+ *
+ * @type {string|null}
+ */
+Object.defineProperty(Script.prototype, "declaredHomepageURL", {
+  "get": function Script_getDeclaredHomepageUrl() {
+    return this._homepageURL || null;
+  },
+  "enumerable": true,
+});
+
+/**
+ * The script's page on the site it comes from (GreasyFork, SleazyFork,
+ * OpenUserJS, GitHub, Gist), derived from its download URL.  That is where
+ * its versions, feedback and updates live.  Null for any other host.
+ *
+ * @type {string|null}
+ */
+Object.defineProperty(Script.prototype, "scriptPageURL", {
+  "get": function Script_getScriptPageUrl() {
+    return inferScriptPageURL(this.downloadURL);
+  },
+  "enumerable": true,
+});
+
+/**
+ * @namespace when it is a web address (often the author's site), skipping
+ * Tampermonkey's "http://tampermonkey.net/" placeholder; else null.
+ *
+ * @type {string|null}
+ */
+Object.defineProperty(Script.prototype, "namespaceURL", {
+  "get": function Script_getNamespaceUrl() {
+    let ns = this._namespace;
+    return (ns && /^https?:\/\/[^\s]+$/i.test(ns)
+        && !/^https?:\/\/(www\.)?tampermonkey\.net\b/i.test(ns))
+        ? ns : null;
+  },
+  "enumerable": true,
+});
+
+/**
+ * The script's @contributionURL (a donation page), or null.
+ *
+ * @type {string|null}
+ */
+Object.defineProperty(Script.prototype, "contributionURL", {
+  "get": function Script_getContributionUrl() {
+    return this._contributionURL;
+  },
+  "set": function Script_setContributionUrl(aVal) {
+    this._contributionURL = aVal ? "" + aVal : null;
   },
   "configurable": true,
   "enumerable": true,
@@ -807,6 +939,7 @@ Script.prototype._fromConfigNode = function (aNode) {
   this.copyright = aNode.getAttribute("copyright") || null;
   this.downloadURL = aNode.getAttribute("installurl") || null;
   this.homepageURL = aNode.getAttribute("homepageurl") || null;
+  this.contributionURL = aNode.getAttribute("contributionurl") || null;
   let updateURL = aNode.getAttribute("updateurl");
   // Older versions could save the string "null" (see the updateURL setter).
   this.updateURL = (updateURL != "null") ? updateURL : null;
@@ -963,10 +1096,13 @@ Script.prototype._fromConfigNode = function (aNode) {
 
 /**
  * Brings a config.xml entry written by an older version up to
- * SCRIPT_CONFIG_VERSION.  Version 1 (3.10) re-reads the installed file's
- * metadata block for what older versions didn't store:
- *   - "@downloadURL none" (updatesDisabled);
- *   - the dependency URLs and pinned hashes (see _copyDependencyUrlsFrom).
+ * SCRIPT_CONFIG_VERSION, by re-reading the installed file's metadata block
+ * for what older versions didn't store (or stored differently):
+ *   1: "@downloadURL none" (updatesDisabled); the dependency URLs and
+ *      pinned hashes (see _copyDependencyUrlsFrom).
+ *   2: homepageurl held a guessed homepage (the @namespace or the install
+ *      URL) as if it were declared; now only a declared one; and
+ *      @contributionURL.
  * The entry is saved afterwards with the new version, so this runs once.
  *
  * @param {number} aFromVersion - The entry's configVersion (0 if absent).
@@ -979,6 +1115,10 @@ Script.prototype._upgradeConfig = function (aFromVersion) {
   if (parsedScript && (aFromVersion < 1)) {
     this._updatesDisabled = parsedScript._updatesDisabled;
     this._copyDependencyUrlsFrom(parsedScript);
+  }
+  if (parsedScript && (aFromVersion < 2)) {
+    this._homepageURL = parsedScript._homepageURL;
+    this._contributionURL = parsedScript._contributionURL;
   }
   this._changed("modified", null);
 };
@@ -1162,8 +1302,13 @@ Script.prototype.toConfigNode = function (aDoc) {
   if (this.downloadURL) {
     scriptNode.setAttribute("installurl", this.downloadURL);
   }
-  if (this.homepageURL) {
-    scriptNode.setAttribute("homepageurl", this.homepageURL);
+  // Declared values only: a derived homepage saved here would read back as
+  // declared (see the homepageURL getter).
+  if (this._homepageURL) {
+    scriptNode.setAttribute("homepageurl", this._homepageURL);
+  }
+  if (this._contributionURL) {
+    scriptNode.setAttribute("contributionurl", this._contributionURL);
   }
   if (this.icon.filename) {
     scriptNode.setAttribute("icon", this.icon.filename);
@@ -1209,7 +1354,7 @@ Script.prototype.info = function () {
       "copyright": this.copyright,
       "description": this.description,
       "excludes": this.excludes,
-      "homepage": this.homepage,
+      "homepage": this.homepageURL,
       // "icon": ? source URL,
       "includes": this.includes,
       "lastUpdated": this.lastUpdated,
@@ -1475,7 +1620,9 @@ Script.prototype.updateFromNewScript = function (
   this._version = newScript._version;
   this._updatesDisabled = newScript._updatesDisabled;
   this.downloadURL = newScript.downloadURL;
-  this.homepageURL = newScript.homepageURL;
+  // The stored (declared) values, not the derived homepageURL getter.
+  this._homepageURL = newScript._homepageURL;
+  this._contributionURL = newScript._contributionURL;
   this.updateURL = newScript.updateURL;
 
   this.showGrantWarning();

@@ -1267,12 +1267,20 @@ function _applyImportedOptions(aScript, aOptions) {
     if (aOptions.updateURL && !aScript._updateURL) {
       aScript._updateURL = "" + aOptions.updateURL;
     }
-    // Homepage URL isn't persisted in the source for many scripts (our
-    // Phase-A fallback chain derives it on the fly), so restore the last
-    // resolved value if we can — keeps the Add-ons Manager homepage link
-    // intact across a round-trip.
-    if (aOptions.homepageURL && !aScript._homepageURL) {
-      aScript._homepageURL = "" + aOptions.homepageURL;
+    // Restore a homepage the source doesn't declare (e.g. a Violentmonkey
+    // custom one), but not one Greasemonkey itself guessed: up to 3.9 it
+    // saved the @namespace, the script page or the install URL as if
+    // declared.  Those are derived again on read (Script.homepageURL), and
+    // restoring one as declared would hide the script page.
+    let homepage = aOptions.homepageURL ? "" + aOptions.homepageURL : null;
+    let guessed = !!homepage && [aScript.namespace, aScript.scriptPageURL,
+        aScript.downloadURL].some(function (aUrl) {
+          // The guess was stored normalised, e.g. with a trailing "/".
+          return !!aUrl
+              && (aUrl.replace(/\/$/, "") == homepage.replace(/\/$/, ""));
+        });
+    if (homepage && !aScript._homepageURL && !guessed) {
+      aScript._homepageURL = homepage;
     }
     if (Array.isArray(aOptions.userIncludes)) {
       aScript.userIncludes = aOptions.userIncludes;
