@@ -128,6 +128,16 @@ cludes {
   cursor: default;
   text-decoration: none;
 }
+/* A link that only stands in for a missing value (Homepage showing a
+   web-address @namespace): greyed, with where it comes from noted after
+   it.  inline-block keeps the link's hover underline off the note. */
+.prefs-meta-value.text-link[derived="true"] {
+  color: GrayText;
+}
+.prefs-meta-note {
+  display: inline-block;
+  font-style: italic;
+}
 
 /* ─── Behaviour section ──────────────────────────────────────────────── */
 

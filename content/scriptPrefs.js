@@ -81,6 +81,20 @@ var gValuesStorage = null;
  *  on every redraw.  Re-built whenever a value is added / edited / deleted. */
 var gValuesData = [];
 
+/**
+ * Closes the window once its script is uninstalled, which is also how an
+ * update or a reinstall replaces it: the new version is a new Script
+ * object, so everything shown here would be stale, and OK would save into
+ * a script that is no longer installed.
+ */
+var gScriptObserver = {
+  "notifyEvent": function (aScript, aEvent, aData) {
+    if (aEvent == "uninstall") {
+      window.close();
+    }
+  },
+};
+
 /** Cached XUL elements indexed by friendly name. */
 var gElm = {
   "scriptIncludes": "script-includes",
@@ -112,6 +126,7 @@ window.addEventListener("load", function () {
   syncToggleEnabledButton();
   installReadonlyListTooltips();
   installScrollBubbling();
+  GM_util.getService().config.addObserver(gScriptObserver, gScript);
 
   // ── 3.7.0 feedback #4: every script opens at the same size ───────
   // Restore the user's last-chosen size from a GLOBAL pref, NOT from
@@ -150,6 +165,10 @@ window.addEventListener("load", function () {
 // the next open re-use the OLD size.
 window.addEventListener("unload", function () {
   try { savePersistedSize(); } catch (e) {}
+}, false);
+
+window.addEventListener("unload", function () {
+  GM_util.getService().config.removeObserver(gScriptObserver, gScript);
 }, false);
 
 window.addEventListener("unload", function () {
@@ -234,9 +253,23 @@ function populateMetadataSection() {
     desc.appendChild(document.createTextNode(descText));
   }
 
-  // Homepage / Support URL — clickable links.
-  setLink("meta-homepage", gScript.homepageURL || "");
-  setLink("meta-support",  gScript.supportURL  || "");
+  // Clickable links.  Homepage is what the script declares; without one, a
+  // web-address @namespace stands in, greyed and marked as such.  The
+  // script's page on its host (GreasyFork etc.) has a row of its own.
+  let declaredHomepage = gScript.declaredHomepageURL;
+  setLink("meta-homepage", declaredHomepage || gScript.namespaceURL || "",
+      declaredHomepage ? null : localizedString(
+          "scriptPrefs.homepage.fromNamespace", "(from @namespace)"));
+  setLink("meta-scriptpage",   gScript.scriptPageURL   || "");
+  setLink("meta-support",      gScript.supportURL      || "");
+  setLink("meta-contribution", gScript.contributionURL || "");
+  // Few scripts ask for donations, so that row shows only when one does.
+  document.getElementById("meta-contribution-row").hidden =
+      !gScript.contributionURL;
+  document.getElementById("meta-scriptpage-key").value = localizedString(
+      "scriptPrefs.label.scriptPage", "Script page");
+  document.getElementById("meta-contribution-key").value = localizedString(
+      "scriptPrefs.label.contribution", "Contribute");
 
   // Timestamps come back as ms-since-epoch numbers (or null for very
   // old configs).  Format with the user's locale conventions.
@@ -314,30 +347,57 @@ function setLabel(aId, aValue) {
 }
 
 /**
- * Same as setLabel but for the homepage / support URL link fields, which
- * also need their stored URL stashed somewhere onLinkClick can read it.
- * (Reading textContent at click time would lose the original URL if it
- * ever displays differently than its stored form, e.g. truncated by CSS
- * ellipsis.)
+ * Same as setLabel but for the link fields (homepage, script page, support,
+ * contribution), which also need their stored URL stashed somewhere
+ * onLinkClick can read it.  (Reading textContent at click time would lose
+ * the original URL if it ever displays differently than its stored form,
+ * e.g. truncated by CSS ellipsis.)
+ *
+ * @param {string} aId
+ * @param {string} aUrl
+ * @param {string} [aNote] - Where a stand-in link comes from, e.g.
+ *   "(from @namespace)": shown after it, and the link is greyed.
  */
-function setLink(aId, aUrl) {
+function setLink(aId, aUrl, aNote) {
   let el = document.getElementById(aId);
   if (!el) return;
   while (el.firstChild) el.removeChild(el.firstChild);
+  let noted = !!(aUrl && aNote);
   if (aUrl) {
     el.appendChild(document.createTextNode(aUrl));
+    if (noted) {
+      let note = document.createElementNS(
+          "http://www.w3.org/1999/xhtml", "span");
+      note.className = "prefs-meta-note";
+      note.textContent = aNote;
+      el.appendChild(document.createTextNode(" "));
+      el.appendChild(note);
+    }
     el.setAttribute("tooltiptext", aUrl);
     el._gmHref = aUrl;
   } else {
     el.removeAttribute("tooltiptext");
     el._gmHref = null;
   }
+  if (noted) {
+    el.setAttribute("derived", "true");
+  } else {
+    el.removeAttribute("derived");
+  }
 }
 
 /**
- * Click handler for <description class="text-link"> homepage/support
- * fields.  Opens the stored URL in a new tab of the most recent
- * browser window.
+ * A string from greasemonkey.properties, or aFallback while this locale
+ * doesn't have the key yet (strings added since the last locale pass).
+ */
+function localizedString(aKey, aFallback) {
+  return bundleStr(GM_CONSTANTS.localeStringBundle.createBundle(
+      GM_CONSTANTS.localeGreasemonkeyProperties), aKey, aFallback);
+}
+
+/**
+ * Click handler for the <description class="text-link"> link fields.
+ * Opens the stored URL in a new tab of the most recent browser window.
  */
 function onLinkClick(aEvent, aId) {
   let el = document.getElementById(aId);
@@ -390,27 +450,14 @@ function populateBehaviourSection() {
   autoRadio.hidden = cannotUpdate;
   never.hidden = !cannotUpdate;
   if (cannotUpdate) {
-    let bundle = GM_CONSTANTS.localeStringBundle.createBundle(
-        GM_CONSTANTS.localeGreasemonkeyProperties);
-    let text;
-    if (gScript.updatesDisabled) {
-      try {
-        text = bundle.GetStringFromName("scriptPrefs.autoUpdate.oldVersion");
-      } catch (e) {
-        text = "Never: this is an old version of the script (its"
+    setLabel("behave-autoupdate-never", gScript.updatesDisabled
+        ? localizedString("scriptPrefs.autoUpdate.oldVersion",
+            "Never: this is an old version of the script (its"
             + " @downloadURL is \"none\").  To get updates, install the"
-            + " current version from the script's page.";
-      }
-    } else {
-      try {
-        text = bundle.GetStringFromName(
-            "scriptPrefs.autoUpdate.notUpdatable");
-      } catch (e) {
-        text = "Never: the script has no web address it can be updated"
-            + " from.";
-      }
-    }
-    setLabel("behave-autoupdate-never", text);
+            + " current version from the script's page.")
+        : localizedString("scriptPrefs.autoUpdate.notUpdatable",
+            "Never: the script has no web address it can be updated"
+            + " from."));
   }
 
   // Position dropdown — populate "1 of N" through "N of N", select the
