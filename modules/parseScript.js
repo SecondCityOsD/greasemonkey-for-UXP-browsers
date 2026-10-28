@@ -379,10 +379,17 @@ function parse(aSource, aUri, aFailWhenMissing) {
       case "downloadURL":
       case "homepageURL":
       case "updateURL":
-        // GreasyFork sets @downloadURL/@updateURL to "none" to disable
-        // auto-updates for old script versions. Treat it as unset rather
-        // than resolving "none" as a relative URL against the base URI.
+        // "none" is never resolved as a relative URL.  GreasyFork serves
+        // old script versions with "@downloadURL none" (and no
+        // @updateURL): such a copy must not update, or it would keep
+        // checking that frozen version against itself.  downloadURL
+        // stays the install URL, the base for relative @require URLs.
+        // "@updateURL none" alone just drops the separate update URL
+        // (downloadURL is checked instead), as in Violentmonkey.
         if (data.value.trim().toLowerCase() === "none") {
+          if (data.keyword == "downloadURL") {
+            script._updatesDisabled = true;
+          }
           break;
         }
         try {
