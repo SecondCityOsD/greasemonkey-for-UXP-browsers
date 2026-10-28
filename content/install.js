@@ -27,6 +27,9 @@ var gScript = window.arguments[0].wrappedJSObject[2];
 
 var gAcceptButton = null;
 var gCurrentDelay = null;
+// Dependency -> its line in the @require / @resource lists:
+// {code, line, status, tooltip}; see setUpDependencies.
+var gDependencyLines = new Map();
 // Install was clicked while files were still downloading ("click-ahead"):
 // onProgress installs once they are all in.
 var gInstallQueued = false;
@@ -97,6 +100,7 @@ function init() {
       "Code it loads (@require):", gScript.requires, false));
   setUpDependencies("resources", "install.resources",
       "Files it loads (@resource):", gScript.resources, true);
+  gRemoteScript.onDependency(onDependency);
 
   let notice = document.getElementById("description-notice");
   let originalScriptVersion = document.getElementById(
@@ -139,6 +143,62 @@ function onBlur(aEvent) {
 function onCancel() {
   gRemoteScript.cancel();
   window.close();
+}
+
+/**
+ * A dependency's download state (RemoteScript.onDependency): its line ends
+ * in "…" while it downloads, then in its size.  Once a code or text file
+ * is in, clicking its line opens the downloaded copy in the source viewer.
+ */
+function onDependency(aRemoteScript, aEventType, aReport) {
+  // Lingering download after window cancel.
+  if (!document) {
+    return undefined;
+  }
+  // The @icon isn't listed.
+  let entry = gDependencyLines.get(aReport.dependency);
+  if (!entry) {
+    return undefined;
+  }
+  let status = entry.status;
+  while (status.firstChild) {
+    status.removeChild(status.firstChild);
+  }
+  if (aReport.state == "downloading") {
+    status.appendChild(document.createTextNode("…"));
+  } else if (aReport.state == "done") {
+    if (aReport.size !== null) {
+      status.appendChild(document.createTextNode(installString(
+          "install.size.kb", "%1 KB")
+          .replace("%1", Math.ceil(aReport.size / 1024).toLocaleString())));
+    }
+    if (entry.code || /^text\/|javascript|json|xml|css/i
+        .test(aReport.dependency.mimetype || "")) {
+      entry.line.setAttribute("viewable", "true");
+      entry.line.setAttribute("tooltiptext", entry.tooltip + "\n"
+          + installString("install.dependency.view", "Click to view it."));
+      entry.line.addEventListener("click", function () {
+        viewDependencyFile(aReport.file);
+      }, false);
+    }
+  }
+}
+
+/**
+ * Opens a downloaded dependency in the source viewer, in a tab of the
+ * browser window, which comes to the front.  (This window keeps its
+ * place, and its countdown starts again when it gets the focus back.)
+ */
+function viewDependencyFile(aFile) {
+  let browserWindow = GM_util.getBrowserWindow();
+  if (!browserWindow) {
+    return undefined;
+  }
+  let tabBrowser = browserWindow.gBrowser;
+  tabBrowser.selectedTab = tabBrowser.addTab(
+      "chrome://greasemonkey/content/sourceViewer.xhtml?path="
+      + encodeURIComponent(aFile.path));
+  browserWindow.focus();
 }
 
 function onFocus(aEvent) {
@@ -307,9 +367,9 @@ function setUpSource(aUrl) {
 /**
  * Lists @require or @resource dependencies in the section "<aName>" (with
  * "<aName>-label" and "<aName>-list"), one line each: the resource's name
- * (aNamed) and the URL with its host in bold.  The tooltip has the whole
- * URL and, for a dependency with a pinned hash, says that the download is
- * checked against it.
+ * (aNamed) and the URL with its host in bold, then its download state (see
+ * onDependency).  The tooltip has the whole URL and, for a dependency with
+ * a pinned hash, says that the download is checked against it.
  *
  * @returns {string[]} The distinct hosts the dependencies come from.
  */
@@ -328,11 +388,12 @@ function setUpDependencies(
     let line = document.createElement("description");
     line.className = "dependency";
     let integrity = dependency._integrity;
-    line.setAttribute("tooltiptext", dependency.downloadURL + (integrity
+    let tooltip = dependency.downloadURL + (integrity
         ? "\n" + installString("install.integrity.pinned",
             "Checked against its pinned %1 hash.")
             .replace("%1", integrity.algo)
-        : ""));
+        : "");
+    line.setAttribute("tooltiptext", tooltip);
     if (aNamed) {
       line.appendChild(document.createTextNode(dependency.name + ": "));
     }
@@ -340,7 +401,16 @@ function setUpDependencies(
     if (host && (hosts.indexOf(host) == -1)) {
       hosts.push(host);
     }
+    let status = document.createElementNS(HTML_NS, "span");
+    status.className = "dependency-status";
+    line.appendChild(status);
     list.appendChild(line);
+    gDependencyLines.set(dependency, {
+      "code": !aNamed,
+      "line": line,
+      "status": status,
+      "tooltip": tooltip,
+    });
   }
   return hosts;
 }
