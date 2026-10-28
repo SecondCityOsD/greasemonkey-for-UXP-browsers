@@ -1087,10 +1087,26 @@ RemoteScript.prototype._downloadDependencies = function (aCompletionCallback) {
             + dependency.downloadURL + ": " + e, false);
       }
       if (!matched && !(dependency instanceof ScriptIcon)) {
-        this.cleanup("RemoteScript: integrity mismatch for "
+        // The technical detail goes to the console; the user gets a
+        // sentence.  (%2 is filled first so a "%2x" in the URL survives.)
+        GM_util.logError("RemoteScript: integrity mismatch for "
             + dependency.downloadURL + " (expected "
             + dependency._integrity.algo + "=" + dependency._integrity.hex
-            + ").");
+            + ").", false);
+        let message;
+        try {
+          message = GM_CONSTANTS.localeStringBundle.createBundle(
+              GM_CONSTANTS.localeGreasemonkeyProperties)
+              .GetStringFromName("error.remoteScript.integrityMismatch");
+        } catch (e) {
+          message = "%1 doesn't match the %2 hash that the script pinned for"
+              + " it, so nothing was installed.  The file may have changed"
+              + " on its server; the script's author needs to update the"
+              + " pin.";
+        }
+        this.cleanup(message
+            .replace("%2", dependency._integrity.algo)
+            .replace("%1", dependency.downloadURL));
         aCompletionCallback(false, "dependency");
         return undefined;
       }

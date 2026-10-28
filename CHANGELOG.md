@@ -80,6 +80,14 @@
   script's own metadata.  A script whose dependency lines changed after
   its dependencies were downloaded is skipped; its next update fills them
   in.  Older versions ignore the new attributes.
+* **Base64 pinned hashes are now checked.**  A `@require` / `@resource`
+  can pin its exact content in the URL.  Greasemonkey only understood
+  Tampermonkey's hex form `#sha256=…`, and silently ignored the base64
+  form `#sha256-…=` (the W3C SRI format used by jsDelivr and scripts such
+  as IG Helper), so those files were never verified.  Both forms are
+  checked now, for sha256, sha384 and sha512 and for lists of several
+  hashes.  A file that doesn't match its pin stops the install or update,
+  with a message naming the file.
 
 **Compatibility**
 * Pale Moon 35 is now within the declared compatibility range

@@ -61,13 +61,58 @@ const META_SEPARATOR = "\0";
 
 const SOMETHING_REGEXP = new RegExp(".+", "g");
 
+// Pinnable digests: preference rank and digest size in bytes.
+const INTEGRITY_ALGOS = {
+  "sha256": { "rank": 1, "bytes": 32 },
+  "sha384": { "rank": 2, "bytes": 48 },
+  "sha512": { "rank": 3, "bytes": 64 },
+};
+
+/**
+ * Converts a pinned digest to lowercase hex.  Both forms in use are
+ * accepted: hex (2 characters per byte) and base64 / base64url (4 per 3
+ * bytes, "=" padding optional).  For every algorithm the two lengths
+ * differ, which is how they are told apart.
+ *
+ * @param {string} aValue - The digest as written after "sha256-" etc.
+ * @param {number} aBytes - The algorithm's digest size.
+ * @returns {string|null} Hex, or null if aValue is not a digest of that size.
+ */
+function digestToHex(aValue, aBytes) {
+  if ((aValue.length == aBytes * 2) && /^[0-9a-f]+$/i.test(aValue)) {
+    return aValue.toLowerCase();
+  }
+  let base64 = aValue.replace(/-/g, "+").replace(/_/g, "/")
+      .replace(/=+$/, "");
+  if ((base64.length != Math.ceil(aBytes * 4 / 3))
+      || !/^[A-Za-z0-9+\/]+$/.test(base64)) {
+    return null;
+  }
+  let binary;
+  try {
+    binary = atob(base64 + "=".repeat((4 - (base64.length % 4)) % 4));
+  } catch (e) {
+    return null;
+  }
+  if (binary.length != aBytes) {
+    return null;
+  }
+  let hex = "";
+  for (let i = 0; i < binary.length; i++) {
+    hex += ("0" + binary.charCodeAt(i).toString(16)).slice(-2);
+  }
+  return hex;
+}
+
 /**
  * Parses Subresource-Integrity-style hashes from a parsed dependency URI's
- * fragment, e.g. "...lib.js#sha256=<hex>" or "#sha256=<hex>,sha512=<hex>"
- * (the Tampermonkey @require / @resource convention).  Returns the
- * strongest recognized {algo, hex} pair, or null when no usable hash is
- * present.  Hex digests only (the common UXP-era form); base64 SRI values
- * are not parsed.
+ * fragment and returns the strongest usable one as {algo, hex}, or null.
+ * Both conventions are recognised:
+ *   - hex, as Tampermonkey documents it: "...lib.js#sha256=<hex>"
+ *     ("-" or ":" also accepted after the algorithm);
+ *   - base64, the W3C SRI form that jsDelivr and many scripts use:
+ *     "...lib.js#sha256-<base64>".
+ * Several hashes may be listed, separated by ",", ";" or spaces.
  *
  * @param {nsIURI} aUri - Parsed dependency URI.
  * @returns {{algo: string, hex: string}|null}
@@ -79,21 +124,24 @@ function integrityFromUri(aUri) {
   } catch (e) {
     ref = "";
   }
-  if (!ref) {
-    return null;
+  try {
+    // A space-separated SRI list arrives as "%20" (and "+" may be "%2B").
+    ref = decodeURIComponent(ref);
+  } catch (e) {
+    // A stray "%": use the fragment as it is.
   }
-  let rank = { "sha256": 1, "sha384": 2, "sha512": 3 };
   let best = null;
-  let parts = ref.split(/[,;]/);
+  let parts = ref.split(/[,;\s]+/);
   for (let i = 0; i < parts.length; i++) {
-    let m = (/^\s*(sha256|sha384|sha512)[=:\-]([0-9a-fA-F]{32,})\s*$/)
-        .exec(parts[i]);
+    let m = (/^(sha256|sha384|sha512)[=:\-](.+)$/i).exec(parts[i]);
     if (!m) {
       continue;
     }
     let algo = m[1].toLowerCase();
-    if (!best || (rank[algo] > rank[best.algo])) {
-      best = { "algo": algo, "hex": m[2].toLowerCase() };
+    let hex = digestToHex(m[2], INTEGRITY_ALGOS[algo].bytes);
+    if (hex && (!best
+        || (INTEGRITY_ALGOS[algo].rank > INTEGRITY_ALGOS[best.algo].rank))) {
+      best = { "algo": algo, "hex": hex };
     }
   }
   return best;
