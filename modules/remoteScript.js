@@ -772,12 +772,14 @@ RemoteScript.prototype.onScriptMeta = function (aCallback) {
  * Called live during download (by DownloadListener) and again from
  * _parseScriptFile() after the download completes.
  *
- * @param {string}  aSource - The raw JavaScript source of the .user.js file.
- * @param {boolean} aFatal  - If true, parsing errors trigger cleanup(); if false,
- *   the error is set but parsing failure is non-fatal.
+ * @param {string}  aSource  - The raw JavaScript source of the .user.js file.
+ * @param {boolean} aPartial - True while the download is still in progress
+ *   (DownloadListener): a missing or bad metadata block may just be
+ *   incomplete, so failure is silent.  False for the complete file
+ *   (_parseScriptFile): failure aborts the download via cleanup().
  * @returns {boolean} True if parsing succeeded and this.script was set.
  */
-RemoteScript.prototype.parseScript = function (aSource, aFatal) {
+RemoteScript.prototype.parseScript = function (aSource, aPartial) {
   if (this.errorMessage) {
     return false;
   }
@@ -787,18 +789,16 @@ RemoteScript.prototype.parseScript = function (aSource, aFatal) {
 
   let scope = {};
   Cu.import("chrome://greasemonkey-modules/content/parseScript.js", scope);
-  let script = scope.parse(aSource, this._uri, aFatal);
+  let script = scope.parse(aSource, this._uri, aPartial);
   if (!script || script.parseErrors.length) {
-    if (!aFatal) {
+    if (!aPartial) {
+      let bundle = GM_CONSTANTS.localeStringBundle.createBundle(
+          GM_CONSTANTS.localeGreasemonkeyProperties);
       this.cleanup(
-          GM_CONSTANTS.localeStringBundle.createBundle(
-              GM_CONSTANTS.localeGreasemonkeyProperties)
-              .GetStringFromName("error.parsingScript")
-          + "\n" + (
-              script
+          bundle.GetStringFromName("error.parsingScript")
+          + "\n" + (script
               ? script.parseErrors
-              : stringBundle.GetStringFromName("error.unknown")
-          ));
+              : bundle.GetStringFromName("error.unknown")));
     }
     return false;
   }
@@ -1154,42 +1154,17 @@ RemoteScript.prototype._downloadFile = function (
   }
   // See #1717.
   // A page with a userscript - http auth.
-  // Private Browsing, Containers (Firefox 42+).
+  // Private Browsing.
   let privateMode = true;
-  let userContextId = null;
   let chromeWin = GM_util.getBrowserWindow();
   if (chromeWin && chromeWin.gBrowser) {
     // i.e. the Private Browsing autoStart pref:
     // "browser.privatebrowsing.autostart"
     privateMode = PrivateBrowsingUtils.isBrowserPrivate(chromeWin.gBrowser);
-    /*
-    if (chromeWin.gBrowser.selectedBrowser
-        && chromeWin.gBrowser.selectedBrowser.contentPrincipal
-        && chromeWin.gBrowser.selectedBrowser.contentPrincipal.originAttributes
-        && chromeWin.gBrowser.selectedBrowser.contentPrincipal.originAttributes
-            .userContextId) {
-      userContextId = chromeWin.gBrowser.selectedBrowser.contentPrincipal
-          .originAttributes.userContextId;
-    }
-    */
   }
-  if (userContextId === null) {
-    if (channel instanceof Ci.nsIPrivateBrowsingChannel) {
-      if (privateMode) {
-        channel = channel.QueryInterface(Ci.nsIPrivateBrowsingChannel);
-        channel.setPrivate(true);
-      }
-    }
-  } else {
-    req.setOriginAttributes({
-      "privateBrowsingId": privateMode ? 1 : 0,
-      // "userContextId": userContextId,
-    });
+  if (privateMode && (channel instanceof Ci.nsIPrivateBrowsingChannel)) {
+    channel.QueryInterface(Ci.nsIPrivateBrowsingChannel).setPrivate(true);
   }
-  /*
-  dump("RemoteScript._downloadFile - url:" + "\n" + aUri.spec + "\n"
-      + "Private Browsing mode: " + req.channel.isChannelPrivate + "\n");
-  */
   this._channels.push(channel);
   let dsl = new DownloadListener(
       this._progressIndex == 0, // aTryToParse.

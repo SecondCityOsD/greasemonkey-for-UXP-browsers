@@ -16,7 +16,7 @@
               <RDF:Description>
                 <em:id>{8de7fcbb-c55c-4fbe-bfc5-fc555c87dbc4}</em:id>
                 <em:minVersion>27.1.0</em:minVersion>
-                <em:maxVersion>34.*</em:maxVersion>
+                <em:maxVersion>35.*</em:maxVersion>
                 <em:updateLink>https://github.com/SecondCityOsD/greasemonkey-for-UXP-browsers/releases/download/3.9/greasemonkey-3.9.xpi</em:updateLink>
               </RDF:Description>
             </em:targetApplication>
