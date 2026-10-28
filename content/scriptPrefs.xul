@@ -134,11 +134,27 @@
                   flex="1"
                   onclick="onLinkClick(event, 'meta-homepage');"/>
               </row>
+              <!-- The Script page and Contribute labels are set by
+                   scriptPrefs.js, with English fallbacks, until every
+                   locale has them: a missing DTD entity would break the
+                   whole window. -->
+              <row align="center">
+                <label id="meta-scriptpage-key" class="prefs-meta-key"/>
+                <description id="meta-scriptpage" class="prefs-meta-value text-link prefs-meta-trunc" context="meta-context-menu"
+                  flex="1"
+                  onclick="onLinkClick(event, 'meta-scriptpage');"/>
+              </row>
               <row align="center">
                 <label class="prefs-meta-key" value="&scriptPrefs.label.metaSupport;"/>
                 <description id="meta-support" class="prefs-meta-value text-link prefs-meta-trunc" context="meta-context-menu"
                   flex="1"
                   onclick="onLinkClick(event, 'meta-support');"/>
+              </row>
+              <row id="meta-contribution-row" align="center" hidden="true">
+                <label id="meta-contribution-key" class="prefs-meta-key"/>
+                <description id="meta-contribution" class="prefs-meta-value text-link prefs-meta-trunc" context="meta-context-menu"
+                  flex="1"
+                  onclick="onLinkClick(event, 'meta-contribution');"/>
               </row>
               <row align="center">
                 <label class="prefs-meta-key" value="&scriptPrefs.label.metaUpdateURL;"/>
