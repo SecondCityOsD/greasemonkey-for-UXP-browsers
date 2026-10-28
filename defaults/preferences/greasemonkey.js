@@ -151,7 +151,9 @@ pref("extensions.greasemonkey.fileDependencyUrlIsDescendantOfDownloadUrl", false
 pref("extensions.greasemonkey.fileIsGreaseable", false);
 pref("extensions.greasemonkey.globalExcludes", "[]");
 pref("extensions.greasemonkey.haveInsertedToolbarbutton", false);
-pref("extensions.greasemonkey.installDelay", 5);
+// Install window countdown, in ticks of 500 ms (2 = one second).  It
+// starts again whenever the window loses the focus.
+pref("extensions.greasemonkey.installDelay", 2);
 pref("extensions.greasemonkey.jarIsGreaseable", false);
 pref("extensions.greasemonkey.load.earlier", false);
 // 3.7.x: about:addons UI toggles (visible in about:config).  Default on;
