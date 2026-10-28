@@ -34,10 +34,14 @@
   <vbox id="dialog-content-box" flex="1">
     <description id="heading" />
     <vbox id="item-box" flex="1">
-      <vbox id="item-description">
-        <description id="script-description" />
-        <description id="script-source" />
-      </vbox>
+      <hbox id="item-description" align="start">
+        <!-- The @icon; shown by install.js once it has loaded. -->
+        <image id="script-icon" hidden="true" />
+        <vbox flex="1">
+          <description id="script-description" />
+          <description id="script-source" />
+        </vbox>
+      </hbox>
       <!-- The labels of the sections without an entity below are set by
            install.js from gmBrowser.properties, with English fallbacks:
            a DTD entity missing from a locale would break the dialog. -->

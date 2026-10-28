@@ -25,6 +25,12 @@
   margin-right: 4px;
 }
 
+#script-icon {
+  width: 32px;
+  height: 32px;
+  margin: 0 8px 0 0;
+}
+
 #script-description {
   margin: 0;
 }
@@ -51,6 +57,20 @@
 /* URLs have no spaces to wrap at. */
 #script-source, .dependency {
   word-wrap: break-word;
+}
+
+/* An unencrypted (http:, ftp:) address.  Amber with its own dark text, so
+   it reads the same on light and dark themes. */
+.insecure-chip {
+  display: inline-block;
+  margin-left: 0.5em;
+  padding: 0 0.4em;
+  border-radius: 3px;
+  background-color: #f0b400;
+  color: #2b2000;
+  font-size: 0.85em;
+  font-style: normal;
+  font-weight: normal;
 }
 
 /* "…" while a dependency downloads, then its size. */
