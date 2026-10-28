@@ -24,6 +24,20 @@
   `extensions.update.enabled` switch is off, just like the browser's own
   add-on checks.  **Check now** still works.
 
+**Script injection**
+* **Back/Forward no longer runs scripts a second time.**  Since 3.7.0, a
+  page restored from the back-forward cache re-ran its document-end and
+  document-idle scripts, while the copies from the first visit were still
+  running.  That repeated alerts and other side effects, and added
+  duplicate menu commands and value-change listeners with every Back.
+  Restored pages now keep their original scripts, as in Violentmonkey and
+  Tampermonkey.  A script that wants to react to a restore can listen for
+  `pageshow` itself.
+
+**Compatibility**
+* Pale Moon 35 is now within the declared compatibility range
+  (`maxVersion 35.*`).
+
 #### 3.9
 
 **about:addons "User Scripts" pane**
