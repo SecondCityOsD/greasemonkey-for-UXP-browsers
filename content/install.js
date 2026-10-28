@@ -78,6 +78,7 @@ function init() {
   description.appendChild(document.createElementNS(HTML_NS, "br"));
   description.appendChild(
       document.createTextNode(gScript.localized.description));
+  setUpIcon();
 
   // Everything else the user should see before installing: where the
   // script comes from, its declared antifeatures, metadata it had to
@@ -155,7 +156,13 @@ function onDependency(aRemoteScript, aEventType, aReport) {
   if (!document) {
     return undefined;
   }
-  // The @icon isn't listed.
+  // The @icon isn't listed: it goes beside the name once it's in.
+  if (aReport.dependency === gScript.icon) {
+    if (aReport.state == "done") {
+      showIcon(GM_util.getUriFromFile(aReport.file).spec);
+    }
+    return undefined;
+  }
   let entry = gDependencyLines.get(aReport.dependency);
   if (!entry) {
     return undefined;
@@ -352,6 +359,34 @@ function appendUrl(aParent, aUrl) {
   return host;
 }
 
+/**
+ * After an unencrypted (http: or ftp:) URL, an amber "not encrypted" chip:
+ * anyone on the network could change what it serves.  aRefused: the
+ * download will be refused for it (requireSecureDependencies).
+ *
+ * @returns {boolean} Whether aUrl is unencrypted.
+ */
+function appendInsecureChip(aParent, aUrl, aRefused) {
+  let uri = GM_util.getUriFromUrl(aUrl);
+  if (!uri || ((uri.scheme != "http") && (uri.scheme != "ftp"))) {
+    return false;
+  }
+  let chip = document.createElementNS(HTML_NS, "span");
+  chip.className = "insecure-chip";
+  chip.appendChild(document.createTextNode(aRefused
+      ? installString("install.insecure.refused",
+          "not encrypted: will be refused")
+      : installString("install.insecure", "not encrypted")));
+  aParent.appendChild(chip);
+  return true;
+}
+
+/** The line a tooltip gets for an unencrypted URL. */
+function insecureTooltip() {
+  return installString("install.insecure.tooltip",
+      "Sent unencrypted, so anyone on the network could change it.");
+}
+
 /** "From: <url>" under the description: where the script comes from. */
 function setUpSource(aUrl) {
   if (!aUrl) {
@@ -361,15 +396,40 @@ function setUpSource(aUrl) {
   source.appendChild(document.createTextNode(
       installString("install.from", "From:") + " "));
   appendUrl(source, aUrl);
-  source.setAttribute("tooltiptext", aUrl);
+  source.setAttribute("tooltiptext", aUrl
+      + (appendInsecureChip(source, aUrl, false)
+          ? "\n" + insecureTooltip() : ""));
+}
+
+/**
+ * Shows the script's @icon beside its name: a data: one at once, a
+ * downloaded one when it's in (onDependency).  One that fails to load
+ * stays hidden.
+ */
+function setUpIcon() {
+  let image = document.getElementById("script-icon");
+  image.addEventListener("error", function () {
+    image.hidden = true;
+  }, false);
+  // A data: @icon isn't downloaded; nor is it in fileURL until installed.
+  if (gScript.icon._dataURI) {
+    showIcon(gScript.icon._dataURI);
+  }
+}
+
+function showIcon(aUrl) {
+  let image = document.getElementById("script-icon");
+  image.setAttribute("src", aUrl);
+  image.hidden = false;
 }
 
 /**
  * Lists @require or @resource dependencies in the section "<aName>" (with
  * "<aName>-label" and "<aName>-list"), one line each: the resource's name
- * (aNamed) and the URL with its host in bold, then its download state (see
- * onDependency).  The tooltip has the whole URL and, for a dependency with
- * a pinned hash, says that the download is checked against it.
+ * (aNamed), the URL with its host in bold and a chip if it's unencrypted,
+ * then its download state (see onDependency).  The tooltip has the whole
+ * URL and, for a dependency with a pinned hash, says that the download is
+ * checked against it.
  *
  * @returns {string[]} The distinct hosts the dependencies come from.
  */
@@ -382,18 +442,13 @@ function setUpDependencies(
   document.getElementById(aName).style.display = "block";
   document.getElementById(aName + "-label").setAttribute("value",
       installString(aLabelKey, aLabelFallback));
+  let refuseInsecure = new GM_PrefManager()
+      .getValue("requireSecureDependencies", false);
   let list = document.getElementById(aName + "-list");
   for (let i = 0, iLen = aDependencies.length; i < iLen; i++) {
     let dependency = aDependencies[i];
     let line = document.createElement("description");
     line.className = "dependency";
-    let integrity = dependency._integrity;
-    let tooltip = dependency.downloadURL + (integrity
-        ? "\n" + installString("install.integrity.pinned",
-            "Checked against its pinned %1 hash.")
-            .replace("%1", integrity.algo)
-        : "");
-    line.setAttribute("tooltiptext", tooltip);
     if (aNamed) {
       line.appendChild(document.createTextNode(dependency.name + ": "));
     }
@@ -401,6 +456,17 @@ function setUpDependencies(
     if (host && (hosts.indexOf(host) == -1)) {
       hosts.push(host);
     }
+    let insecure = appendInsecureChip(
+        line, dependency.downloadURL, refuseInsecure);
+    let integrity = dependency._integrity;
+    let tooltip = dependency.downloadURL
+        + (insecure ? "\n" + insecureTooltip() : "")
+        + (integrity
+            ? "\n" + installString("install.integrity.pinned",
+                "Checked against its pinned %1 hash.")
+                .replace("%1", integrity.algo)
+            : "");
+    line.setAttribute("tooltiptext", tooltip);
     let status = document.createElementNS(HTML_NS, "span");
     status.className = "dependency-status";
     line.appendChild(status);

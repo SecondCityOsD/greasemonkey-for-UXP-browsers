@@ -49,7 +49,12 @@
 * **The install window shows what else a script brings with it.**  Before,
   it listed only the pages a script runs on, its `@grant` and its
   `@connect`.  It now also shows:
+  - the script's `@icon`, beside its name;
   - where the script is installed from, with the site in bold;
+  - an amber "not encrypted" mark on any `http://` address, whether the
+    script's own or a file it loads, since anyone on the network could
+    change what it serves.  With `requireSecureDependencies` on, a file's
+    mark says that it will be refused;
   - the code (`@require`) and files (`@resource`) it loads, one line each
     with the site in bold.  The tooltip shows the whole address and, when
     the script pins a hash for it, that the download is checked against
