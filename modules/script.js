@@ -18,7 +18,7 @@
  *     notification bubbles up to Config which persists config.xml.
  *   - Manage remote update checks (checkForRemoteUpdate / checkRemoteVersion).
  *   - Manage file lifecycle: setFilename, fixTimestampsOnInstall, allFiles,
- *     allFilesExist, uninstall.
+ *     allFilesExistResult, uninstall.
  *   - Produce the GM_info object (Script.info()) injected into sandboxes.
  *   - Apply updates from a newly-downloaded script (updateFromNewScript).
  *
@@ -52,7 +52,6 @@ Cu.import("chrome://greasemonkey-modules/content/abstractScript.js");
 Cu.import("chrome://greasemonkey-modules/content/extractMeta.js");
 Cu.import("chrome://greasemonkey-modules/content/GM_notification.js");
 Cu.import("chrome://greasemonkey-modules/content/ipcScript.js");
-Cu.import("chrome://greasemonkey-modules/content/miscApis.js");
 Cu.import("chrome://greasemonkey-modules/content/parseScript.js");
 Cu.import("chrome://greasemonkey-modules/content/prefManager.js");
 Cu.import("chrome://greasemonkey-modules/content/scriptIcon.js");
@@ -135,7 +134,6 @@ function Script(aConfigNode) {
   // backup restored, or a reinstall) the script auto-recovers.
   this._broken = false;
   this._brokenMissingFiles = [];
-  this._tempFile = null;
   this._updateMetaStatus = "unknown";
   this._updateURL = null;
   this._userExcludes = [];
@@ -411,13 +409,6 @@ Object.defineProperty(Script.prototype, "includes", {
   "enumerable": true,
 });
 
-Object.defineProperty(Script.prototype, "installDate", {
-  "get": function Script_getInstallDate() {
-    return new Date(this._installTime);
-  },
-  "enumerable": true,
-});
-
 Object.defineProperty(Script.prototype, "localized", {
   "get": function Script_getLocalizedDescription() {
     // We can't simply return this._locales[locale], as the best match for name
@@ -478,12 +469,6 @@ Object.defineProperty(Script.prototype, "matches", {
 
     for (let i = 0, iLen = aMatches.length; i < iLen; i++) {
       let match = aMatches[i];
-      // See property "userMatches".
-      /*
-      if (typeof match == "object") {
-        match = match.pattern;
-      }
-      */
       let match_MatchPattern;
       try {
         match_MatchPattern = new MatchPattern(match);
@@ -546,13 +531,6 @@ Object.defineProperty(Script.prototype, "broken", {
   "enumerable": true,
 });
 
-Object.defineProperty(Script.prototype, "brokenMissingFiles", {
-  "get": function Script_getBrokenMissingFiles() {
-    return this._brokenMissingFiles.concat();
-  },
-  "enumerable": true,
-});
-
 /**
  * Flags this script as "broken" because its on-disk file set is
  * incomplete (allFilesExistResult() returned a non-empty list).  The
@@ -576,7 +554,7 @@ Script.prototype.markBroken = function (aMissingFiles) {
 
 /**
  * Clears the broken flag.  Called when a previously-broken script's
- * files reappear (the next startup's allFilesExist check passes).
+ * files reappear (the next startup's allFilesExistResult check is empty).
  * Does NOT auto-re-enable — the user must explicitly toggle the
  * script back on, so a transient file-system state doesn't silently
  * restart a script the user had walked away from.
@@ -585,13 +563,6 @@ Script.prototype.clearBroken = function () {
   this._broken = false;
   this._brokenMissingFiles = [];
 };
-
-Object.defineProperty(Script.prototype, "previewURL", {
-  "get": function Script_getPreviewURL() {
-    return GM_CONSTANTS.ioService.newFileURI(this._tempFile).spec;
-  },
-  "enumerable": true,
-});
 
 Object.defineProperty(Script.prototype, "requires", {
   "get": function Script_getRequires() {
@@ -674,14 +645,6 @@ Object.defineProperty(Script.prototype, "userMatches", {
 
     for (let i = 0, iLen = aMatches.length; i < iLen; i++) {
       let match = aMatches[i];
-      // A needed fix for script update (if contains userMatches).
-      // See #2455.
-      // Fixed in file config.js
-      /*
-      if (typeof match == "object") {
-        match = match.pattern;
-      }
-      */
       let match_MatchPattern;
       try {
         match_MatchPattern = new MatchPattern(match);
@@ -1069,15 +1032,6 @@ Script.prototype.toString = function () {
 };
 
 /**
- * Stores the temp file reference for a downloaded-but-not-yet-installed script.
- *
- * @param {nsIFile} aFile - The downloaded temp file.
- */
-Script.prototype.setDownloadedFile = function (aFile) {
-  this._tempFile = aFile;
-};
-
-/**
  * Builds the GM_info object that is injected into every script sandbox.
  * Contains script metadata, the Greasemonkey version, and the raw meta block.
  *
@@ -1093,14 +1047,6 @@ Script.prototype.info = function () {
     return {
       "name": aRes.name,
       "mimetype": aRes.mimetype,
-      /*
-      "file_url": GM_util.getUriFromFile(aRes.file).spec,
-      "gm_url": [
-        GM_CONSTANTS.addonScriptProtocolScheme + ":",
-        aScript.uuid,
-        GM_CONSTANTS.addonScriptProtocolSeparator, aRes.name
-      ].join(""),
-      */
     };
   });
 
@@ -1675,7 +1621,7 @@ Script.prototype.checkForRemoteUpdate = function (aCallback, aForced, aManual) {
     // Update checks must not be served a stale cached copy (which causes
     // missed or phantom updates); ask the cache to revalidate with the
     // origin.  A no-cache request header is used rather than the
-    // LOAD_BYPASS_CACHE channel flag (commented out below), because that
+    // LOAD_BYPASS_CACHE channel flag, because that
     // flag triggered cache-directory bugs #2425 / #1824 on some builds.
     req.setRequestHeader("Cache-Control", "no-cache");
     req.setRequestHeader("Pragma", "no-cache");
@@ -1691,16 +1637,6 @@ Script.prototype.checkForRemoteUpdate = function (aCallback, aForced, aManual) {
   }
 
   let channel;
-
-  // See #2425, #1824.
-  /*
-  try {
-    channel = req.channel.QueryInterface(Ci.nsIHttpChannel);
-    channel.loadFlags |= channel.LOAD_BYPASS_CACHE;
-  } catch (e) {
-    // Ignore.
-  }
-  */
 
   // Private Browsing, Containers (Firefox 42+).
   let privateMode = true;
@@ -1732,11 +1668,6 @@ Script.prototype.checkForRemoteUpdate = function (aCallback, aForced, aManual) {
       "userContextId": userContextId,
     });
   }
-  /*
-  dump("Script.checkForRemoteUpdate - url:" + "\n" + url + "\n"
-      + "Private Browsing mode: " + req.channel.isChannelPrivate + "\n");
-  */
-
   req.onload = this.checkRemoteVersion.bind(
       this, req, aCallback, aForced, aManual, usedMeta);
   req.onerror = aCallback.bind(null, "noUpdateAvailable", {
@@ -1882,15 +1813,6 @@ Script.prototype.fileExists = function (aFile) {
 };
 
 /**
- * Checks that every file returned by allFiles() exists on disk.
- *
- * @returns {boolean} True if all files exist.
- */
-Script.prototype.allFilesExist = function () {
-  return this.allFiles().every(this.fileExists);
-};
-
-/**
  * Returns the leaf names of any files from allFiles() that are missing.
  * Useful for producing a human-readable list of broken dependencies.
  *
@@ -1942,7 +1864,6 @@ Script.prototype.uninstall = function (aForUpdate) {
               .replace("%1", this.file.path)
           + "\n" + e, false,
           e.fileName, e.lineNumber);
-      // GM_util.enqueueRemove(this.file);
     }
   } else if (this.baseDirFile.exists()) {
     // If script has its own dir, remove the dir + contents.
@@ -1957,7 +1878,6 @@ Script.prototype.uninstall = function (aForUpdate) {
               .replace("%1", this.baseDirFile.path)
           + "\n" + e, false,
           e.fileName, e.lineNumber);
-      // GM_util.enqueueRemove(this.baseDirFile);
     }
   }
 
