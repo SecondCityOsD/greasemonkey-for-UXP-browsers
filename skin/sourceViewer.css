@@ -9,8 +9,9 @@
  *   2. two complete palettes (VS Code Light+ and Dark+) as variables on
  *      body.theme-light / body.theme-dark (set by sourceViewer/theme.js).
  * Every colour below comes from a variable, never a system colour, so the
- * dark palette stays dark on any OS theme.  Known limit: the scrollbars
- * stay native (Gecko 52 can't restyle them).
+ * dark palette stays dark on any OS theme.  The code's scrollbars are our
+ * own (sourceViewer/scrollbars.js), because Gecko 52 can't recolour native
+ * ones; the plain-text fallback for huge files keeps native scrollbars.
  * CodeMirror's own gutters / padding / font metrics are left alone.
  */
 
@@ -34,6 +35,10 @@ body.theme-light {
   --sv-cursor: #000000;
   --sv-selection: #add6ff;
   --sv-selection-unfocused: #e5ebf1;
+  --sv-scrollbar-track: #f8f8f8;
+  --sv-scrollbar-thumb: rgba(100, 100, 100, 0.4);
+  --sv-scrollbar-thumb-hover: rgba(100, 100, 100, 0.7);
+  --sv-scrollbar-thumb-active: rgba(0, 0, 0, 0.6);
 
   --sv-tok-keyword: #0000ff;
   --sv-tok-atom: #0000ff;
@@ -70,6 +75,10 @@ body.theme-dark {
   --sv-cursor: #aeafad;
   --sv-selection: #264f78;
   --sv-selection-unfocused: #3a3d41;
+  --sv-scrollbar-track: #252526;
+  --sv-scrollbar-thumb: rgba(121, 121, 121, 0.4);
+  --sv-scrollbar-thumb-hover: rgba(100, 100, 100, 0.7);
+  --sv-scrollbar-thumb-active: rgba(191, 191, 191, 0.4);
 
   --sv-tok-keyword: #569cd6;
   --sv-tok-atom: #569cd6;
@@ -303,9 +312,48 @@ body {
 .CodeMirror-linenumber {
   color: var(--sv-line-number);
 }
+/* The corner between the two bars, and under the gutter beside the
+   horizontal bar. */
 .CodeMirror-scrollbar-filler,
 .CodeMirror-gutter-filler {
-  background: var(--sv-bg);
+  background: var(--sv-scrollbar-track);
+}
+
+/* Our own scrollbars (sourceViewer/scrollbars.js), above the gutters like
+   CodeMirror's native ones.  14px matches SV_SCROLLBAR_SIZE. */
+.gm-sv-scrollbar {
+  position: absolute;
+  z-index: 6;
+  background: var(--sv-scrollbar-track);
+}
+.gm-sv-scrollbar-vertical {
+  top: 0;
+  right: 0;
+  width: 14px;
+}
+.gm-sv-scrollbar-horizontal {
+  bottom: 0;
+  left: 0;
+  height: 14px;
+}
+.gm-sv-scrollbar-thumb {
+  position: absolute;
+  border-radius: 4px;
+  background: var(--sv-scrollbar-thumb);
+}
+.gm-sv-scrollbar-vertical > .gm-sv-scrollbar-thumb {
+  left: 3px;
+  right: 3px;
+}
+.gm-sv-scrollbar-horizontal > .gm-sv-scrollbar-thumb {
+  top: 3px;
+  bottom: 3px;
+}
+.gm-sv-scrollbar-thumb:hover {
+  background: var(--sv-scrollbar-thumb-hover);
+}
+.gm-sv-scrollbar-thumb[dragging="true"] {
+  background: var(--sv-scrollbar-thumb-active);
 }
 .CodeMirror-cursor {
   border-left-color: var(--sv-cursor);

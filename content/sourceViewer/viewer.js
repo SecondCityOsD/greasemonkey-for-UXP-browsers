@@ -1,7 +1,8 @@
 /**
  * @file sourceViewer/viewer.js
  * @overview Read-only, syntax-highlighted viewer for user-script source.
- *   Colours live in theme.js, loaded first.
+ *   Colours live in theme.js and the themed scrollbars in scrollbars.js,
+ *   both loaded first.
  *
  * Loaded as a chrome XHTML document in a browser tab via
  *   chrome://greasemonkey/content/sourceViewer.xhtml?path=<encoded OS path>
@@ -190,6 +191,9 @@ function renderSource(aText) {
         "readOnly": true,
         "lineNumbers": true,
         "lineWrapping": false,
+        // Drawn in the theme's colours (scrollbars.js); native ones stay
+        // light in the dark palette.
+        "scrollbarStyle": SV_SCROLLBAR_STYLE,
         "tabSize": 2,
       });
       // CodeMirror occasionally lays out at zero height when constructed
@@ -214,7 +218,7 @@ function renderSource(aText) {
 
 /**
  * Loads the CodeMirror bundle into the page's global scope via the script
- * loader.
+ * loader, and registers the themed scrollbar model with it.
  * @returns {boolean} true when a global CodeMirror is available.
  */
 function loadCodeMirror() {
@@ -222,6 +226,9 @@ function loadCodeMirror() {
     try {
       Services.scriptloader.loadSubScript(CM_BUNDLE_URL, window);
       gCM = window.CodeMirror || null;
+      if (gCM) {
+        gCM.scrollbarModel[SV_SCROLLBAR_STYLE] = SvScrollbars;
+      }
     } catch (e) {
       // A build without DevTools: the textarea fallback takes over.
     }
