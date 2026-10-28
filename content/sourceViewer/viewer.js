@@ -6,6 +6,10 @@
  *
  * Loaded as a chrome XHTML document in a browser tab via
  *   chrome://greasemonkey/content/sourceViewer.xhtml?path=<encoded OS path>
+ *       &url=<encoded address it was downloaded from>
+ * The toolbar shows the script's name and version (from its metadata, or
+ * the file name for a library) and that address; url is optional, and
+ * without it the toolbar shows the path.
  *
  * Opened from:
  *   - RemoteScript.showSource()  — the install-time "Show Script Source"
@@ -45,8 +49,10 @@
  * Safety
  * ------
  * The path is always supplied by our own chrome code (a downloaded temp file
- * or an installed script's on-disk file), never by web content.  No script
- * content is ever evaluated here — it is only read as text and displayed.
+ * or an installed script's on-disk file), never by web content.  The url is
+ * only ever displayed, as text.  No script content is ever evaluated here —
+ * it is only read as text and displayed (the metadata parser reads the
+ * ==UserScript== block as text too).
  */
 
 if (typeof Cc === "undefined") {
@@ -71,6 +77,9 @@ const CM_BUNDLE_URL =
 /** Above this source size (chars), skip CodeMirror and use the textarea —
  *  CodeMirror's per-line DOM gets sluggish on huge / minified files. */
 const SV_MAX_CM_BYTES = 1500000;
+
+/** Longest address shown in the toolbar; a data: URL can be huge. */
+const SV_MAX_URL_CHARS = 200;
 
 /** The resolved CodeMirror constructor (or null when it couldn't load). */
 var gCM = null;
@@ -100,7 +109,7 @@ function GM_sourceViewerLoad() {
 
   SvTheme.init(document.body, svString);
 
-  let path = readPathFromQuery();
+  let path = readQueryParam("path");
   if (!path) {
     showNote(svString("sourceViewer.error.noPath",
         "No script source to display."));
@@ -118,18 +127,17 @@ function GM_sourceViewerLoad() {
     return;
   }
 
-  let pathLabel = document.getElementById("gm-sv-path");
-  if (pathLabel) {
-    pathLabel.textContent = path;
-    pathLabel.title = path;
-  }
+  // The address it came from, not the temp copy's path (which means nothing
+  // to the reader and shows the Windows user name in screenshots).
+  let url = readQueryParam("url");
+  showSourceAddress(url || path);
 
   // Read the file as UTF-8, then render.  OS.File works in the chrome
   // document context this page runs in.
   OS.File.read(path, { "encoding": "UTF-8" }).then(
       function (text) {
-        document.title = svString("sourceViewer.title", "User Script Source");
         renderSource(text);
+        showSourceName(text, url, path);
       },
       function (e) {
         showNote(svString("sourceViewer.error.read",
@@ -138,26 +146,139 @@ function GM_sourceViewerLoad() {
 }
 
 /**
- * Parses the `path` parameter out of the document's URL query string.
+ * Reads one parameter out of the document's URL query string.
  * Prefers location.search, falling back to the full href.
- * @returns {string|null} The decoded OS path, or null when absent/invalid.
+ * @param {string} aName - "path" or "url".
+ * @returns {string|null} The decoded value, or null when absent/invalid.
  */
-function readPathFromQuery() {
+function readQueryParam(aName) {
   let haystack = "";
   try {
     haystack = window.location.search || window.location.href || "";
   } catch (e) {
     haystack = "";
   }
-  let match = /[?&]path=([^&]*)/.exec(haystack);
+  let match = new RegExp("[?&]" + aName + "=([^&]*)").exec(haystack);
   if (!match) {
     return null;
   }
   try {
-    return decodeURIComponent(match[1]);
+    return decodeURIComponent(match[1]) || null;
   } catch (e) {
     return null;
   }
+}
+
+/**
+ * Shows where the file came from in the toolbar, like the install window
+ * does: the site in bold, the rest decoded, without the #fragment (where a
+ * pinned hash lives).  Without an address, the on-disk path.
+ * @param {string} aSource - The download address, or else the path.
+ * @returns {void}
+ */
+function showSourceAddress(aSource) {
+  let slot = document.getElementById("gm-sv-source");
+  if (!slot) {
+    return;
+  }
+  let text = aSource;
+  let url = /^([a-z][a-z0-9+.-]*:\/\/)([^\/?#]*)([^#]*)/i.exec(aSource);
+  if (url) {
+    let rest = url[3];
+    try {
+      rest = decodeURI(rest);
+    } catch (e) {
+      // Not valid percent-encoding: show it as it is.
+    }
+    text = url[1] + url[2] + rest;
+  }
+  if (text.length > SV_MAX_URL_CHARS) {
+    text = text.substring(0, SV_MAX_URL_CHARS) + "…";
+  }
+  slot.title = text;
+
+  let hostEnd = url ? (url[1].length + url[2].length) : 0;
+  if (!url || (hostEnd > text.length)) {
+    slot.textContent = text;
+    return;
+  }
+  let host = document.createElement("strong");
+  host.textContent = url[2];
+  slot.appendChild(document.createTextNode(url[1]));
+  slot.appendChild(host);
+  slot.appendChild(document.createTextNode(text.substring(hostEnd)));
+}
+
+/**
+ * Names the file in the toolbar and the tab: the script's own (localised)
+ * @name and its @version when it has a metadata block, else the file name
+ * (a @require'd library, say).  Uses the real metadata parser, so the name
+ * is the one Greasemonkey shows everywhere else.
+ * @param {string} aText - The file's contents.
+ * @param {string|null} aUrl - The address it was downloaded from.
+ * @param {string} aPath - The on-disk path.
+ * @returns {void}
+ */
+function showSourceName(aText, aUrl, aPath) {
+  let name = "";
+  let version = "";
+  try {
+    let scope = {};
+    Cu.import("chrome://greasemonkey-modules/content/parseScript.js", scope);
+    let script = scope.parse(
+        aText, aUrl ? GM_util.getUriFromUrl(aUrl) : null,
+        /* aFailWhenMissing */ true);
+    if (script) {
+      name = script.localized.name;
+      version = script.version || "";
+    }
+  } catch (e) {
+    // Metadata the parser can't read: name it after the file instead.
+  }
+  if (!name) {
+    name = leafName(aUrl || aPath);
+  }
+
+  let nameSlot = document.getElementById("gm-sv-name");
+  let versionSlot = document.getElementById("gm-sv-version");
+  if (nameSlot) {
+    nameSlot.textContent = name;
+    nameSlot.title = name;
+  }
+  if (versionSlot) {
+    versionSlot.textContent = version;
+  }
+
+  let label = version ? (name + " " + version) : name;
+  // A function replacement, so a "$&" in a script's name stays as it is.
+  document.title = label
+      ? svString("sourceViewer.title.named", "%1 — Source")
+          .replace("%1", function () { return label; })
+      : svString("sourceViewer.title", "User Script Source");
+}
+
+/**
+ * @param {string} aSource - An address or an OS path.
+ * @returns {string} Its last part, decoded; "" for a data: URL or a
+ *          trailing slash.
+ */
+function leafName(aSource) {
+  if (/^data:/i.test(aSource)) {
+    return "";
+  }
+  // Only an address has a query, a fragment and percent-encoding; a path's
+  // "#" or "%" is part of the file name.
+  let isUrl = (aSource.indexOf("://") != -1);
+  let leaf = (isUrl ? aSource.replace(/[?#].*$/, "") : aSource)
+      .split(/[\\\/]/).pop() || "";
+  if (isUrl) {
+    try {
+      leaf = decodeURIComponent(leaf);
+    } catch (e) {
+      // Not valid percent-encoding: keep it as it is.
+    }
+  }
+  return leaf;
 }
 
 /**

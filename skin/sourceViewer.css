@@ -137,16 +137,40 @@ body {
   display: none;
 }
 
-#gm-sv-path {
-  flex: 1 1 auto;
+/* Name, version, then the address; a long name gives way first, and the
+   address takes the rest and crops at its end. */
+#gm-sv-name,
+#gm-sv-source {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  direction: rtl;          /* crop the start of long paths, keep filename */
-  text-align: left;
+}
+#gm-sv-name {
+  flex: 0 1 auto;
+  max-width: 40%;
+  font-weight: bold;
+}
+#gm-sv-version {
+  flex: 0 0 auto;
+  margin-left: 6px;
+  color: var(--sv-muted);
+}
+#gm-sv-source {
+  flex: 1 1 auto;
+  margin-left: 12px;
   color: var(--sv-muted);
   font-family: monospace;
   font-size: 11px;
+}
+#gm-sv-source > strong {
+  color: var(--sv-chrome-fg);
+}
+#gm-sv-name:empty,
+#gm-sv-version:empty {
+  display: none;
+}
+#gm-sv-name:empty + #gm-sv-version:empty + #gm-sv-source {
+  margin-left: 0;
 }
 
 #gm-sv-note {
