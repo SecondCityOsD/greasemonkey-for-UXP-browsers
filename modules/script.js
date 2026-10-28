@@ -148,7 +148,11 @@ function Script(aConfigNode) {
   this.availableUpdate = null;
   this.checkRemoteUpdates = AddonManager.AUTOUPDATE_DEFAULT;
   this.needsUninstall = false;
+  // Problems that refuse the install (e.g. a @require that can't be used).
   this.parseErrors = [];
+  // Metadata lines that were ignored, e.g. an unusable @match (the script
+  // still installs; the user is told).
+  this.parseWarnings = [];
   this.pendingExec = [];
 
   if (aConfigNode) {

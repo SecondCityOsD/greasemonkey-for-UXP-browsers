@@ -495,16 +495,24 @@ Config.prototype.updateModifiedScripts = function (
       Cu.import("chrome://greasemonkey-modules/content/parseScript.js", scope);
       let parsedScript = scope.parse(
           script.textContent, GM_util.getUriFromUrl(script.downloadURL));
+      // The edited script is reloaded either way; errors and ignored
+      // lines (warnings, e.g. an unusable @match) are reported.
+      let problems = [];
       if (!parsedScript || parsedScript.parseErrors.length) {
-        let message = "(" + script.localized.name + ") "
-            + GM_CONSTANTS.localeStringBundle.createBundle(
-                GM_CONSTANTS.localeGreasemonkeyProperties)
-                .GetStringFromName("error.parsingScript")
+        let bundle = GM_CONSTANTS.localeStringBundle.createBundle(
+            GM_CONSTANTS.localeGreasemonkeyProperties);
+        problems.push(bundle.GetStringFromName("error.parsingScript")
             + "\n" + (parsedScript
                 ? parsedScript.parseErrors
-                : GM_CONSTANTS.localeStringBundle.createBundle(
-                    GM_CONSTANTS.localeGreasemonkeyProperties)
-                    .GetStringFromName("error.unknown"));
+                : bundle.GetStringFromName("error.unknown")));
+      }
+      if (parsedScript) {
+        problems = problems.concat(parsedScript.parseWarnings);
+      }
+      if (problems.length) {
+        // The notification bar collapses line breaks, hence the dashes.
+        let message = "(" + script.localized.name + ") "
+            + problems.join(" — ");
         let chromeWin = GM_util.getBrowserWindow();
         if (chromeWin && chromeWin.gBrowser) {
           let buttons = [];

@@ -34,6 +34,21 @@
   Tampermonkey.  A script that wants to react to a restore can listen for
   `pageshow` itself.
 
+**Installing scripts**
+* **An unusable `@match` no longer stops the install.**  A pattern such as
+  `@match https://example.com` (no path) used to abort it, even though the
+  message said it was being ignored.  The same went for a bad
+  `@exclude-match`, `@icon` or `@icon64`, and also for importing a backup.
+  Like Violentmonkey, Greasemonkey now ignores such a line and installs
+  the script.  The "installed" message and the Browser Console list what
+  was ignored.  A broken `@require` or `@resource` still stops the install.
+* A script whose `@match` lines were *all* ignored runs on no page at all,
+  as in Violentmonkey.  It does not fall back to running everywhere, which
+  is what a script with no rules at all does.  The message says so, and
+  you can add your own `@match` in the script's Options.
+* Messages about ignored metadata no longer garble values that contain
+  `%2`-like sequences, such as URLs with `%20`.
+
 **Compatibility**
 * Pale Moon 35 is now within the declared compatibility range
   (`maxVersion 35.*`).

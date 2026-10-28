@@ -100,11 +100,77 @@ function integrityFromUri(aUri) {
 }
 
 /**
+ * Returns a string from greasemonkey.properties, or aFallback (English)
+ * for a key the locale doesn't have yet.  New strings ship in English
+ * first and reach the other locales in one pass per release.
+ *
+ * @param {string} aName     - String bundle key.
+ * @param {string} aFallback - English text used when the key is missing.
+ * @returns {string}
+ */
+function localizedString(aName, aFallback) {
+  try {
+    return GM_CONSTANTS.localeStringBundle.createBundle(
+        GM_CONSTANTS.localeGreasemonkeyProperties)
+        .GetStringFromName(aName);
+  } catch (e) {
+    return aFallback;
+  }
+}
+
+/**
+ * Fills %1, %2, … in aTemplate in a single pass, so a value that itself
+ * contains "%2" (a URL with %20, say) isn't substituted again.
+ *
+ * @param {string} aTemplate
+ * @param {Array}  aValues - aValues[0] replaces %1, and so on.
+ * @returns {string}
+ */
+function fillPlaceholders(aTemplate, aValues) {
+  return aTemplate.replace(/%(\d)/g, function (aPlaceholder, aIndex) {
+    let value = aValues[aIndex - 1];
+    return (typeof value == "undefined") ? aPlaceholder : String(value);
+  });
+}
+
+/**
+ * @param {string} aPattern - The @match / @exclude-match value.
+ * @param {Error}  aError   - Why MatchPattern refused it.
+ * @returns {string} The parseWarnings entry for an ignored pattern.
+ */
+function ignoringMatchWarning(aPattern, aError) {
+  return fillPlaceholders(
+      GM_CONSTANTS.localeStringBundle.createBundle(
+          GM_CONSTANTS.localeGreasemonkeyProperties)
+          .GetStringFromName("error.parse.ignoringMatch"),
+      [aPattern, aError.message || aError]);
+}
+
+/**
+ * @param {object} aData  - Parsed @icon / @icon64 meta line.
+ * @param {Error}  aError - Why ScriptIcon.setMetaVal() refused it.
+ * @returns {string} The parseWarnings entry for an ignored icon line.
+ */
+function ignoringIconWarning(aData, aError) {
+  return fillPlaceholders(
+      localizedString("warning.parse.ignoringIcon",
+          "Ignoring @%1 %2 because: %3"),
+      [aData.keyword, aData.value, aError.message || aError]);
+}
+
+/**
  * Parses the source of a userscript and produces a populated Script object.
  *
  * If no ==UserScript== block is found and aFailWhenMissing is true, returns
  * null.  If aFailWhenMissing is false (the default), a Script with default
  * values is returned so that the script can still run (no metadata = match all).
+ *
+ * Problems are reported in two lists on the returned Script:
+ *   - parseErrors: the script can't be installed as written (a @require or
+ *     @resource that can't be used, a duplicate @resource name).
+ *   - parseWarnings: a metadata line was ignored (an unusable @match,
+ *     @exclude-match, @icon or @icon64), as in Violentmonkey; the script
+ *     still installs.
  *
  * @param {string}     aSource          - Full source text of the script.
  * @param {nsIURI|null} aUri            - The URI the script was fetched from,
@@ -140,6 +206,8 @@ function parse(aSource, aUri, aFailWhenMissing) {
   }
 
   var resourceNames = {};
+  // Set when a @match line is ignored; see setDefaults().
+  let ignoredMatch = false;
   let _re = new RegExp("\\s+$", "");
   for (let i = 0, metaLine = ""; metaLine = meta[i]; i++) {
     var data;
@@ -205,12 +273,7 @@ function parse(aSource, aUri, aFailWhenMissing) {
           let excludeMatch = new MatchPattern(data.value);
           script._excludeMatches.push(excludeMatch);
         } catch (e) {
-          script.parseErrors.push(
-              GM_CONSTANTS.localeStringBundle.createBundle(
-                  GM_CONSTANTS.localeGreasemonkeyProperties)
-                  .GetStringFromName("error.parse.ignoringMatch")
-                  .replace("%1", data.value).replace("%2", e)
-              );
+          script.parseWarnings.push(ignoringMatchWarning(data.value, e));
         }
         break;
       case "grant":
@@ -226,7 +289,7 @@ function parse(aSource, aUri, aFailWhenMissing) {
           script["_rawMeta"] += data.keyword + META_SEPARATOR
               + data.value + META_SEPARATOR;
         } catch (e) {
-          script.parseErrors.push(e.message);
+          script.parseWarnings.push(ignoringIconWarning(data, e));
         }
         break;
 
@@ -242,7 +305,7 @@ function parse(aSource, aUri, aFailWhenMissing) {
           script["_rawMeta"] += data.keyword + META_SEPARATOR
               + data.value + META_SEPARATOR;
         } catch (e) {
-          script.parseErrors.push(e.message);
+          script.parseWarnings.push(ignoringIconWarning(data, e));
         }
         break;
 
@@ -299,12 +362,10 @@ function parse(aSource, aUri, aFailWhenMissing) {
           match = new MatchPattern(data.value);
           script._matches.push(match);
         } catch (e) {
-          script.parseErrors.push(
-              GM_CONSTANTS.localeStringBundle.createBundle(
-                  GM_CONSTANTS.localeGreasemonkeyProperties)
-                  .GetStringFromName("error.parse.ignoringMatch")
-                  .replace("%1", data.value).replace("%2", e)
-              );
+          // E.g. "https://example.com" with no path.  Violentmonkey
+          // ignores such a pattern too, rather than refusing the script.
+          script.parseWarnings.push(ignoringMatchWarning(data.value, e));
+          ignoredMatch = true;
         }
         break;
 
@@ -450,7 +511,13 @@ function parse(aSource, aUri, aFailWhenMissing) {
     }
   }
 
-  setDefaults(script);
+  setDefaults(script, ignoredMatch);
+  if (ignoredMatch
+      && (script._includes.length == 0) && (script._matches.length == 0)) {
+    script.parseWarnings.push(localizedString("warning.parse.noRulesLeft",
+        "None of this script's @match patterns could be used, so it won't"
+        + " run on any page.  You can add your own @match in its Options."));
+  }
   return script;
 }
 
@@ -522,10 +589,14 @@ function inferHomepageFromInstallUrl(aInstallUrl) {
  *   - If no @updateURL was set, falls back to @downloadURL.
  *   - If @run-at is missing or invalid, defaults to "document-end".
  *   - If no @include and no @match patterns were set, adds "*" (match all).
+ *     Not when @match lines were written but all ignored: the author meant
+ *     specific pages, so the script runs nowhere instead, as in
+ *     Violentmonkey (which counts unusable rules as rules).
  *
- * @param {Script} aScript - The Script object to fill in defaults for.
+ * @param {Script}  aScript        - The Script object to fill in defaults for.
+ * @param {boolean} [aIgnoredMatch] - True if any @match line was ignored.
  */
-function setDefaults(aScript) {
+function setDefaults(aScript, aIgnoredMatch) {
   if (!aScript.updateURL && aScript.downloadURL) {
     aScript.updateURL = aScript.downloadURL;
   }
@@ -535,7 +606,8 @@ function setDefaults(aScript) {
       new RegExp("^document-(body|end|idle|start)$", ""))) {
     aScript._runAt = "document-end";
   }
-  if ((aScript._includes.length == 0) && (aScript._matches.length == 0)) {
+  if (!aIgnoredMatch
+      && (aScript._includes.length == 0) && (aScript._matches.length == 0)) {
     aScript._includes.push(GM_CONSTANTS.script.includeAll);
   }
 }
