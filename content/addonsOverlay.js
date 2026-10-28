@@ -337,13 +337,31 @@ function init() {
         aAddon.uninstall();
       }
     };
-  gViewController.commands.cmd_userscript_showItemPreferences = {
-      // Always enabled for installed user scripts — including disabled
-      // ones.  The AOM's built-in prefs button gates on `isActive`; ours
-      // does not, which is the whole point of having our own command.
-      "isEnabled": addonIsInstalledScript,
+  // The platform's Options command drives the list row's Options button
+  // and the detail pane's (#detail-prefs-btn, through the
+  // <command id="cmd_showItemPreferences"> it observes).  Its isEnabled()
+  // refuses inactive add-ons, so for a disabled script the row button did
+  // nothing and the detail button was hidden (.addon-control[disabled]
+  // is display:none).  A disabled script's options are still worth
+  // opening, so user scripts get their own rule and our non-modal,
+  // de-duplicated window; every other add-on type is handed to the
+  // original command unchanged.  The AOM looks commands up by name on
+  // every use, so replacing the entry is enough.
+  let platformShowItemPreferences =
+      gViewController.commands.cmd_showItemPreferences;
+  gViewController.commands.cmd_showItemPreferences = {
+      "isEnabled": function (aAddon) {
+        if (aAddon && (aAddon.type == GM_CONSTANTS.scriptAddonType)) {
+          return addonIsInstalledScript(aAddon);
+        }
+        return platformShowItemPreferences.isEnabled(aAddon);
+      },
       "doCommand": function (aAddon) {
-        gmOpenScriptPrefs(aAddon);
+        if (aAddon && (aAddon.type == GM_CONSTANTS.scriptAddonType)) {
+          gmOpenScriptPrefs(aAddon);
+          return undefined;
+        }
+        return platformShowItemPreferences.doCommand(aAddon);
       }
     };
 
@@ -610,7 +628,6 @@ function onViewChanged(aEvent) {
     document.documentElement.classList.remove("greasemonkey");
   }
   updateDetailEditButton();
-  updateDetailPrefsButton();
 };
 
 /**
@@ -651,105 +668,10 @@ function updateDetailEditButton() {
 };
 
 /**
- * For Greasemonkey user-script detail views, hides the AOM's built-in
- * Options button (#detail-prefs-btn) and shows our own
- * (#gm-detail-prefs-btn) in the same spot.  Our button is wired to
- * cmd_userscript_showItemPreferences via the command= attribute in
- * addonsOverlay.xul, and that command always opens the prefs dialog
- * regardless of `isActive` — fixes the disabled-script bug that
- * resisted every attempt to override the AOM's button from the outside.
- *
- * For every other addon type and every non-detail view, the AOM button
- * is restored to whatever state it had before we touched it (visible
- * for addons with optionsURL, hidden otherwise) and the original
- * tooltip is put back.  That stops the user-script tooltip from
- * leaking into the Extensions tab (#3 in the v3.7.0 feedback).
- */
-function updateDetailPrefsButton() {
-  let aomBtn = document.getElementById("detail-prefs-btn");
-  let gmBtn  = document.getElementById("gm-detail-prefs-btn");
-
-  let viewId = gViewController.currentViewId;
-  let isDetail = viewId
-      && (viewId.indexOf(GM_CONSTANTS.scriptViewIDDetailPrefix) == 0);
-
-  let addon = null;
-  if (isDetail) {
-    try {
-      if (typeof gDetailView != "undefined" && gDetailView) {
-        addon = gDetailView._addon || null;
-      }
-    } catch (e) { addon = null; }
-  }
-
-  let isUserscript = !!(addon
-      && addon.type == GM_CONSTANTS.scriptAddonType);
-
-  if (!isUserscript) {
-    // Restore AOM's button to whatever it was before we touched it.
-    // Both `hidden` and an explicit `style.display = none` so the AOM
-    // CSS rule that hides .addon-control for inactive addons takes back
-    // over without our inline style winning the cascade.
-    if (gmBtn) {
-      gmBtn.hidden = true;
-      gmBtn.style.display = "none";
-    }
-    if (aomBtn && aomBtn._gmHiddenByGM) {
-      aomBtn.hidden = aomBtn._gmAomOrigHidden;
-      aomBtn._gmHiddenByGM = false;
-    }
-    return;
-  }
-
-  // ─── Userscript detail view ────────────────────────────────────────
-  // Hide AOM's button (remembering its original hidden state so we can
-  // restore it on leave), show ours.
-  if (aomBtn && !aomBtn._gmHiddenByGM) {
-    aomBtn._gmAomOrigHidden = aomBtn.hidden;
-    aomBtn._gmHiddenByGM = true;
-  }
-  if (aomBtn) aomBtn.hidden = true;
-
-  if (gmBtn) {
-    gmBtn.hidden = false;
-    // ── Disabled-script Options-button fix (3.7.0 feedback #1) ─────
-    // Belt-and-braces:
-    //   1. Inline `display` overrides any AOM CSS that hides
-    //      .addon-control descendants for inactive add-ons.
-    //   2. Clearing `disabled` keeps the button click-able even if
-    //      AOM's gDetailView_updateState walks the detail pane and
-    //      tries to gray it out.  We dropped the `addon-control`
-    //      class in addonsOverlay.xul so the iterator should not
-    //      touch us, but this is cheap defence-in-depth.
-    gmBtn.style.display = "-moz-box";
-    gmBtn.removeAttribute("disabled");
-    if ("disabled" in gmBtn) gmBtn.disabled = false;
-    // Set our button's label + tooltip from locale.  Doing it here
-    // (rather than in the XUL via &entity;) so the strings can come
-    // from the gmAddons.properties bundle and stay in sync with the
-    // AOM's "Options" wording on platforms where we want to mirror it.
-    try {
-      let bundle = GM_CONSTANTS.localeStringBundle.createBundle(
-          GM_CONSTANTS.localeGmAddonsProperties);
-      gmBtn.setAttribute("tooltiptext",
-          bundle.GetStringFromName("scriptPrefs.optionsBtn.tooltip"));
-    } catch (e) {}
-    // Re-use the AOM's "Options" label from the platform DTD by reading
-    // the AOM button's label.  Falls back to a hard-coded "Options" if
-    // the AOM button somehow has no label.
-    if (!gmBtn.getAttribute("label")) {
-      let aomLabel = aomBtn ? aomBtn.getAttribute("label") : null;
-      gmBtn.setAttribute("label", aomLabel || "Options");
-    }
-  }
-}
-
-/**
  * Opens the per-script preferences window as a non-modal, resizable,
- * maximizable top-level chrome window.  Used by both the AOM Options
- * button (via the capture-phase listener installed in
- * updateDetailPrefsButton) and any other future entry point that wants
- * to surface a script's prefs.
+ * maximizable top-level chrome window.  Used for user scripts by the
+ * Add-ons Manager's Options command (list row and detail pane; see the
+ * cmd_showItemPreferences override in init()).
  *
  * If a prefs window for this exact script is already open, focuses it
  * instead of stacking duplicates.
@@ -890,42 +812,6 @@ function unload() {
   GM_config.removeObserver(observer);
 };
 })();
-
-/**
- * Click handler for the Greasemonkey Options button in the AOM
- * detail-view (#gm-detail-prefs-btn).  Lives at module scope (not
- * inside the IIFE) because XUL inline `onclick="…"` is evaluated in
- * the document's global scope.
- *
- * Why we use this instead of `command="cmd_userscript_showItemPreferences"`:
- * Pale Moon's extensions.js disables every `.addon-control` button in
- * the detail pane when the addon is inactive (userDisabled), and a
- * disabled XUL button silently swallows the click that would otherwise
- * dispatch the command.  Routing through onclick + a direct call to
- * the controller bypasses that path entirely.
- */
-function gmDetailPrefsClicked(aEvent) {
-  if (aEvent && aEvent.button) return;
-  let addon = null;
-  try {
-    if (typeof gDetailView != "undefined" && gDetailView) {
-      addon = gDetailView._addon || null;
-    }
-  } catch (e) {}
-  if (!addon) return;
-  // Defensive: even if our class drop didn't help, a disabled button
-  // sometimes still fires onclick.  Just call the command's doCommand
-  // directly so the dialog opens regardless of UI state.
-  try {
-    let cmd = gViewController.commands.cmd_userscript_showItemPreferences;
-    if (cmd && typeof cmd.doCommand == "function") {
-      cmd.doCommand(addon);
-    }
-  } catch (e) {
-    Components.utils.reportError(
-        "Greasemonkey: gmDetailPrefsClicked failed: " + e);
-  }
-}
 
 /**
  * Live-search filter for the Greasemonkey tab in about:addons (3.7.0).
