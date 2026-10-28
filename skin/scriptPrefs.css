@@ -49,7 +49,6 @@ cludes {
   min-width: 140px;
   padding-right: 8px;
   -moz-padding-end: 8px;
-  color: -moz-FieldText;
 }
 
 .prefs-meta-value {
@@ -105,18 +104,26 @@ cludes {
   text-overflow: clip;
 }
 
-/* Click-to-open URL fields: pointer cursor wins over the `text` cursor
-   from .prefs-meta-value above.  Selection still works on
-   ctrl-click-and-drag and via right-click → "Select All". */
-.prefs-meta-value.text-link {
-  cursor: pointer;
+/* Colours: this window sets none of its own.  Text takes the theme's
+   dialog colours, links the theme's .text-link colour, and secondary text
+   is dimmed with opacity instead of GrayText.  System colours such as
+   -moz-FieldText or GrayText are meant for the OS's own (light, on
+   Windows) backgrounds: with a dark complete theme they left the row
+   labels black on black. */
+#behave-position-suffix,
+.prefs-pages .count,
+.prefs-pages-hint,
+#grp-permissions description.prefs-meta-value:empty::before,
+#values-count,
+.values-empty-label {
+  opacity: 0.6;
 }
 
-/* Click-to-open URL labels (homepage, support).  Subtle underline + colour
-   change on hover so the affordance is obvious without cluttering the
-   read-only sections. */
+/* Click-to-open URL fields (homepage, support…): pointer cursor wins over
+   the `text` cursor from .prefs-meta-value above, and an underline on
+   hover.  Selection still works on ctrl-click-and-drag and via
+   right-click → "Select All". */
 .prefs-meta-value.text-link {
-  color: -moz-nativehyperlinktext;
   cursor: pointer;
 }
 .prefs-meta-value.text-link:hover {
@@ -124,15 +131,18 @@ cludes {
 }
 /* When the URL is empty, hide the link styling so the row reads "—". */
 .prefs-meta-value.text-link[value=""] {
-  color: GrayText;
+  color: inherit;
+  opacity: 0.6;
   cursor: default;
   text-decoration: none;
 }
 /* A link that only stands in for a missing value (Homepage showing a
-   web-address @namespace): greyed, with where it comes from noted after
-   it.  inline-block keeps the link's hover underline off the note. */
+   web-address @namespace): dimmed plain text, with where it comes from
+   noted after it.  inline-block keeps the link's hover underline off the
+   note. */
 .prefs-meta-value.text-link[derived="true"] {
-  color: GrayText;
+  color: inherit;
+  opacity: 0.6;
 }
 .prefs-meta-note {
   display: inline-block;
@@ -156,7 +166,6 @@ cludes {
 
 #behave-position-suffix {
   margin-left: 6px;
-  color: GrayText;
 }
 
 /* ─── Pages section ──────────────────────────────────────────────────── */
@@ -171,15 +180,12 @@ cludes {
 }
 .prefs-pages .sub-name {
   font-style: italic;
-  color: -moz-FieldText;
 }
 .prefs-pages .count {
   margin-left: 6px;
-  color: GrayText;
   font-size: 0.9em;
 }
 .prefs-pages-hint {
-  color: GrayText;
   font-style: italic;
   font-size: 0.9em;
 }
@@ -198,7 +204,6 @@ cludes {
    doesn't disappear and confuse the layout. */
 #grp-permissions description.prefs-meta-value:empty::before {
   content: "—";
-  color: GrayText;
 }
 
 /* ─── Values tab ──────────────────────────────────────────────────────── */
@@ -212,14 +217,10 @@ cludes {
 #values-toolbar > button {
   margin-left: 4px;
 }
-#values-count {
-  color: GrayText;
-}
 #values-tree {
   height: 320px;
 }
 .values-empty-label {
-  color: GrayText;
   font-style: italic;
   margin: 24px 0;
 }

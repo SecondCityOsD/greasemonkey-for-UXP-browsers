@@ -141,6 +141,12 @@
   pane only worked through a separate stand-in button.  Both now use the
   Add-ons Manager's own Options button, which opens the script's
   Options window whether the script is enabled or not.
+* **A script's Options window is readable with dark themes.**  Its row
+  labels (Name, Version, Homepage…) and the Included / Matched / Excluded
+  headings used the system's text-field colour, black on Windows, so a
+  dark complete theme such as Blackmoon left them black on black.  The
+  window now takes every colour from the theme, links included, and
+  greyed-out text is dimmed instead of set to a fixed grey.
 
 **Script APIs**
 * **`GM_xmlhttpRequest` upload callbacks work.**  `upload.onload`,
