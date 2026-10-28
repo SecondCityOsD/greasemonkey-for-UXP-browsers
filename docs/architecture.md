@@ -1,8 +1,14 @@
 # Architecture — Greasemonkey for UXP
 
 **Companion document:** [`docs/legacy-inventory.md`](legacy-inventory.md)
-**Branch:** `cleanup/strip-legacy`
-**Status:** Phase 2 of the legacy-cleanup roadmap.
+**Status:** written in Phase 2 of the legacy-cleanup roadmap; see the note below.
+
+> **Partly out of date (checked during 3.10 development).**  This map predates the
+> single-process collapse ("Phase 4"), which landed during 3.7–3.9.  The
+> `content/frameScript.js`, `messageManager` (`Services.ppmm` / `cpmm`) and
+> `storageFront` detours it describes no longer exist; everything runs
+> chrome-side, in one process.  The end-to-end flows still hold: read each
+> "[Phase 4: …]" footnote as done.
 
 ---
 
@@ -440,9 +446,11 @@ content/addonsOverlay.xul + content/addons.xul + content/thirdParty/addons.css
    ├─ Custom #greasemonkey-sort-bar (sort buttons + new/import/export +
    │     live-search box, added in 3.7.0)
    ├─ Per-row context menu (edit, show folder, exec-order, find updates)
-   ├─ Detail-pane buttons:
-   │     ├─ #gm-detail-prefs-btn → opens scriptPrefs dialog
-   │     │     (works for disabled scripts; bypasses AOM's gating)
+   ├─ Options for user scripts: addonsOverlay.js replaces the AOM's
+   │     cmd_showItemPreferences for our add-on type, so the built-in
+   │     Options buttons (list row + #detail-prefs-btn) open scriptPrefs
+   │     for disabled scripts too (since 3.10)
+   ├─ Detail-pane button:
    │     └─ #gm-detail-edit-btn → opens script in configured editor
    └─ A list-empty state with "get user scripts" + "new" links
 
