@@ -202,6 +202,8 @@ var _GM_parseMetaLine = /*
         peg$c39b = peg$literalExpectation("supportURL", false),
         peg$c39c = "antifeature",
         peg$c39d = peg$literalExpectation("antifeature", false),
+        peg$c39e = "contributionURL",
+        peg$c39f = peg$literalExpectation("contributionURL", false),
         peg$c40 = "updateURL",
         peg$c41 = peg$literalExpectation("updateURL", false),
         peg$c42 = "version",
@@ -698,6 +700,17 @@ var _GM_parseMetaLine = /*
                                 } else {
                                   s1 = peg$FAILED;
                                   if (peg$silentFails === 0) { peg$fail(peg$c39b); }
+                                }
+                                // @contributionURL (hand-added, self-contained
+                                // so the generated nesting below is untouched).
+                                if (s1 === peg$FAILED) {
+                                  if (input.substr(peg$currPos, 15) === peg$c39e) {
+                                    s1 = peg$c39e;
+                                    peg$currPos += 15;
+                                  } else {
+                                    s1 = peg$FAILED;
+                                    if (peg$silentFails === 0) { peg$fail(peg$c39f); }
+                                  }
                                 }
                                 if (s1 === peg$FAILED) {
                                   if (input.substr(peg$currPos, 11) === peg$c39c) {

@@ -20,7 +20,8 @@
  *   @resource                        — named binary resources
  *   @run-at                          — document-start | document-body | document-end | document-idle
  *   @downloadURL, @updateURL,
- *   @homepageURL, @installURL        — various URL metadata
+ *   @homepageURL, @installURL,
+ *   @contributionURL                 — various URL metadata
  *   @homepage, @website, @source     — aliases for @homepageURL (VM-compat)
  *
  * Security note on @require / @resource:
@@ -376,6 +377,7 @@ function parse(aSource, aUri, aFailWhenMissing) {
         // handler.  DO NOT add a `break` here.
         if (data.keyword == "installURL") data.keyword = "downloadURL";
         // fallthrough
+      case "contributionURL":
       case "downloadURL":
       case "homepageURL":
       case "updateURL":
@@ -538,34 +540,8 @@ function parse(aSource, aUri, aFailWhenMissing) {
     }
   }
 
-  // Homepage fallback chain — mirrors Violentmonkey's getScriptHome() +
-  // inferScriptHome() behavior so scripts without an explicit @homepageURL
-  // (e.g. gists) still surface a clickable homepage link in the Add-ons
-  // Manager.  Order of precedence:
-  //   1. @homepageURL / @homepage / @website / @source (populated above)
-  //   2. URL-shaped @namespace (skip the tampermonkey.net sentinel)
-  //   3. Host-rewritten install URL (github, gist, greasyfork, openuserjs)
-  //   4. The install URL itself
-  if (!script.homepageURL) {
-    let candidate = null;
-    let ns = script.namespace;
-    if (ns && /^https?:\/\//i.test(ns)
-        && !/^https?:\/\/tampermonkey\.net\b/i.test(ns)) {
-      candidate = ns;
-    } else if (aUri && aUri.spec) {
-      candidate = inferHomepageFromInstallUrl(aUri.spec);
-    }
-    if (candidate) {
-      try {
-        let uri = GM_util.getUriFromUrl(candidate, aUri);
-        script.homepageURL = uri.spec;
-      } catch (e) {
-        // Derived candidate wasn't parseable as a URI — leave homepageURL
-        // empty rather than storing a malformed value.
-      }
-    }
-  }
-
+  // Only a declared homepage is stored; the script page and the namespace
+  // fallback are derived when read (Script.homepageURL).
   setDefaults(script, ignoredMatch);
   if (ignoredMatch
       && (script._includes.length == 0) && (script._matches.length == 0)) {
@@ -574,69 +550,6 @@ function parse(aSource, aUri, aFailWhenMissing) {
         + " run on any page.  You can add your own @match in its Options."));
   }
   return script;
-}
-
-/**
- * Derives a human-viewable homepage from the URL a script was installed from.
- * Mirrors Violentmonkey's inferScriptHome() host-rewriting logic so that
- * scripts installed from raw file hosts still show a sensible homepage link.
- *
- *   raw.githubusercontent.com/<user>/<repo>/...   -> github.com/<user>/<repo>
- *   gist.githubusercontent.com/<user>/<id>/...    -> gist.github.com/<user>/<id>
- *   github.com/<user>/<repo>/raw/...              -> github.com/<user>/<repo>
- *   greasyfork.org/<locale>/scripts/<slug>/code/* -> .../scripts/<slug>
- *   sleazyfork.org/<locale>/scripts/<slug>/code/* -> .../scripts/<slug>
- *   openuserjs.org/install/<user>/<slug>.user.js  -> .../scripts/<user>/<slug>
- *   anything else                                 -> the install URL as-is
- *
- * @param {string} aInstallUrl - The URL the script was downloaded from.
- * @returns {string|null} A homepage URL, or null if input is falsy.
- */
-function inferHomepageFromInstallUrl(aInstallUrl) {
-  if (!aInstallUrl) return null;
-  let m;
-  // raw.githubusercontent.com/<user>/<repo>/<branch>/...
-  m = aInstallUrl.match(
-      /^https?:\/\/raw\.githubusercontent\.com\/([^\/]+)\/([^\/]+)\//i);
-  if (m) return "https://github.com/" + m[1] + "/" + m[2];
-  // gist.githubusercontent.com/<user>/<id>/raw/...
-  m = aInstallUrl.match(
-      /^https?:\/\/gist\.githubusercontent\.com\/([^\/]+)\/([^\/]+)\//i);
-  if (m) return "https://gist.github.com/" + m[1] + "/" + m[2];
-  // gist.github.com/<user>/<id>/raw/<sha>/<filename> — the other raw URL
-  // format gists expose (via the "Raw" button on the gist page itself).
-  // Strip the /raw/ suffix so the homepage points at the human-readable
-  // gist page rather than the .user.js download itself.
-  m = aInstallUrl.match(
-      /^(https?:\/\/gist\.github\.com\/[^\/]+\/[^\/]+)\/raw(?:\/|$)/i);
-  if (m) return m[1];
-  // github.com/<user>/<repo>/raw/<branch>/...
-  m = aInstallUrl.match(
-      /^(https?:\/\/github\.com\/[^\/]+\/[^\/]+)\/raw\//i);
-  if (m) return m[1];
-  // update.greasyfork.org / update.sleazyfork.org /scripts/<id>/<file>.user.js
-  //   This is the host that GreasyFork puts in @updateURL / @downloadURL,
-  //   so it's what we see for scripts whose update URL was followed (the
-  //   user-visible install button uses /code/<filename>, but the metadata
-  //   directives commonly point at the update host).  Strip the "update."
-  //   prefix and rewrite to the human-readable script page.
-  m = aInstallUrl.match(
-      /^https?:\/\/update\.(greasy|sleazy)fork\.org\/scripts\/([^\/]+)/i);
-  if (m) return "https://" + m[1] + "fork.org/scripts/" + m[2];
-  // greasyfork.org / sleazyfork.org [/<locale>] /scripts/<slug>[/...]
-  //   Catches both the locale-prefixed install URL (en, fr, zh-CN, etc.)
-  //   and the bare form.  Drops everything after /scripts/<slug> so the
-  //   homepage points at the script's overview page rather than the
-  //   /code/<filename> raw-source endpoint.
-  m = aInstallUrl.match(
-      /^https?:\/\/(greasy|sleazy)fork\.org\/(?:[^\/]+\/)?scripts\/([^\/]+)/i);
-  if (m) return "https://" + m[1] + "fork.org/scripts/" + m[2];
-  // openuserjs.org/install/<user>/<slug>.user.js
-  m = aInstallUrl.match(
-      /^https?:\/\/openuserjs\.org\/install\/([^\/]+)\/(.+?)\.user\.js$/i);
-  if (m) return "https://openuserjs.org/scripts/" + m[1] + "/" + m[2];
-  // Fallback: the install URL itself.
-  return aInstallUrl;
 }
 
 /**

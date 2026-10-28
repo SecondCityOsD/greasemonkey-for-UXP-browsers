@@ -61,6 +61,22 @@
   `%2`-like sequences, such as URLs with `%20`.
 
 **about:addons "User Scripts" pane**
+* **A script's homepage link goes to its real page.**  For a script that
+  declares no homepage, Greasemonkey guessed one.  It tried the
+  `@namespace` first, which is often a placeholder or an author profile.
+  As a last resort it used the script's own `.user.js` address, which
+  just reinstalls the script when clicked.  It now uses Violentmonkey's
+  order:
+  - the declared homepage;
+  - else the script's page on GreasyFork, SleazyFork, OpenUserJS, GitHub
+    or Gist, worked out from where it updates from;
+  - else an `@namespace` that is a web address.
+
+  IG Helper, for example, now links to its GreasyFork page instead of
+  github.snkms.com.  `GM_info.script.homepage` follows the same rule.
+  Existing scripts are corrected on the first start.  Importing a 3.9
+  backup no longer turns a guessed homepage into a declared one.
+* `@contributionURL` (a script's donation link) is now read and saved.
 * A script's Options window offers no Automatic updates choice when the
   script can't update at all.  For example, it has no web address to
   update from.  The window says why instead.
