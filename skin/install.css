@@ -29,18 +29,28 @@
   margin: 0;
 }
 
-#includes, #matches, #grants, #connects {
+#script-source {
+  margin: 0.5em 0 0 0;
+}
+
+/* Each section shows only when the script has something for it (see
+   setUpIncludes / setUpDependencies in install.js). */
+#antifeatures, #warnings, #includes, #matches, #excludes, #runat,
+#grants, #connects, #requires, #resources {
   margin-bottom: 1em;
   display: none;
 }
 
-#excludes {
-  display: none;
+#antifeatures-description, #warnings-description,
+#includes-description, #matches-description, #excludes-description,
+#runat-description, #grants-description, #connects-description,
+.dependency {
+  font-style: italic;
 }
 
-#includes-description, #matches-description, #excludes-description,
-#grants-description, #connects-description {
-  font-style: italic;
+/* URLs have no spaces to wrap at. */
+#script-source, .dependency {
+  word-wrap: break-word;
 }
 
 /* Every bit of text inside the textfield-styled #item-box uses the field

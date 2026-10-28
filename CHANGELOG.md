@@ -46,6 +46,19 @@
   `pageshow` itself.
 
 **Installing scripts**
+* **The install window shows what else a script brings with it.**  Before,
+  it listed only the pages a script runs on, its `@grant` and its
+  `@connect`.  It now also shows:
+  - where the script is installed from, with the site in bold;
+  - the code (`@require`) and files (`@resource`) it loads, one line each
+    with the site in bold.  The tooltip shows the whole address and, when
+    the script pins a hash for it, that the download is checked against
+    it.  A line on top names the other sites it runs code from, since that
+    code gets all of the script's permissions;
+  - its `@antifeature` declarations (ads, tracking, mining…);
+  - metadata it had to ignore, such as an unusable `@match`;
+  - `@exclude-match` rules, with the other pages it doesn't run on;
+  - its `@run-at`, when that isn't the usual document-end.
 * **An unusable `@match` no longer stops the install.**  A pattern such as
   `@match https://example.com` (no path) used to abort it, even though the
   message said it was being ignored.  The same went for a bad
