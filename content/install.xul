@@ -36,6 +36,18 @@
     <vbox id="item-box" flex="1">
       <vbox id="item-description">
         <description id="script-description" />
+        <description id="script-source" />
+      </vbox>
+      <!-- The labels of the sections without an entity below are set by
+           install.js from gmBrowser.properties, with English fallbacks:
+           a DTD entity missing from a locale would break the dialog. -->
+      <vbox id="antifeatures">
+        <label id="antifeatures-label" />
+        <description id="antifeatures-description" />
+      </vbox>
+      <vbox id="warnings">
+        <label id="warnings-label" />
+        <description id="warnings-description" />
       </vbox>
       <vbox id="includes">
         <label id="includes-label" value="&install.runsOn;" />
@@ -49,6 +61,10 @@
         <label id="excludes-label" value="&install.butNotOn;" />
         <description id="excludes-description" />
       </vbox>
+      <vbox id="runat">
+        <label id="runat-label" />
+        <description id="runat-description" />
+      </vbox>
       <vbox id="grants">
         <label id="grants-label" />
         <description id="grants-description" />
@@ -56,6 +72,16 @@
       <vbox id="connects">
         <label id="connects-label" />
         <description id="connects-description" />
+      </vbox>
+      <!-- One <description> per dependency, added by install.js. -->
+      <vbox id="requires">
+        <label id="requires-label" />
+        <description id="requires-summary" />
+        <vbox id="requires-list" />
+      </vbox>
+      <vbox id="resources">
+        <label id="resources-label" />
+        <vbox id="resources-list" />
       </vbox>
       <spacer flex="1" />
     </vbox>

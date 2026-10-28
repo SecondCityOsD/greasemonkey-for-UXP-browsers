@@ -28,8 +28,11 @@ var gTotalDelay = new GM_PrefManager().getValue("installDelay", 5);
 function init() {
   setUpIncludes("includes", "includes-label", "includes-description",
       gScript.includes);
+  // An @exclude-match keeps the script off a page just like an @exclude.
   setUpIncludes("excludes", "excludes-label", "excludes-description",
-      gScript.excludes);
+      gScript.excludes.concat(gScript.excludeMatches.map(function (aMatch) {
+        return aMatch.pattern;
+      })));
 
   let matches = [];
   for (let i = 0, iLen = gScript.matches.length; i < iLen; i++) {
@@ -61,20 +64,27 @@ function init() {
   description.appendChild(
       document.createTextNode(gScript.localized.description));
 
-  // Permissions summary (3.7.x): show @grant + @connect so the user sees
-  // what the script can do before installing.  Labels come from the
-  // browser bundle with an English fallback (no per-locale DTD churn).
-  function gmInstallString(aKey, aFallback) {
-    try { return bundle.getString(aKey); } catch (e) { return aFallback; }
+  // Everything else the user should see before installing: where the
+  // script comes from, its declared antifeatures, metadata it had to
+  // ignore, an unusual @run-at, what it may do (@grant, @connect) and the
+  // code and files it loads from elsewhere.
+  setUpSource("" + gRemoteScript.url);
+  setUpSection("antifeatures", "install.antifeatures",
+      "Antifeatures (@antifeature):", gScript.antifeatures);
+  setUpSection("warnings", "install.warnings", "Warnings:",
+      gScript.parseWarnings || []);
+  if (gScript.runAt != "document-end") {
+    setUpSection("runat", "install.runAt", "Runs at (@run-at):",
+        [gScript.runAt]);
   }
-  document.getElementById("grants-label").setAttribute("value",
-      gmInstallString("install.grants", "Permissions (@grant):"));
-  setUpIncludes("grants", "grants-label", "grants-description",
+  setUpSection("grants", "install.grants", "Permissions (@grant):",
       gScript.grants || []);
-  document.getElementById("connects-label").setAttribute("value",
-      gmInstallString("install.connects", "Can connect to (@connect):"));
-  setUpIncludes("connects", "connects-label", "connects-description",
+  setUpSection("connects", "install.connects", "Can connect to (@connect):",
       gScript.connects || []);
+  setUpRequiresSummary(setUpDependencies("requires", "install.requires",
+      "Code it loads (@require):", gScript.requires, false));
+  setUpDependencies("resources", "install.resources",
+      "Files it loads (@resource):", gScript.resources, true);
 
   let notice = document.getElementById("description-notice");
   let originalScriptVersion = document.getElementById(
@@ -184,6 +194,141 @@ function setUpIncludes(aBox, aLabel, aDescription, aIncludes) {
     }
 
     aDescription.removeChild(aDescription.lastChild);
+  }
+}
+
+/**
+ * A string from gmBrowser.properties, or aFallback while this locale
+ * doesn't have the key yet (strings added since the last locale pass).
+ */
+function installString(aKey, aFallback) {
+  try {
+    return document.getElementById("gm-browser-bundle").getString(aKey);
+  } catch (e) {
+    return aFallback;
+  }
+}
+
+/**
+ * setUpIncludes() for a section whose label is set here rather than in the
+ * DTD; its elements are "<aName>", "<aName>-label" and
+ * "<aName>-description".
+ */
+function setUpSection(aName, aLabelKey, aLabelFallback, aItems) {
+  document.getElementById(aName + "-label").setAttribute("value",
+      installString(aLabelKey, aLabelFallback));
+  setUpIncludes(aName, aName + "-label", aName + "-description", aItems);
+}
+
+/**
+ * Appends aUrl to aParent with its host in bold, so that the site stands
+ * out.  The fragment, where a pinned hash lives, is left out, and a very
+ * long URL (a data: one) is shortened.
+ *
+ * @returns {string} The URL's host (with any port), or "" if it has none.
+ */
+function appendUrl(aParent, aUrl) {
+  const MAX_SHOWN = 200;
+  let uri = GM_util.getUriFromUrl(aUrl);
+  let host = "";
+  try {
+    host = uri.hostPort;
+  } catch (e) {
+    // No URI, or one without a host (data:): shown as it is below.
+  }
+  let rest = host ? uri.path : (uri ? uri.spec : aUrl);
+  rest = rest.replace(/#.*$/, "");
+  try {
+    rest = decodeURI(rest);
+  } catch (e) {
+    // A malformed escape: keep the text encoded.
+  }
+  if (rest.length > MAX_SHOWN) {
+    rest = rest.substring(0, MAX_SHOWN) + "…";
+  }
+  if (host) {
+    let strong = document.createElementNS(HTML_NS, "strong");
+    strong.appendChild(document.createTextNode(host));
+    aParent.appendChild(document.createTextNode(uri.scheme + "://"));
+    aParent.appendChild(strong);
+  }
+  aParent.appendChild(document.createTextNode(rest));
+  return host;
+}
+
+/** "From: <url>" under the description: where the script comes from. */
+function setUpSource(aUrl) {
+  if (!aUrl) {
+    return undefined;
+  }
+  let source = document.getElementById("script-source");
+  source.appendChild(document.createTextNode(
+      installString("install.from", "From:") + " "));
+  appendUrl(source, aUrl);
+  source.setAttribute("tooltiptext", aUrl);
+}
+
+/**
+ * Lists @require or @resource dependencies in the section "<aName>" (with
+ * "<aName>-label" and "<aName>-list"), one line each: the resource's name
+ * (aNamed) and the URL with its host in bold.  The tooltip has the whole
+ * URL and, for a dependency with a pinned hash, says that the download is
+ * checked against it.
+ *
+ * @returns {string[]} The distinct hosts the dependencies come from.
+ */
+function setUpDependencies(
+    aName, aLabelKey, aLabelFallback, aDependencies, aNamed) {
+  let hosts = [];
+  if (aDependencies.length == 0) {
+    return hosts;
+  }
+  document.getElementById(aName).style.display = "block";
+  document.getElementById(aName + "-label").setAttribute("value",
+      installString(aLabelKey, aLabelFallback));
+  let list = document.getElementById(aName + "-list");
+  for (let i = 0, iLen = aDependencies.length; i < iLen; i++) {
+    let dependency = aDependencies[i];
+    let line = document.createElement("description");
+    line.className = "dependency";
+    let integrity = dependency._integrity;
+    line.setAttribute("tooltiptext", dependency.downloadURL + (integrity
+        ? "\n" + installString("install.integrity.pinned",
+            "Checked against its pinned %1 hash.")
+            .replace("%1", integrity.algo)
+        : ""));
+    if (aNamed) {
+      line.appendChild(document.createTextNode(dependency.name + ": "));
+    }
+    let host = appendUrl(line, dependency.downloadURL);
+    if (host && (hosts.indexOf(host) == -1)) {
+      hosts.push(host);
+    }
+    list.appendChild(line);
+  }
+  return hosts;
+}
+
+/**
+ * Names, above the @require list, the sites other than the script's own
+ * that it runs code from: that code has all of the script's permissions.
+ */
+function setUpRequiresSummary(aHosts) {
+  let ownHost = "";
+  try {
+    ownHost = GM_util.getUriFromUrl("" + gRemoteScript.url).hostPort;
+  } catch (e) {
+    // No host of its own (a local file): every host is another site.
+  }
+  let others = aHosts.filter(function (aHost) {
+    return aHost != ownHost;
+  });
+  let summary = document.getElementById("requires-summary");
+  summary.hidden = (others.length == 0);
+  if (others.length) {
+    summary.appendChild(document.createTextNode(installString(
+        "install.requires.otherSites", "From other sites: %1")
+        .replace("%1", others.join(", "))));
   }
 }
 
