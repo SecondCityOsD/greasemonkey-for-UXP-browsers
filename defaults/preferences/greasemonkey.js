@@ -151,7 +151,7 @@ pref("extensions.greasemonkey.fileDependencyUrlIsDescendantOfDownloadUrl", false
 pref("extensions.greasemonkey.fileIsGreaseable", false);
 pref("extensions.greasemonkey.globalExcludes", "[]");
 pref("extensions.greasemonkey.haveInsertedToolbarbutton", false);
-// Install window countdown, in ticks of 500 ms (2 = one second).  It
+// Install window countdown, in ticks of 400 ms (2 = 0.8 seconds).  It
 // starts again whenever the window loses the focus.
 pref("extensions.greasemonkey.installDelay", 2);
 pref("extensions.greasemonkey.jarIsGreaseable", false);
