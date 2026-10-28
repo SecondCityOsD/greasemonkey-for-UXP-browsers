@@ -59,6 +59,21 @@
   - metadata it had to ignore, such as an unusable `@match`;
   - `@exclude-match` rules, with the other pages it doesn't run on;
   - its `@run-at`, when that isn't the usual document-end.
+* **The Install button is ready sooner.**
+  - Its countdown is now one second instead of two and a half, but it
+    starts again whenever the install window loses the focus.  That
+    restart is what stops a page from popping the window up under your
+    cursor and timing a click onto Install.
+  - You can click Install before the script's `@require` and `@resource`
+    files have finished downloading.  The button then reads
+    "Installing…", and the script installs as soon as they are all in.
+  - The countdown is the `extensions.greasemonkey.installDelay` setting,
+    in half-second steps; `0` turns it off.
+* Backups now save only the Greasemonkey settings you have changed.  They
+  used to save every listed setting, so restoring one turned that day's
+  defaults into fixed choices.  A 3.9 backup still brings back the old
+  2.5-second countdown (`installDelay` 5), which you can reset in
+  about:config.
 * **An unusable `@match` no longer stops the install.**  A pattern such as
   `@match https://example.com` (no path) used to abort it, even though the
   message said it was being ignored.  The same went for a bad

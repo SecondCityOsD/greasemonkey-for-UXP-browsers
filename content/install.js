@@ -14,16 +14,26 @@ Cu.import("chrome://greasemonkey-modules/content/util.js");
 
 const HTML_NS = "http://www.w3.org/1999/xhtml";
 
+// The Install button unlocks once the window has had the focus for
+// installDelay ticks (default 2: one second).  Losing the focus starts the
+// count again, so a page can't pop this window up under the cursor and
+// time a click onto Install; that, not the length, is what the delay is
+// for.
+const TIMER_TICK_MS = 500;
+
 var gRemoteScript = window.arguments[0].wrappedJSObject[0];
 var gBrowser = window.arguments[0].wrappedJSObject[1];
 var gScript = window.arguments[0].wrappedJSObject[2];
 
 var gAcceptButton = null;
 var gCurrentDelay = null;
+// Install was clicked while files were still downloading ("click-ahead"):
+// onProgress installs once they are all in.
+var gInstallQueued = false;
 var gProgress = 0;
 var gShowScriptButton = null;
 var gTimer = null;
-var gTotalDelay = new GM_PrefManager().getValue("installDelay", 5);
+var gTotalDelay = new GM_PrefManager().getValue("installDelay", 2);
 
 function init() {
   setUpIncludes("includes", "includes-label", "includes-description",
@@ -46,6 +56,8 @@ function init() {
   gAcceptButton.baseLabel = gAcceptButton.label;
 
   startTimer();
+  window.addEventListener("blur", onBlur, false);
+  window.addEventListener("focus", onFocus, false);
   gShowScriptButton.disabled = true;
 
   let bundle = document.getElementById("gm-browser-bundle");
@@ -116,8 +128,12 @@ function init() {
   }
 }
 
-function onBlur(e) {
-  stopTimer();
+// Only the window's own focus changes count, not those between its
+// buttons; and a queued install isn't held up any more.
+function onBlur(aEvent) {
+  if ((aEvent.target == window) && !gInstallQueued) {
+    pauseTimer();
+  }
 }
 
 function onCancel() {
@@ -125,22 +141,37 @@ function onCancel() {
   window.close();
 }
 
-function onFocus(e) {
-  startTimer();
+function onFocus(aEvent) {
+  if ((aEvent.target == window) && !gInstallQueued) {
+    startTimer();
+  }
 }
 
 function onInterval() {
   gCurrentDelay--;
-  updateLabel();
-
-  if (gCurrentDelay == 0) {
+  if (gCurrentDelay <= 0) {
     stopTimer();
   }
+  updateLabel();
 }
 
 function onOk() {
   // Stops multiple pressing of the button.
   gAcceptButton.disabled = true;
+  if (!gRemoteScript.done) {
+    // Click-ahead: keep the window open and install from onProgress.
+    gInstallQueued = true;
+    updateLabel();
+    return false;
+  }
+  installAndClose();
+  return true;
+}
+
+function installAndClose() {
+  // Closing runs cleanup(), whose last progress event must not install
+  // a second time.
+  gInstallQueued = false;
   gRemoteScript.install();
   window.setTimeout(window.close, 0);
 }
@@ -156,6 +187,7 @@ function onProgress(aRemoteScript, aEventType, aData) {
 
     document.getElementById("loading").style.display = "none";
     if (gRemoteScript.errorMessage) {
+      gInstallQueued = false;
       gShowScriptButton.disabled = true;
       document.getElementById("dialog-content-box").style.display = "none";
       document.getElementById("error-content-box").style.display = "-moz-box";
@@ -163,6 +195,10 @@ function onProgress(aRemoteScript, aEventType, aData) {
           .textContent = gRemoteScript.errorMessage;
       stopTimer();
       updateLabel(false);
+      return undefined;
+    }
+    if (gInstallQueued) {
+      installAndClose();
       return undefined;
     }
   } else {
@@ -332,16 +368,22 @@ function setUpRequiresSummary(aHosts) {
   }
 }
 
+// (Re)starts the countdown from the top.  With installDelay 0 there is
+// nothing to count.
 function startTimer() {
+  stopTimer();
   gCurrentDelay = gTotalDelay;
   updateLabel();
 
-  gTimer = window.setInterval(onInterval, 500);
+  if (gCurrentDelay > 0) {
+    gTimer = window.setInterval(onInterval, TIMER_TICK_MS);
+  }
 }
 
 function stopTimer() {
   if (gTimer) {
     window.clearInterval(gTimer);
+    gTimer = null;
   }
   gCurrentDelay = 0;
 }
@@ -351,7 +393,9 @@ function updateLabel(aOkAllowed) {
     aOkAllowed = true;
   }
 
-  if (gCurrentDelay > 0) {
+  if (gInstallQueued) {
+    gAcceptButton.label = installString("install.installing", "Installing…");
+  } else if (gCurrentDelay > 0) {
     gAcceptButton.focus();
     gAcceptButton.label = gAcceptButton.baseLabel + " (" + gCurrentDelay + ")";
   } else {
@@ -360,7 +404,7 @@ function updateLabel(aOkAllowed) {
 
   /*
   Part 1/3 (remoteScript.js - Part 2/3 and 3/3).
-  Sometimes - throws an errors:
+  Installing before the downloads are done throws errors such as:
     NS_ERROR_FILE_IS_LOCKED: Component returned failure code:
       0x8052000e (NS_ERROR_FILE_IS_LOCKED) [nsIFile.moveTo]
       remoteScript.js:394:0
@@ -369,12 +413,11 @@ function updateLabel(aOkAllowed) {
       script.js:474:0
     TypeError: this._tempDir is null
       remoteScript.js:394:4
-  Especially if it contains many requires and resources
-  and if the button "Install" is pressed too soon.
-  gRemoteScript.done: This parameter also must be verified.
+  So the button unlocks with the countdown, but an early click only queues
+  the install (onOk); onProgress runs it once gRemoteScript.done.
   */
   let disabled = aOkAllowed
-      ? ((gCurrentDelay > 0) || (gProgress < 100) || !gRemoteScript.done)
+      ? ((gCurrentDelay > 0) || gInstallQueued)
       : true;
   gAcceptButton.disabled = disabled;
 }

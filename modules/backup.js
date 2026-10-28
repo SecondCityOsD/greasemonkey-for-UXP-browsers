@@ -1333,12 +1333,17 @@ function _applyImportedStorage(aScript, aStorageJson) {
 
 /**
  * Snapshots the whitelisted extensions.greasemonkey.* prefs for the
- * manifest's settings block.
+ * manifest's settings block: only the ones the user has changed.  A
+ * default written into a backup would come back as a user value on
+ * import, and pin that default once a later version changes it.
  */
 function _exportSettingsPrefs() {
   let out = {};
   for (let i = 0; i < SETTINGS_PREFS.length; i++) {
     try {
+      if (!GM_prefRoot.pref.prefHasUserValue(SETTINGS_PREFS[i])) {
+        continue;
+      }
       let value = GM_prefRoot.getValue(SETTINGS_PREFS[i]);
       if (typeof value !== "undefined") {
         out[SETTINGS_PREFS[i]] = value;
