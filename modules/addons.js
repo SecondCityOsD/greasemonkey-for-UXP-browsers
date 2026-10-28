@@ -403,6 +403,18 @@ ScriptAddon.prototype.findUpdates = function (aUpdateListener, aReason) {
     return undefined;
   }
 
+  // An edit made in an external editor since the last page load hasn't
+  // switched Automatic Updates Off yet.  Do it now, before any caller asks
+  // AddonManager.shouldAutoUpdate() whether to install what this check
+  // finds.
+  this._switchOffAutoUpdateForUnnoticedEdits();
+  // about:addons sets forceUpdate only after the user confirmed
+  // "Overwrite with remote contents?" (confirmForceUpdate), so Update Now
+  // needn't ask again for this version of the file.
+  if (this.forceUpdate) {
+    this._script.acceptLocalEditsLoss();
+  }
+
   let callback = this._handleRemoteUpdate.bind(this, aUpdateListener);
   // Treat user-initiated update checks (clicking "Check for Updates") as
   // manual — bypasses the shouldAutoUpdate() gate so scripts get checked
@@ -410,6 +422,18 @@ ScriptAddon.prototype.findUpdates = function (aUpdateListener, aReason) {
   let isManual = this.manualUpdate
       || (aReason == AddonManager.UPDATE_WHEN_USER_REQUESTED);
   this._script.checkForRemoteUpdate(callback, this.forceUpdate, isManual);
+};
+
+/**
+ * Switches Automatic Updates Off for local edits Greasemonkey hasn't
+ * noticed yet (see Script.switchOffAutoUpdateForUnnoticedEdits) and
+ * refreshes the radio in about:addons.
+ */
+ScriptAddon.prototype._switchOffAutoUpdateForUnnoticedEdits = function () {
+  if (this._script.switchOffAutoUpdateForUnnoticedEdits()) {
+    AddonManagerPrivate.callAddonListeners(
+        "onPropertyChanged", this, ["applyBackgroundUpdates"]);
+  }
 };
 
 /**
@@ -567,8 +591,32 @@ ScriptInstall.prototype._script = null;
  * Downloads and installs the updated script.
  * Notifies AOM listeners at each stage: download started/ended, install
  * started/ended, or download failed.
+ *
+ * If that would overwrite local edits the user hasn't agreed to lose, asks
+ * first.  Only a click reaches this with such edits (Update Now, Update
+ * Selected): automatic installs require Automatic Updates to be on, which
+ * an edit switches off, and the update scheduler checks the edits itself.
  */
 ScriptInstall.prototype.install = function () {
+  if (this._script.hasUnacceptedLocalEdits()) {
+    let confirmed = Services.prompt.confirm(
+        null,
+        "Greasemonkey",
+        GM_CONSTANTS.localeStringBundle.createBundle(
+            GM_CONSTANTS.localeGmAddonsProperties)
+            .GetStringFromName("confirmForceUpdate"));
+    if (!confirmed) {
+      // about:addons dropped its reference to this install when the button
+      // was clicked.  Announce the install again so the row offers Update
+      // Now again.  The row only does that while Automatic Updates is Off,
+      // which is the right setting for a script whose edits are kept.
+      this.existingAddon._switchOffAutoUpdateForUnnoticedEdits();
+      AddonManagerPrivate.callInstallListeners("onNewInstall", [], this);
+      return undefined;
+    }
+    this._script.acceptLocalEditsLoss();
+  }
+
   AddonManagerPrivate.callInstallListeners(
       "onDownloadStarted", this._listeners, this);
   this.state = AddonManager.STATE_DOWNLOADING;
