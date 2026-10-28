@@ -724,22 +724,37 @@ RemoteScript.prototype.install = function (aOldScript, aOnlyDependencies) {
     ScriptAddonFactoryByScript(this.script, true);
     this.script._changed("modified", this.script.id);
 
+    // Metadata lines the parser ignored (an unusable @match, say) don't
+    // stop the install, but the user must hear about them.
+    let warnings = this.script.parseWarnings;
+    if (warnings.length) {
+      GM_util.logError(
+          "(" + this.script.localized.name + ")\n" + warnings.join("\n"),
+          true, this.script.fileURL, null);
+    }
+
     // Let the user know we're all done.
     if (!this._silent) {
+      let message = "(" + this.script.localized.name + ") "
+          + GM_CONSTANTS.localeStringBundle.createBundle(
+              GM_CONSTANTS.localeGmBrowserProperties)
+              .GetStringFromName(this.messageName);
+      let topic = this.messageName;
       let notificationOptions = null;
-      if (this.messageName == "script.updated") {
+      if (warnings.length) {
+        // The popup collapses line breaks, hence the dashes.  Own topic,
+        // so muting plain "installed" messages doesn't hide warnings.
+        message += " — " + warnings.join(" — ");
+        topic = "script.parseWarnings";
+      }
+      if ((this.messageName == "script.updated") || warnings.length) {
         notificationOptions = {
           "persistence": -1,
           "persistWhileVisible": true,
           "learnMoreURL": this.script.homepageURL,
         };
       }
-      GM_notification(
-          "(" + this.script.localized.name + ") "
-          + GM_CONSTANTS.localeStringBundle.createBundle(
-              GM_CONSTANTS.localeGmBrowserProperties)
-              .GetStringFromName(this.messageName),
-          this.messageName, notificationOptions);
+      GM_notification(message, topic, notificationOptions);
     }
   }
 };
