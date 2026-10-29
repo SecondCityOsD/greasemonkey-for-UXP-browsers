@@ -1,8 +1,8 @@
 /**
  * @file sourceViewer/viewer.js
  * @overview Read-only, syntax-highlighted viewer for user-script source.
- *   Colours live in theme.js and the themed scrollbars in scrollbars.js,
- *   both loaded first.
+ *   Colours live in theme.js, the themed scrollbars in scrollbars.js and
+ *   the metadata header in meta.js, all loaded first.
  *
  * Loaded as a chrome XHTML document in a browser tab via
  *   chrome://greasemonkey/content/sourceViewer.xhtml?path=<encoded OS path>
@@ -87,8 +87,11 @@ var gCM = null;
 /** The live CodeMirror instance, kept so we can refresh() after layout. */
 var gCMInstance = null;
 
-/** Localised string bundle; lazily created in GM_sourceViewerLoad(). */
-var gBundle = null;
+/** Localised string bundles, created in GM_sourceViewerLoad(): the
+ *  viewer's own strings (greasemonkey.properties), then the install
+ *  window's (gmBrowser.properties), whose labels the metadata header
+ *  reuses. */
+var gBundles = [];
 
 window.addEventListener("load", GM_sourceViewerLoad, false);
 
@@ -100,12 +103,15 @@ window.addEventListener("load", GM_sourceViewerLoad, false);
  * @returns {void}
  */
 function GM_sourceViewerLoad() {
-  try {
-    gBundle = GM_CONSTANTS.localeStringBundle.createBundle(
-        GM_CONSTANTS.localeGreasemonkeyProperties);
-  } catch (e) {
-    gBundle = null;
-  }
+  gBundles = [];
+  [GM_CONSTANTS.localeGreasemonkeyProperties,
+      GM_CONSTANTS.localeGmBrowserProperties].forEach(function (aUrl) {
+    try {
+      gBundles.push(GM_CONSTANTS.localeStringBundle.createBundle(aUrl));
+    } catch (e) {
+      // Fallback strings cover it.
+    }
+  });
 
   SvTheme.init(document.body, svString);
 
@@ -137,7 +143,20 @@ function GM_sourceViewerLoad() {
   OS.File.read(path, { "encoding": "UTF-8" }).then(
       function (text) {
         renderSource(text);
-        showSourceName(text, url, path);
+        let script = parseSource(text, url);
+        showSourceName(script, url, path);
+        SvMeta.init({
+          "jumpTo": jumpToLine,
+          "relayout": function () {
+            if (gCMInstance) {
+              gCMInstance.refresh();
+            }
+          },
+          "script": script,
+          "string": svString,
+          "text": text,
+          "url": url,
+        });
       },
       function (e) {
         showNote(svString("sourceViewer.error.read",
@@ -210,31 +229,35 @@ function showSourceAddress(aSource) {
 }
 
 /**
- * Names the file in the toolbar and the tab: the script's own (localised)
- * @name and its @version when it has a metadata block, else the file name
- * (a @require'd library, say).  Uses the real metadata parser, so the name
- * is the one Greasemonkey shows everywhere else.
+ * Reads the file's metadata with the real parser, so names and warnings
+ * are the ones Greasemonkey shows everywhere else.
  * @param {string} aText - The file's contents.
+ * @param {string|null} aUrl - The address it was downloaded from.
+ * @returns {Script|null} null without a metadata block (a @require'd
+ *          library, say) or when the parser can't read it.
+ */
+function parseSource(aText, aUrl) {
+  try {
+    let scope = {};
+    Cu.import("chrome://greasemonkey-modules/content/parseScript.js", scope);
+    return scope.parse(aText, aUrl ? GM_util.getUriFromUrl(aUrl) : null,
+        /* aFailWhenMissing */ true);
+  } catch (e) {
+    return null;
+  }
+}
+
+/**
+ * Names the file in the toolbar and the tab: the script's own (localised)
+ * @name and its @version, else the file name.
+ * @param {Script|null} aScript - From parseSource().
  * @param {string|null} aUrl - The address it was downloaded from.
  * @param {string} aPath - The on-disk path.
  * @returns {void}
  */
-function showSourceName(aText, aUrl, aPath) {
-  let name = "";
-  let version = "";
-  try {
-    let scope = {};
-    Cu.import("chrome://greasemonkey-modules/content/parseScript.js", scope);
-    let script = scope.parse(
-        aText, aUrl ? GM_util.getUriFromUrl(aUrl) : null,
-        /* aFailWhenMissing */ true);
-    if (script) {
-      name = script.localized.name;
-      version = script.version || "";
-    }
-  } catch (e) {
-    // Metadata the parser can't read: name it after the file instead.
-  }
+function showSourceName(aScript, aUrl, aPath) {
+  let name = aScript ? aScript.localized.name : "";
+  let version = (aScript && aScript.version) || "";
   if (!name) {
     name = leafName(aUrl || aPath);
   }
@@ -407,22 +430,52 @@ function showNote(aMessage) {
 }
 
 /**
- * Looks up a localised string, returning an English fallback when the key
- * isn't present in the bundle (so this feature ships without touching the
- * 34 locale files; keys can be added later).
+ * Looks up a localised string in the viewer's bundles, returning an English
+ * fallback when no bundle has the key (so this feature ships without
+ * touching the 34 locale files; keys can be added later).
  * @param {string} aKey
  * @param {string} aFallback
  * @returns {string}
  */
 function svString(aKey, aFallback) {
-  if (!gBundle) {
-    return aFallback;
+  for (let i = 0, iLen = gBundles.length; i < iLen; i++) {
+    try {
+      return gBundles[i].GetStringFromName(aKey);
+    } catch (e) {
+      // Not in this bundle: try the next.
+    }
   }
-  try {
-    return gBundle.GetStringFromName(aKey);
-  } catch (e) {
-    return aFallback;
+  return aFallback;
+}
+
+/**
+ * Selects a line of the code and scrolls it into view: the metadata
+ * header's values jump to the line that declares them.
+ * @param {number} aLine - 0-based, as CodeMirror counts.
+ * @returns {void}
+ */
+function jumpToLine(aLine) {
+  if (gCMInstance) {
+    let from = {"ch": 0, "line": aLine};
+    let to = {"ch": gCMInstance.getLine(aLine).length, "line": aLine};
+    gCMInstance.setSelection(from, to);
+    gCMInstance.scrollIntoView({"from": from, "to": to}, 60);
+    gCMInstance.focus();
+    return;
   }
+  // The plain-text fallback: its value has its line breaks as "\n".
+  let textarea = document.getElementById("gm-sv-textarea");
+  if (!textarea) {
+    return;
+  }
+  let lines = textarea.value.split("\n");
+  let start = 0;
+  for (let i = 0; (i < aLine) && (i < lines.length); i++) {
+    start += lines[i].length + 1;
+  }
+  let length = (aLine < lines.length) ? lines[aLine].length : 0;
+  textarea.focus();
+  textarea.setSelectionRange(start, start + length);
 }
 
 /**

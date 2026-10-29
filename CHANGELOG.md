@@ -115,9 +115,26 @@
   - Both colour sets are complete (VS Code's Light+ and Dark+), scrollbars
     included: the viewer now draws its own, since this browser can't
     recolour native ones and they stayed light in Dark.
-* The file's location moved from the bottom strip to the new toolbar,
-  next to Find.  The strip now only appears for a note, such as "shown as
+* **The toolbar says what you're looking at.**  It used to show the path
+  of a temporary copy, which put your Windows user name in screenshots.
+  It now shows the script's name and version (a library's file name) and
+  the address it was downloaded from, with the site in bold, as in the
+  install window.  The tab is titled after the script too.  The status
+  strip at the bottom now only appears for a note, such as "shown as
   plain text".
+* **A metadata header above the code** lists what the script declares,
+  grouped as in the install window: where it runs and doesn't, `@run-at`
+  and `@noframes`, its `@grant` permissions, `@connect`, the code and
+  files it loads, `@antifeature`, its update addresses, and the lines the
+  parser ignores.
+  - Clicking a value selects the line that declares it.
+  - Permissions that reach past the page (requests to other sites,
+    cookies, downloads, the clipboard, `unsafeWindow`) get a small tag,
+    and `@connect *` is flagged.  Hovering one says what it allows.
+  - `http://` addresses get the install window's "not encrypted" mark,
+    and a `@require` or `@resource` address can be opened in a new tab.
+  - The **Metadata** button in the toolbar shows and hides it.  A
+    library has no metadata, so neither the header nor the button.
 
 **about:addons "User Scripts" pane**
 * **Homepage links go to the right pages.**  For a script that declares no
