@@ -271,12 +271,15 @@ function populateMetadataSection() {
   document.getElementById("meta-contribution-key").value = localizedString(
       "scriptPrefs.label.contribution", "Contribute");
 
-  // Timestamps come back as ms-since-epoch numbers (or null for very
-  // old configs).  Format with the user's locale conventions.
-  let installDate = gScript._installTime
-      ? new Date(gScript._installTime).toLocaleString()
+  // Installed is the first install, which updates keep; Last updated is
+  // the script file's latest change, an update or the user's own edit.
+  // Both are ms-since-epoch numbers (or null for very old configs),
+  // formatted with the user's locale conventions.  (modifiedDate is a
+  // Date even for a null time, so test the number.)
+  let installDate = gScript.firstInstallTime
+      ? new Date(gScript.firstInstallTime).toLocaleString()
       : "—";
-  let lastUpdate = gScript.modifiedDate
+  let lastUpdate = gScript._modifiedTime
       ? gScript.modifiedDate.toLocaleString()
       : "—";
   setLabel("meta-installed",  installDate);

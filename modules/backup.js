@@ -641,6 +641,7 @@ function _buildOptionsJson(aScript, aDependencies) {
     "enabled": aScript._enabled,
     "checkRemoteUpdates": aScript.checkRemoteUpdates,
     "installTime": aScript._installTime,
+    "firstInstallTime": aScript.firstInstallTime,
     "downloadURL": aScript._downloadURL,
     "updateURL": aScript._updateURL,
     "homepageURL": aScript._homepageURL,
@@ -1242,9 +1243,11 @@ function _normalizeImportedOptions(aRaw) {
  * live Script object.  `installTime` is deliberately NOT restored — it was
  * just set to "now" by the install pipeline and replacing it with the
  * exporter's timestamp would confuse the modified-since-install check.
- * downloadURL is also not touched here — it was already populated during
- * parse() from the synthesised install URI, and we want it to reflect the
- * URL the import used (which matches the sidecar's value anyway).
+ * The first-install date is restored, being history rather than that
+ * baseline.  downloadURL is also not touched here — it was already
+ * populated during parse() from the synthesised install URI, and we want
+ * it to reflect the URL the import used (which matches the sidecar's
+ * value anyway).
  */
 function _applyImportedOptions(aScript, aOptions) {
   if (!aOptions || typeof aOptions !== "object") return;
@@ -1293,6 +1296,18 @@ function _applyImportedOptions(aScript, aOptions) {
     }
     if (typeof aOptions.userOverride === "boolean") {
       aScript._userOverride = aOptions.userOverride;
+    }
+    // The earliest first install known wins: the backup's, or the copy's
+    // this import replaced.  A backup from before 3.10 has only
+    // installTime, its last install or update before the export, which
+    // still comes before this import.
+    let firstInstalls = [aOptions.firstInstallTime, aOptions.installTime,
+        aScript.firstInstallTime].filter(function (aTime) {
+          return (typeof aTime === "number") && (aTime > 0)
+              && (aTime <= Date.now());
+        });
+    if (firstInstalls.length) {
+      aScript._firstInstallTime = Math.min.apply(null, firstInstalls);
     }
     aScript._changed("modified", null);
   } catch (e) {

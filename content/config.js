@@ -383,6 +383,9 @@ Config.prototype.install = function (
     });
     aScript.userIncludes = aOldScript.userIncludes;
     aScript.userOverride = aOldScript.userOverride;
+    // The first install outlives updates; _installTime, set below, is this
+    // version's.
+    aScript._firstInstallTime = aOldScript.firstInstallTime;
 
     // Uninstall the old script.
     this.uninstall(aOldScript, true);

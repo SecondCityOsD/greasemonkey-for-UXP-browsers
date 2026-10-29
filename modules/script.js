@@ -208,7 +208,12 @@ function Script(aConfigNode) {
   this._icon = new ScriptIcon(this);
   this._id = null;
   this._includes = [];
+  // When this version was installed: the baseline for spotting local
+  // edits, so every update resets it.
   this._installTime = null;
+  // When the script was first installed; updates keep it.  See the
+  // firstInstallTime getter.
+  this._firstInstallTime = null;
   // All available localized properties.
   this._locales = {};
   // The best localized matches for the current browser locale.
@@ -671,6 +676,16 @@ Object.defineProperty(Script.prototype, "modifiedDate", {
   "enumerable": true,
 });
 
+/** When the script was first installed (ms since the epoch).  Updates
+ *  reset _installTime but keep this.  Configs from before 3.10 never
+ *  stored it, so their scripts start from the install time on record. */
+Object.defineProperty(Script.prototype, "firstInstallTime", {
+  "get": function Script_getFirstInstallTime() {
+    return this._firstInstallTime || this._installTime;
+  },
+  "enumerable": true,
+});
+
 Object.defineProperty(Script.prototype, "name", {
   "get": function Script_getName() {
     return this._name;
@@ -918,10 +933,17 @@ Script.prototype.setFilename = function (aBaseName, aFileName) {
  * edits" state (_modifiedTime > _installTime), so the Add-ons Manager
  * entry stops showing the yellow-stripes overlay and the Automatic
  * Updates radio goes back to whatever the user had it set to.
+ *
+ * A new script's first install is this one, at the same time, so the
+ * Options window doesn't show it installed after its last update.  An
+ * updated script's was carried over by Config.install().
  */
 Script.prototype.fixTimestampsOnInstall = function () {
   this._modifiedTime = this.file.lastModifiedTime;
   this._installTime = this.file.lastModifiedTime;
+  if (!this._firstInstallTime) {
+    this._firstInstallTime = this._installTime;
+  }
 };
 
 /**
@@ -990,6 +1012,12 @@ Script.prototype._fromConfigNode = function (aNode) {
   } else {
     this._installTime = parseInt(aNode.getAttribute("installTime"), 10);
   }
+  // Absent before 3.10: the install time on record, the last update, is
+  // the earliest date known.  A first install can't come after it either.
+  let firstInstallTime = parseInt(aNode.getAttribute("firstInstallTime"), 10);
+  this._firstInstallTime = ((firstInstallTime > 0)
+      && !(firstInstallTime > this._installTime))
+      ? firstInstallTime : this._installTime;
 
   this._uuid = aNode.getAttribute("uuid");
 
@@ -1268,6 +1296,7 @@ Script.prototype.toConfigNode = function (aDoc) {
   scriptNode.setAttribute("description", this._description);
   scriptNode.setAttribute("enabled", this._enabled);
   scriptNode.setAttribute("filename", this._filename);
+  scriptNode.setAttribute("firstInstallTime", this.firstInstallTime);
   scriptNode.setAttribute("installTime", this._installTime);
   scriptNode.setAttribute("modified", this._modifiedTime);
   scriptNode.setAttribute("name", this._name);
