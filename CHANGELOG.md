@@ -149,6 +149,19 @@
     through the matches.  A short selection fills in the search when
     find opens.
   - **Ctrl+G** goes to a line, or `line:column`.
+* **Reading long scripts is easier.**
+  - Code can be folded from a gutter beside the line numbers: braces,
+    and the whole `==UserScript==` block.
+  - A **Wrap** button (or Alt+Z) wraps long lines.
+  - Ctrl++, Ctrl+-, Ctrl+0 and Ctrl+wheel change the code's text size,
+    leaving the toolbar as it is.  The status bar shows the size when it
+    isn't 100%; click it to reset.
+  - Wrap, the text size and whether the metadata header is shown are
+    remembered, and apply to every open viewer.
+* **Copy** puts the whole file on the clipboard.  Web addresses in the
+  code are underlined, and **Ctrl+click** opens one in a new tab.  A
+  plain click still just places the cursor.  The **?** button (or the ?
+  key) lists the keyboard shortcuts.
 
 **about:addons "User Scripts" pane**
 * **Homepage links go to the right pages.**  For a script that declares no
