@@ -894,10 +894,19 @@ RemoteScript.prototype.showSource = function (aBrowser) {
   // rather than the browser's raw file:// view, so the user gets syntax
   // highlighting, line numbers and find while reviewing before install.  The
   // viewer falls back to plain read-only text if CodeMirror can't load.
-  // Its toolbar shows the address the script came from.
+  // Its toolbar shows the address the script came from, and the @icon once
+  // that has downloaded (a data: icon the viewer reads from the metadata).
   let viewerUrl = "chrome://greasemonkey/content/sourceViewer.xhtml?path="
       + encodeURIComponent(this._scriptFile.path)
       + "&url=" + encodeURIComponent(this._url);
+  let icon = this.script && this.script.icon;
+  let iconReport = this._dependencyReports.filter(function (aReport) {
+    return (aReport.dependency === icon) && (aReport.state == "done");
+  })[0];
+  if (iconReport) {
+    viewerUrl += "&icon=" + encodeURIComponent(
+        GM_util.getUriFromFile(iconReport.file).spec);
+  }
   let tab = tabBrowser.addTab(viewerUrl);
   tabBrowser.selectedTab = tab;
 

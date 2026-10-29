@@ -7,9 +7,10 @@
  * Loaded as a chrome XHTML document in a browser tab via
  *   chrome://greasemonkey/content/sourceViewer.xhtml?path=<encoded OS path>
  *       &url=<encoded address it was downloaded from>
- * The toolbar shows the script's name and version (from its metadata, or
- * the file name for a library) and that address; url is optional, and
- * without it the toolbar shows the path.
+ *       &icon=<encoded file: URL of the downloaded @icon>
+ * The toolbar shows the script's icon, name and version (from its
+ * metadata, or the file name for a library) and that address.  url and
+ * icon are optional; without url the toolbar shows the path.
  *
  * Opened from:
  *   - RemoteScript.showSource()  — the install-time "Show Script Source"
@@ -145,6 +146,7 @@ function GM_sourceViewerLoad() {
         renderSource(text);
         let script = parseSource(text, url);
         showSourceName(script, url, path);
+        showSourceIcon(readQueryParam("icon"), script);
         SvMeta.init({
           "jumpTo": jumpToLine,
           "relayout": function () {
@@ -278,6 +280,46 @@ function showSourceName(aScript, aUrl, aPath) {
       ? svString("sourceViewer.title.named", "%1 — Source")
           .replace("%1", function () { return label; })
       : svString("sourceViewer.title", "User Script Source");
+}
+
+/**
+ * Puts the script's @icon beside its name, as the install window does:
+ * the downloaded copy the caller passed, else a data: icon from the
+ * metadata.  An icon that fails to load is hidden again.
+ * @param {string|null} aIconUrl - A file: URL; only one inside the
+ *        user-scripts folder or the temp area is used (see isAllowedPath).
+ * @param {Script|null} aScript - From parseSource().
+ * @returns {void}
+ */
+function showSourceIcon(aIconUrl, aScript) {
+  let image = document.getElementById("gm-sv-icon");
+  if (!image) {
+    return;
+  }
+  let src = null;
+  if (aIconUrl) {
+    try {
+      let file = GM_util.getUriFromUrl(aIconUrl)
+          .QueryInterface(Ci.nsIFileURL).file;
+      if (isAllowedPath(file.path)) {
+        src = aIconUrl;
+      }
+    } catch (e) {
+      // Not a local file: no icon from it.
+    }
+  }
+  let dataUri = aScript && aScript.icon && aScript.icon._dataURI;
+  if (!src && dataUri && /^data:image\//i.test(dataUri)) {
+    src = dataUri;
+  }
+  if (!src) {
+    return;
+  }
+  image.addEventListener("error", function () {
+    image.setAttribute("hidden", "hidden");
+  }, false);
+  image.src = src;
+  image.removeAttribute("hidden");
 }
 
 /**
