@@ -115,8 +115,8 @@
   its frames, each one once, so a script enabled after the page loaded
   doesn't count until it runs.  It follows you between tabs and pages,
   Back and Forward included, and is hidden when nothing ran or
-  Greasemonkey is off.  Set `extensions.greasemonkey.toolbarBadge` to
-  false to turn it off.
+  Greasemonkey is off.  Preferences chooses what it counts and its
+  colour (below).
 
 **Greasemonkey Preferences**
 * **Preferences no longer blocks the browser.**  It opens as an ordinary
@@ -126,6 +126,11 @@
 * **Notify script updates** turns the "… updated successfully" message
   on or off.  Before, it could only be silenced from the message's own
   "Never show again".
+* **Toolbar button: Badge** shows the number of unique running scripts
+  (the default), the number of running scripts (a script running in
+  three frames counts three times, as in Violentmonkey) or nothing.
+  **Color** picks the badge's colour; its figures turn black or white to
+  stay readable.
 
 **Source viewer**
 * **A dark theme that follows the browser.**  The viewer's dark colours

@@ -39,17 +39,18 @@
  *     Recursive frame-URL collector, called by content/browser.js for
  *     the toolbar popup and tooltip.
  *
- *   scriptsRanIn(aTopWin)
- *     The ids of the scripts that actually ran in a tab's page (top
- *     document and its frames, each script once), for the toolbar
- *     button's badge.  Each new one is announced with the
- *     "greasemonkey:scripts-ran" observer topic (subject: the top
- *     window).
+ *   scriptsRanIn(aTopWin) / scriptRunCountIn(aTopWin)
+ *     The scripts that actually ran in a tab's page (top document and
+ *     its frames), for the toolbar button's badge: their ids, each
+ *     script once, or how many ran counting each frame they ran in.
+ *     Each new run is announced with the "greasemonkey:scripts-ran"
+ *     observer topic (subject: the top window).
  */
 
 const EXPORTED_SYMBOLS = [
   "startScriptInjector",
   "injectDelayedScript",
+  "scriptRunCountIn",
   "scriptsRanIn",
   "urlsOfAllFrames",
 ];
@@ -263,25 +264,28 @@ function urlsOfAllFrames(aContentWin) {
 }
 
 /**
- * Top-level document -> Set of the ids of the scripts that ran in it or
- * its frames (the toolbar badge).  Keyed on the document, not the window:
- * a tab's window is reused when it navigates, its document isn't, and
- * Back/Forward restores the very same document from the bfcache.  The
- * WeakMap lets a closed page's set go with it.
+ * Top-level document -> what ran in it and its frames (the toolbar badge):
+ * {ids: the Set of script ids, frames: a Map from each window, the top one
+ * included, to {doc, ids} for the page it showed}.  Keyed on the document,
+ * not the window: a tab's window is reused when it navigates, its document
+ * isn't, and Back/Forward restores the very same document from the
+ * bfcache.  The WeakMap lets a closed page's record go with it.
  */
 var gScriptsRan = new WeakMap();
 
 /**
  * Records that aScript ran in aContentWin (a page or a frame), and
- * announces it when it's new for the tab's page.
+ * announces it when it's new for that frame's page.  A script that runs
+ * again in the same page (another run-at) counts once.
  * @param {Window}    aContentWin
  * @param {IPCScript} aScript
  */
 function noteScriptRan(aContentWin, aScript) {
-  let top;
+  let top, doc;
   try {
     top = aContentWin.top;
-    if (!top || !top.document) {
+    doc = aContentWin.document;
+    if (!top || !top.document || !doc) {
       return;
     }
   } catch (e) {
@@ -289,13 +293,21 @@ function noteScriptRan(aContentWin, aScript) {
   }
   let ran = gScriptsRan.get(top.document);
   if (!ran) {
-    ran = new Set();
+    ran = {"frames": new Map(), "ids": new Set()};
     gScriptsRan.set(top.document, ran);
   }
-  if (!ran.has(aScript.id)) {
-    ran.add(aScript.id);
-    Services.obs.notifyObservers(top, "greasemonkey:scripts-ran", null);
+  // A frame that loaded another page starts its count again.
+  let frame = ran.frames.get(aContentWin);
+  if (!frame || (frame.doc !== doc)) {
+    frame = {"doc": doc, "ids": new Set()};
+    ran.frames.set(aContentWin, frame);
   }
+  if (frame.ids.has(aScript.id)) {
+    return;
+  }
+  frame.ids.add(aScript.id);
+  ran.ids.add(aScript.id);
+  Services.obs.notifyObservers(top, "greasemonkey:scripts-ran", null);
 }
 
 /**
@@ -305,7 +317,31 @@ function noteScriptRan(aContentWin, aScript) {
  */
 function scriptsRanIn(aTopWin) {
   let ran = aTopWin && aTopWin.document && gScriptsRan.get(aTopWin.document);
-  return ran ? Array.from(ran) : [];
+  return ran ? Array.from(ran.ids) : [];
+}
+
+/**
+ * @param {Window} aTopWin - A tab's content window.
+ * @returns {number} How many scripts ran in its current page, each counted
+ *          once per frame it runs in (Violentmonkey's "total").  Frames
+ *          that are gone, or show another page by now, don't count.
+ */
+function scriptRunCountIn(aTopWin) {
+  let ran = aTopWin && aTopWin.document && gScriptsRan.get(aTopWin.document);
+  if (!ran) {
+    return 0;
+  }
+  let count = 0;
+  ran.frames.forEach(function (aFrame, aWin) {
+    try {
+      if (!aWin.closed && (aWin.document === aFrame.doc)) {
+        count += aFrame.ids.size;
+      }
+    } catch (e) {
+      // A frame we can no longer reach is gone.
+    }
+  });
+  return count;
 }
 
 

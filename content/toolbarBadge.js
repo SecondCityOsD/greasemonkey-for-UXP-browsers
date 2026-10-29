@@ -9,7 +9,8 @@
 // the button keeps the theme's layout and the count stays on the icon.
 
 var GM_ToolbarBadge = {
-  // Painted icons as data: URIs, by icon, count, scale and direction.
+  // Painted icons as data: URIs, by icon, count, colour, scale and
+  // direction.
   "cache": new Map(),
   // Loaded icons by URL; null for one that failed to load.
   "images": new Map(),
@@ -21,9 +22,9 @@ var GM_ToolbarBadge = {
 GM_ToolbarBadge.HTML_NS = "http://www.w3.org/1999/xhtml";
 /** Painted icons kept: tab switches mostly move between a few counts. */
 GM_ToolbarBadge.CACHE_SIZE = 24;
-/** The platform's own badge red, with white figures. */
+/** The pill's colour unless Preferences sets another: the platform's own
+ *  badge red (as defaults/preferences has it). */
 GM_ToolbarBadge.FILL = "#d90000";
-GM_ToolbarBadge.TEXT = "#fff";
 
 /**
  * Shows aCount in the corner of aButton's icon, or the plain icon at 0.
@@ -34,8 +35,10 @@ GM_ToolbarBadge.TEXT = "#fff";
  *
  * @param {Element} aButton - The toolbar button.
  * @param {number} aCount - How many scripts ran; 0 for no badge.
+ * @param {string} [aColor] - The pill's #rrggbb colour; the figures go
+ *     black or white to stay readable.  Anything else: FILL.
  */
-GM_ToolbarBadge.paint = function (aButton, aCount) {
+GM_ToolbarBadge.paint = function (aButton, aCount, aColor) {
   let generations = GM_ToolbarBadge.generations;
   let generation = (generations.get(aButton) || 0) + 1;
   generations.set(aButton, generation);
@@ -55,6 +58,8 @@ GM_ToolbarBadge.paint = function (aButton, aCount) {
     return undefined;
   }
   let source = {
+    "fill": /^#[0-9a-f]{6}$/i.test(aColor)
+        ? aColor.toLowerCase() : GM_ToolbarBadge.FILL,
     "font": style.getPropertyValue("font-family") || "sans-serif",
     "region": region,
     "rtl": style.getPropertyValue("direction") == "rtl",
@@ -67,8 +72,8 @@ GM_ToolbarBadge.paint = function (aButton, aCount) {
     if (!aImage || (generation != generations.get(aButton))) {
       return undefined;
     }
-    let key = [source.url, JSON.stringify(region), source.rtl, scale, text]
-        .join("|");
+    let key = [source.url, JSON.stringify(region), source.rtl, source.fill,
+        scale, text].join("|");
     let uri = GM_ToolbarBadge.cache.get(key);
     if (uri === undefined) {
       uri = GM_ToolbarBadge.draw(aImage, source, text, scale);
@@ -140,7 +145,7 @@ GM_ToolbarBadge.loadImage = function (aUrl, aCallback) {
  * Paints the icon with aText in a pill in its bottom corner.
  *
  * @param {HTMLImageElement} aImage - The loaded icon.
- * @param {Object} aSource - font, region, rtl (see paint()).
+ * @param {Object} aSource - fill, font, region, rtl (see paint()).
  * @param {string} aText - The figures.
  * @param {number} aScale - Device pixels per CSS pixel.
  * @returns {?string} A data: URI the size of the icon, or null.
@@ -181,11 +186,11 @@ GM_ToolbarBadge.draw = function (aImage, aSource, aText, aScale) {
   ctx.fill();
   ctx.globalCompositeOperation = "source-over";
   GM_ToolbarBadge.pillPath(ctx, x, y, pillWidth, pillHeight);
-  ctx.fillStyle = GM_ToolbarBadge.FILL;
+  ctx.fillStyle = aSource.fill;
   ctx.fill();
   // Centre the figures on their height (about 0.72 of the font size), not
   // on the font's whole line, which sits them too low.
-  ctx.fillStyle = GM_ToolbarBadge.TEXT;
+  ctx.fillStyle = GM_ToolbarBadge.textColor(aSource.fill);
   ctx.textAlign = "center";
   ctx.textBaseline = "alphabetic";
   ctx.fillText(aText, x + pillWidth / 2,
@@ -203,6 +208,23 @@ GM_ToolbarBadge.draw = function (aImage, aSource, aText, aScale) {
       + '<image width="' + width + '" height="' + height + '"'
       + ' xlink:href="' + png + '"/></svg>';
   return "data:image/svg+xml," + encodeURIComponent(svg);
+};
+
+/**
+ * White or black figures for a pill of aFill (#rrggbb), whichever has the
+ * higher contrast (WCAG): white on the default red, black on a light one.
+ */
+GM_ToolbarBadge.textColor = function (aFill) {
+  let luminance = [[1, 0.2126], [3, 0.7152], [5, 0.0722]].reduce(
+      function (aSum, [aAt, aWeight]) {
+        let channel = parseInt(aFill.substr(aAt, 2), 16) / 255;
+        channel = (channel <= 0.03928) ? channel / 12.92
+            : Math.pow((channel + 0.055) / 1.055, 2.4);
+        return aSum + aWeight * channel;
+      }, 0);
+  let onWhite = 1.05 / (luminance + 0.05);
+  let onBlack = (luminance + 0.05) / 0.05;
+  return (onWhite >= onBlack) ? "#fff" : "#000";
 };
 
 /** Traces a pill (a rectangle with round ends) for fill(). */

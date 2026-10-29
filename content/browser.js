@@ -298,26 +298,31 @@ GM_BrowserUI.refreshStatus = function () {
 
 /**
  * Shows on the toolbar button how many user scripts ran in the selected
- * tab's page: the top document and its frames, each script counted once
- * (Violentmonkey's default).  toolbarBadge.js paints it into the icon's
- * corner.  Hidden at 0, while Greasemonkey is off, with
- * extensions.greasemonkey.toolbarBadge false, and when the button isn't
- * on a toolbar.
+ * tab's page, the top document and its frames, as Preferences says
+ * (extensions.greasemonkey.toolbarBadge.show): each script once
+ * ("unique", Violentmonkey's default), once per frame it ran in ("total"),
+ * or not at all ("none").  toolbarBadge.js paints it into the icon's
+ * corner in toolbarBadge.color.  Hidden at 0, while Greasemonkey is off,
+ * and when the button isn't on a toolbar.
  */
 GM_BrowserUI.refreshBadge = function () {
   let button = document.getElementById("greasemonkey-tbb");
   if (!button) {
     return;
   }
+  let show = GM_prefRoot.getValue("toolbarBadge.show", "unique");
   let count = 0;
-  if (GM_util.getEnabled() && GM_prefRoot.getValue("toolbarBadge", true)) {
+  if (GM_util.getEnabled() && (show != "none")) {
     try {
-      count = scriptsRanIn(gBrowser.selectedBrowser.contentWindow).length;
+      let win = gBrowser.selectedBrowser.contentWindow;
+      count = (show == "total")
+          ? scriptRunCountIn(win) : scriptsRanIn(win).length;
     } catch (e) {
       count = 0;
     }
   }
-  GM_ToolbarBadge.paint(button, count);
+  GM_ToolbarBadge.paint(button, count,
+      GM_prefRoot.getValue("toolbarBadge.color", ""));
 };
 
 /** A script ran somewhere for the first time on its page: the selected
