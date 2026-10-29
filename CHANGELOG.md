@@ -118,6 +118,12 @@
   Greasemonkey is off.  Set `extensions.greasemonkey.toolbarBadge` to
   false to turn it off.
 
+**Greasemonkey Preferences**
+* **Preferences no longer blocks the browser.**  It opens as an ordinary
+  window, from the toolbar menu and from the Add-ons Manager, so you can
+  keep browsing with it open.  Opening it again brings the open window
+  forward.
+
 **Source viewer**
 * **A dark theme that follows the browser.**  The viewer's dark colours
   were tied to Pale Moon's "Web Page Color Scheme" setting, which themes

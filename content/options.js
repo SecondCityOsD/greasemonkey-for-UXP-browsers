@@ -21,6 +21,34 @@ Cu.import("chrome://greasemonkey-modules/content/util.js");
 
 const EDITOR_PATH_DEFAULT = "[Scratchpad]";
 
+// Preferences is modeless (GM_BrowserUI.openOptions marks its copies), so
+// the browser stays usable while it's open.  The Add-ons Manager opens
+// add-on options modal, though, unless browser.preferences.instantApply
+// is on: such a copy hands over before it's ever shown.
+if (!GM_isModelessOptions()) {
+  GM_handOverToModelessOptions();
+}
+
+function GM_isModelessOptions() {
+  let args = window.arguments;
+  return !!(args && args[0] && args[0].modeless);
+}
+
+/**
+ * Closes this modal copy and has the browser window open the modeless one
+ * just after: on its own timer, which outlives this window, and once this
+ * one is gone, or closing it would bring the browser back in front.
+ * Without a browser window this copy just stays.
+ */
+function GM_handOverToModelessOptions() {
+  let browserWin = Services.wm.getMostRecentWindow("navigator:browser");
+  if (!browserWin || !browserWin.GM_BrowserUI) {
+    return undefined;
+  }
+  browserWin.setTimeout(browserWin.GM_BrowserUI.openOptions, 150);
+  window.close();
+}
+
 // PARKED for 3.9 (scheduled backups): GM_pickedBackupFolder plus the backup
 // load/save blocks and the handlers below are disabled together with the
 // Backups groupbox in options.xul and the scheduler in the service.

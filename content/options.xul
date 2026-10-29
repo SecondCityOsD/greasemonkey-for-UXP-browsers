@@ -21,6 +21,7 @@
 <dialog xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul"
   buttons="accept,cancel"
   id="greasemonkey-options-dialog"
+  windowtype="greasemonkey:options"
   title="Greasemonkey - &preferencesCmd2.label;"
   onload="GM_loadOptions();"
   ondialogaccept="GM_saveOptions();"

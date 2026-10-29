@@ -391,9 +391,29 @@ GM_BrowserUI.showToolbarButton = function () {
   }
 };
 
+/**
+ * Opens Greasemonkey Preferences, or brings it forward when it's open.  It
+ * is modeless, so the browser stays usable meanwhile.  The copy the
+ * Add-ons Manager opens is modal, and options.js hands it over to this.
+ */
 GM_BrowserUI.openOptions = function () {
-  openDialog(
-      "chrome://greasemonkey/content/options.xul", null, "modal,resizable");
+  let windows = Services.wm.getEnumerator("greasemonkey:options");
+  while (windows.hasMoreElements()) {
+    let win = windows.getNext();
+    if (!win.closed && GM_BrowserUI.isModelessOptions(win)) {
+      win.focus();
+      return undefined;
+    }
+  }
+  openDialog("chrome://greasemonkey/content/options.xul", "",
+      "chrome,dialog,resizable", {"modeless": true});
+};
+
+/** Whether aWin is a Preferences window openOptions() opened (marked by
+ *  its argument), not a modal copy about to hand over. */
+GM_BrowserUI.isModelessOptions = function (aWin) {
+  let args = aWin.arguments;
+  return !!(args && args[0] && args[0].modeless);
 };
 
 GM_BrowserUI.checkDisabledScriptNavigation = function (aContentType, aHref) {
