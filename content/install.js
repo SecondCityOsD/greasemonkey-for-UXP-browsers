@@ -9,6 +9,7 @@ if (typeof Cu === "undefined") {
 }
 
 Cu.import("chrome://greasemonkey-modules/content/prefManager.js");
+Cu.import("chrome://greasemonkey-modules/content/sourceViewerTabs.js");
 Cu.import("chrome://greasemonkey-modules/content/util.js");
 
 
@@ -203,11 +204,10 @@ function viewDependencyFile(aFile, aUrl) {
   if (!browserWindow) {
     return undefined;
   }
-  let tabBrowser = browserWindow.gBrowser;
-  tabBrowser.selectedTab = tabBrowser.addTab(
-      "chrome://greasemonkey/content/sourceViewer.xhtml?path="
-      + encodeURIComponent(aFile.path)
-      + "&url=" + encodeURIComponent(aUrl));
+  GM_openSourceViewer(browserWindow.gBrowser, {
+    "path": aFile.path,
+    "url": aUrl,
+  });
   browserWindow.focus();
 }
 

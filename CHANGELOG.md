@@ -121,7 +121,7 @@
   name) and the address it was downloaded from, with the site in bold, as
   in the install window.  The icon is the copy the install window already
   downloaded, so it isn't fetched again.  The tab is titled after the
-  script too.
+  script too, and its address no longer contains the file's path either.
 * **A status bar** at the bottom shows the cursor's line and column (and
   how much is selected), the number of lines, the size, the line endings
   (LF, CRLF, or mixed, with counts on hover), a UTF-8 byte order mark, and
