@@ -207,6 +207,16 @@
   already have start from their last update; their next update moves
   the two apart.  Backups keep the date, and restoring an older backup
   uses the earliest date it has.
+* **Stored values get a proper editor.**  Add and Edit on a script's
+  Values tab opened a one-line prompt, far too small for anything longer
+  than a word.  They now open an editor window you can resize or
+  maximise, with the key and the value together and the value in a
+  fixed-width font.  Text values are edited as plain text, so a script
+  that keeps JSON in a string, as 4chan X does, reads without `\"`
+  escapes.  **Edit as JSON** is there for numbers, lists and objects.
+  **Format** and **Compact** lay out JSON, invalid JSON is pointed out
+  before it can be saved, Ctrl+Z undoes either, and Ctrl+Enter saves.
+  Double-clicking a value opens it too.
 * **Options now opens for disabled scripts, from the list as well.**  The
   Options button on a disabled script's row did nothing, and the detail
   pane only worked through a separate stand-in button.  Both now use the
