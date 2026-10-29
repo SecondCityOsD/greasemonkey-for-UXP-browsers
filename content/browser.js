@@ -299,10 +299,10 @@ GM_BrowserUI.refreshStatus = function () {
 /**
  * Shows on the toolbar button how many user scripts ran in the selected
  * tab's page: the top document and its frames, each script counted once
- * (Violentmonkey's default).  It's the platform's own badge (the
- * badged-button class in browser.xul), so the theme styles it.  Hidden at
- * 0, while Greasemonkey is off, with extensions.greasemonkey.toolbarBadge
- * false, and when the button isn't on a toolbar.
+ * (Violentmonkey's default).  toolbarBadge.js paints it into the icon's
+ * corner.  Hidden at 0, while Greasemonkey is off, with
+ * extensions.greasemonkey.toolbarBadge false, and when the button isn't
+ * on a toolbar.
  */
 GM_BrowserUI.refreshBadge = function () {
   let button = document.getElementById("greasemonkey-tbb");
@@ -317,11 +317,7 @@ GM_BrowserUI.refreshBadge = function () {
       count = 0;
     }
   }
-  if (count > 0) {
-    button.setAttribute("badge", String(count));
-  } else {
-    button.removeAttribute("badge");
-  }
+  GM_ToolbarBadge.paint(button, count);
 };
 
 /** A script ran somewhere for the first time on its page: the selected

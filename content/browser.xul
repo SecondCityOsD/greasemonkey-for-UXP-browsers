@@ -12,6 +12,8 @@
     src="chrome://greasemonkey/content/browser.js" />
   <script type="application/x-javascript"
     src="chrome://greasemonkey/content/menuCommander.js" />
+  <script type="application/x-javascript"
+    src="chrome://greasemonkey/content/toolbarBadge.js" />
 
   <commandset>
     <!-- Sync the 'disabled' attribute for toolbar button. -->
@@ -35,11 +37,10 @@
   </popupset>
 
   <toolbarpalette id="BrowserToolbarPalette">
-    <!-- badged-button: the platform draws browser.js's "badge" attribute
-         (how many scripts ran on the tab) in the theme's own badge style;
-         the menu-button binding passes it to the inner button. -->
+    <!-- No badged-button class: toolbarBadge.js paints the count into the
+         icon instead, so the theme's menu-button styling still applies. -->
     <toolbarbutton id="greasemonkey-tbb" type="menu-button"
-      class="toolbarbutton-1 chromeclass-toolbar-additional badged-button"
+      class="toolbarbutton-1 chromeclass-toolbar-additional"
       command="gm_toggle_enabled"
       label="Greasemonkey" tooltip="greasemonkey-tooltip">
       <menupopup id="blank" />
