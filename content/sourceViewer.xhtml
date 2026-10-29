@@ -31,18 +31,22 @@
   <script type="application/javascript"
     src="chrome://greasemonkey/content/sourceViewer/find.js"></script>
   <script type="application/javascript"
+    src="chrome://greasemonkey/content/sourceViewer/view.js"></script>
+  <script type="application/javascript"
     src="chrome://greasemonkey/content/sourceViewer/viewer.js"></script>
 </head>
 <body class="theme-light">
-  <!-- Toolbar: the script's name and version, the address it came from,
-       Metadata (shows/hides the header below), Find, and the Auto / Light /
-       Dark switch. -->
+  <!-- Toolbar: the script's icon, name and version, the address it came
+       from, Metadata (shows/hides the header below), Wrap, Find, and the
+       Auto / Light / Dark switch. -->
   <div id="gm-sv-toolbar">
     <img id="gm-sv-icon" alt="" hidden="hidden"/>
     <span id="gm-sv-name"></span>
     <span id="gm-sv-version"></span>
     <span id="gm-sv-source"></span>
     <button id="gm-sv-meta-toggle" type="button" hidden="hidden"
+      aria-pressed="false"></button>
+    <button id="gm-sv-wrap" type="button" hidden="hidden"
       aria-pressed="false"></button>
     <button id="gm-sv-find-open" type="button" hidden="hidden"></button>
     <span id="gm-sv-theme" role="group">
@@ -92,6 +96,7 @@
     <span id="gm-sv-eol"></span>
     <span id="gm-sv-bom"></span>
     <span id="gm-sv-minified"></span>
+    <span id="gm-sv-zoom"></span>
   </div>
 </body>
 </html>
