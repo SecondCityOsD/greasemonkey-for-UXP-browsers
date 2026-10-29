@@ -271,11 +271,13 @@
   German, Spanish (Spain), French, Indonesian, Italian, Japanese, Dutch,
   Polish, Portuguese (Brazil and Portugal), Russian, Slovak, Slovenian,
   Serbian, Swedish, Turkish and Chinese (Simplified and Traditional).
-  That covers the install window, the source viewer, the Options window
-  and the messages.  The same goes for some older text that had stayed
-  English everywhere: the backup import window, "Recover orphans" and
-  the "no built-in editor" message.  The other locales, whose files are
-  still largely English, show these in English as before.
+  That covers the install window, the source viewer, the Options
+  window's new text, the value editor and the messages.  The same goes
+  for some older text that had stayed English everywhere: the backup
+  import window, "Recover orphans", the "no built-in editor" message,
+  and the Values tab with its buttons and the Options window's OK and
+  Cancel.  The other locales, whose files are still largely English,
+  show these in English as before.
 
 #### 3.9
 

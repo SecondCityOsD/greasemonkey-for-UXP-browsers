@@ -62,18 +62,18 @@
 <!ENTITY scriptPrefs.label.antifeatures     "Antifeatures">
 
 <!-- Values tab -->
-<!ENTITY scriptPrefs.values.add             "Add…">
-<!ENTITY scriptPrefs.values.edit            "Edit…">
-<!ENTITY scriptPrefs.values.delete          "Delete">
-<!ENTITY scriptPrefs.values.key             "Key">
-<!ENTITY scriptPrefs.values.type            "Type">
-<!ENTITY scriptPrefs.values.value           "Value">
-<!ENTITY scriptPrefs.values.empty           "This script has no stored values.">
+<!ENTITY scriptPrefs.values.add             "Dodaj …">
+<!ENTITY scriptPrefs.values.edit            "Uredi …">
+<!ENTITY scriptPrefs.values.delete          "Izbriši">
+<!ENTITY scriptPrefs.values.key             "Ključ">
+<!ENTITY scriptPrefs.values.type            "Vrsta">
+<!ENTITY scriptPrefs.values.value           "Vrednost">
+<!ENTITY scriptPrefs.values.empty           "Ta skript nima shranjenih vrednosti.">
 <!ENTITY scriptPrefs.label.noFramesTooltip  "When checked, the script runs only in the top-level page and is skipped inside iframes / child frames.  Maps to the @noframes metadata directive.">
 <!ENTITY scriptPrefs.label.noFramesTooltip.short "@noframes — skip iframes / child frames">
 <!ENTITY scriptPrefs.label.metaSize          "Size">
-<!ENTITY scriptPrefs.button.ok              "OK">
-<!ENTITY scriptPrefs.button.cancel          "Cancel">
+<!ENTITY scriptPrefs.button.ok              "V redu">
+<!ENTITY scriptPrefs.button.cancel          "Prekliči">
 <!ENTITY scriptPrefs.copy                   "Copy">
 <!ENTITY scriptPrefs.copy.accesskey         "C">
 <!ENTITY scriptPrefs.selectAll              "Select All">

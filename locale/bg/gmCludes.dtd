@@ -62,18 +62,18 @@
 <!ENTITY scriptPrefs.label.antifeatures     "Antifeatures">
 
 <!-- Values tab -->
-<!ENTITY scriptPrefs.values.add             "Add…">
-<!ENTITY scriptPrefs.values.edit            "Edit…">
-<!ENTITY scriptPrefs.values.delete          "Delete">
-<!ENTITY scriptPrefs.values.key             "Key">
-<!ENTITY scriptPrefs.values.type            "Type">
-<!ENTITY scriptPrefs.values.value           "Value">
-<!ENTITY scriptPrefs.values.empty           "This script has no stored values.">
+<!ENTITY scriptPrefs.values.add             "Добавяне…">
+<!ENTITY scriptPrefs.values.edit            "Редактиране…">
+<!ENTITY scriptPrefs.values.delete          "Изтриване">
+<!ENTITY scriptPrefs.values.key             "Ключ">
+<!ENTITY scriptPrefs.values.type            "Тип">
+<!ENTITY scriptPrefs.values.value           "Стойност">
+<!ENTITY scriptPrefs.values.empty           "Този скрипт няма съхранени стойности.">
 <!ENTITY scriptPrefs.label.noFramesTooltip  "When checked, the script runs only in the top-level page and is skipped inside iframes / child frames.  Maps to the @noframes metadata directive.">
 <!ENTITY scriptPrefs.label.noFramesTooltip.short "@noframes — skip iframes / child frames">
 <!ENTITY scriptPrefs.label.metaSize          "Size">
-<!ENTITY scriptPrefs.button.ok              "OK">
-<!ENTITY scriptPrefs.button.cancel          "Cancel">
+<!ENTITY scriptPrefs.button.ok              "Добре">
+<!ENTITY scriptPrefs.button.cancel          "Отказ">
 <!ENTITY scriptPrefs.copy                   "Copy">
 <!ENTITY scriptPrefs.copy.accesskey         "C">
 <!ENTITY scriptPrefs.selectAll              "Select All">
