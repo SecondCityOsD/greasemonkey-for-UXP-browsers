@@ -162,6 +162,10 @@
   code are underlined, and **Ctrl+click** opens one in a new tab.  A
   plain click still just places the cursor.  The **?** button (or the ?
   key) lists the keyboard shortcuts.
+* **Installed scripts can be opened in the viewer from about:addons**:
+  **View User Script Source** in a script's right-click menu, and as a
+  button beside **Edit** in its details.  Until now about:addons only
+  offered Edit, which opens the external editor.
 
 **about:addons "User Scripts" pane**
 * **Homepage links go to the right pages.**  For a script that declares no

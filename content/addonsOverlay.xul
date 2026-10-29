@@ -27,6 +27,7 @@
 
 <commandset id="viewCommandSet">
   <command id="cmd_userscript_edit" />
+  <command id="cmd_userscript_viewSource" />
   <command id="cmd_userscript_show" />
   <command id="cmd_userscript_execute_first" />
   <command id="cmd_userscript_execute_sooner" />
@@ -46,6 +47,11 @@
     label="&gmDisable;" command="cmd_disableItem" />
   <menuitem command="cmd_userscript_edit"
     label="&edit;" accesskey="&edit.accesskey;" class="greasemonkey" />
+  <!-- The read-only source viewer.  Reuses the page context menu's
+       translated "View User Script Source" label. -->
+  <menuitem command="cmd_userscript_viewSource"
+    label="&menu.show;" accesskey="&menu.show.accesskey;"
+    class="greasemonkey" />
   <!-- Remove — routes through cmd_userscript_remove, which calls the
        script addon's own undoable uninstall() so the Add-ons Manager
        shows the same "removed — Undo" affordance as the row button
@@ -205,12 +211,12 @@
 </vbox>
 
 <!--
-  About-pane "Edit" button.  Placed immediately after the built-in
-  "Options" (#detail-prefs-btn), hidden by default.  onViewChanged in
-  addonsOverlay.js unhides it when the currently-viewed add-on is a
-  Greasemonkey user script and re-hides it otherwise.  Clicking reuses
-  the existing cmd_userscript_edit command, which opens the script in
-  the user's configured external editor.
+  About-pane "Edit" and "View User Script Source" buttons.  Placed right
+  after the built-in "Options" (#detail-prefs-btn), hidden by default.
+  onViewChanged in addonsOverlay.js unhides them when the currently-viewed
+  add-on is a Greasemonkey user script and re-hides them otherwise.  Edit
+  reuses cmd_userscript_edit (the user's configured external editor);
+  View Source reuses cmd_userscript_viewSource (the read-only viewer).
 -->
 <hbox id="detail-controls">
   <!-- The built-in #detail-prefs-btn works for disabled scripts too: the
@@ -220,6 +226,10 @@
     label="&edit;" accesskey="&edit.accesskey;"
     tooltiptext="&edit.tooltip;"
     command="cmd_userscript_edit" />
+  <button id="gm-detail-source-btn" insertafter="gm-detail-edit-btn"
+    class="addon-control greasemonkey" hidden="true"
+    label="&menu.show;" accesskey="&menu.show.accesskey;"
+    command="cmd_userscript_viewSource" />
 </hbox>
 
 </overlay>
