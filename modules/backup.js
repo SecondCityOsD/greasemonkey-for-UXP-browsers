@@ -649,6 +649,7 @@ function _buildOptionsJson(aScript, aDependencies) {
     "userIncludes": aScript.userIncludes,
     "userMatches": aScript.userMatches.map(function (m) { return m.pattern; }),
     "userOverride": aScript._userOverride,
+    "httpOnlyCookies": aScript.httpOnlyCookies,
     "dependencies": aDependencies || [],
   }, null, 2);
 }
@@ -1166,6 +1167,10 @@ function _normalizeImportedOptions(aRaw) {
     if ((config.shouldUpdate != null) && !+config.shouldUpdate) {
       out.checkRemoteUpdates = AddonManager.AUTOUPDATE_DISABLE;
     }
+    // Its per-script "Allow GM_cookie to access HTTP-only cookies".
+    if (config.httpOnly != null) {
+      out.httpOnlyCookies = !!+config.httpOnly;
+    }
     if (custom.downloadURL) {
       out.downloadURL = "" + custom.downloadURL;
     }
@@ -1296,6 +1301,9 @@ function _applyImportedOptions(aScript, aOptions) {
     }
     if (typeof aOptions.userOverride === "boolean") {
       aScript._userOverride = aOptions.userOverride;
+    }
+    if (typeof aOptions.httpOnlyCookies === "boolean") {
+      aScript.httpOnlyCookies = aOptions.httpOnlyCookies;
     }
     // The earliest first install known wins: the backup's, or the copy's
     // this import replaced.  A backup from before 3.10 has only

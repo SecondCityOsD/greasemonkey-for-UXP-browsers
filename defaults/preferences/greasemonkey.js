@@ -5,10 +5,10 @@ pref("extensions.greasemonkey.api.@match.hash", true);
 // Services.cookies (see modules/GM_cookie.js).  Default true.
 pref("extensions.greasemonkey.api.GM_cookie", true);
 // HTTP-only cookies for GM_cookie (Preferences > Script APIs): a script
-// may read their values and set or delete them only when this is true AND
-// its own Options window allows it, as in Violentmonkey.  Otherwise list()
-// still reports them, value redacted (security finding S13).  Default
-// false since 3.10; 3.9 gave them to every script.
+// may see, set, overwrite or delete them only when this is true AND its
+// own Options window allows it, as in Violentmonkey; otherwise list()
+// leaves them out (security finding S13).  Default false since 3.10; 3.9
+// gave them to every script.
 pref("extensions.greasemonkey.api.GM_cookie.exposeHttpOnly", false);
 // Phase 7c: GM_download is now a native callable built on
 // nsIWebBrowserPersist + nsIFilePicker (see modules/GM_download.js),

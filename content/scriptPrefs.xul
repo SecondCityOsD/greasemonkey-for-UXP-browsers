@@ -223,6 +223,21 @@
                   </menupopup>
                 </menulist>
               </row>
+              <!-- Only for scripts that use GM_cookie (or have it on);
+                   labels from greasemonkey.properties in scriptPrefs.js,
+                   the English here is their fallback.  The note shows
+                   while Preferences has the global switch off. -->
+              <row align="center" id="behave-httponly-row" hidden="true">
+                <label class="prefs-meta-key" value="GM_cookie"/>
+                <vbox align="start">
+                  <checkbox id="behave-httponly"
+                    label="Allow GM_cookie to access HTTP-only cookies"
+                    tooltiptext="When enabled, scripts can read and write cookies with the HTTP-only flag. This allows scripts to access cookies that cannot be accessed via JavaScript. Use with caution as it may pose security risks."/>
+                  <description id="behave-httponly-note" hidden="true"
+                    style="opacity: 0.6; -moz-margin-start: 24px; margin-inline-start: 24px;"
+                    >(this option must be also enabled in global settings)</description>
+                </vbox>
+              </row>
               <row align="center">
                 <label class="prefs-meta-key" value="&scriptPrefs.label.autoUpdate;"/>
                 <hbox align="center">

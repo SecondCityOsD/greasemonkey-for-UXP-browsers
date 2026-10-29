@@ -131,6 +131,14 @@
   three frames counts three times, as in Violentmonkey) or nothing.
   **Color** picks the badge's colour; its figures turn black or white to
   stay readable.
+* **Script APIs: Allow GM_cookie to access HTTP-only cookies.**  3.9 let
+  every script using `GM_cookie` read them, though pages' own scripts
+  can't, since they often hold your login.  Now, as in Violentmonkey, a
+  script reaches them only when this is on *and* its own Options window
+  allows it (a new GM_cookie row, for scripts that use it).  Otherwise
+  `GM_cookie.list()` leaves them out, and `set()` / `delete()` won't
+  create, overwrite or remove them.  Backups keep the per-script choice,
+  and Violentmonkey backups bring theirs.
 
 **Source viewer**
 * **A dark theme that follows the browser.**  The viewer's dark colours

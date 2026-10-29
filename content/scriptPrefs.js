@@ -434,6 +434,26 @@ function populateBehaviourSection() {
   let injectMenu = document.getElementById("behave-injectinto");
   selectMenuByValue(injectMenu, injectInto);
 
+  // GM_cookie's HTTP-only cookies: offered to scripts that use GM_cookie,
+  // or already have it on, as in Violentmonkey.  Both this and the
+  // Preferences switch must be on; the note says so while that one isn't.
+  let grants = gScript.grants || [];
+  document.getElementById("behave-httponly-row").hidden =
+      !gScript.httpOnlyCookies && (grants.indexOf("GM_cookie") == -1)
+          && (grants.indexOf("GM.cookie") == -1);
+  let httpOnlyBox = document.getElementById("behave-httponly");
+  httpOnlyBox.checked = !!gScript.httpOnlyCookies;
+  httpOnlyBox.setAttribute("label", localizedString(
+      "options.httpOnlyCookies", httpOnlyBox.getAttribute("label")));
+  httpOnlyBox.setAttribute("tooltiptext", localizedString(
+      "options.httpOnlyCookies.tip",
+      httpOnlyBox.getAttribute("tooltiptext")));
+  let httpOnlyNote = document.getElementById("behave-httponly-note");
+  httpOnlyNote.textContent = localizedString(
+      "scriptPrefs.httpOnlyCookies.globalOff", httpOnlyNote.textContent);
+  httpOnlyNote.hidden =
+      GM_prefRoot.getValue("api.GM_cookie.exposeHttpOnly", false);
+
   // Auto-update — Script.checkRemoteUpdates is one of
   // AddonManager.AUTOUPDATE_DEFAULT | _ENABLE | _DISABLE.
   let autoRadio = document.getElementById("behave-autoupdate");
@@ -1009,6 +1029,12 @@ function onDialogAccept() {
     if (v && v !== gScript.injectInto) {
       gScript.injectInto = v;
     }
+  }
+
+  // GM_cookie's HTTP-only cookies
+  let httpOnlyBox = document.getElementById("behave-httponly");
+  if (httpOnlyBox && (!!httpOnlyBox.checked !== !!gScript.httpOnlyCookies)) {
+    gScript.httpOnlyCookies = httpOnlyBox.checked;
   }
 
   // Auto-update radio → checkRemoteUpdates int
