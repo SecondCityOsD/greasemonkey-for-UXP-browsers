@@ -234,6 +234,10 @@ function Script(aConfigNode) {
   this._supportURL = null;
   this._topLevelAwait = false;
   this._unwrap = false;
+  // The user's own choice in the Options window, not metadata: whether
+  // GM_cookie may touch this script's HTTP-only cookies (when the global
+  // Preferences switch allows it too).  Updates keep it.
+  this._httpOnlyCookies = false;
   // Non-destructive "files are missing" marker.  Previously the
   // Config._load path removed the entire <Script> node from
   // config.xml when allFilesExist() returned false; the resulting
@@ -714,6 +718,17 @@ Object.defineProperty(Script.prototype, "unwrap", {
   "enumerable": true,
 });
 
+Object.defineProperty(Script.prototype, "httpOnlyCookies", {
+  "get": function Script_getHttpOnlyCookies() {
+    return this._httpOnlyCookies;
+  },
+  "set": function Script_setHttpOnlyCookies(aVal) {
+    this._httpOnlyCookies = !!aVal;
+  },
+  "configurable": true,
+  "enumerable": true,
+});
+
 Object.defineProperty(Script.prototype, "broken", {
   "get": function Script_getBroken() {
     return this._broken;
@@ -1097,6 +1112,7 @@ Script.prototype._fromConfigNode = function (aNode) {
   this._namespace = aNode.getAttribute("namespace");
   this._noframes = aNode.getAttribute("noframes") == "true";
   this._unwrap = aNode.getAttribute("unwrap") == "true";
+  this._httpOnlyCookies = aNode.getAttribute("httpOnlyCookies") == "true";
   this._broken = aNode.getAttribute("broken") == "true";
   // brokenMissingFiles is space-separated leaf names; empty string
   // when the attribute is absent (the common case for non-broken
@@ -1306,6 +1322,10 @@ Script.prototype.toConfigNode = function (aDoc) {
     // Only serialize when truthy — keeps existing config.xml files
     // diff-clean for the common case (no @unwrap).
     scriptNode.setAttribute("unwrap", "true");
+  }
+  if (this._httpOnlyCookies) {
+    // Likewise only when allowed: most scripts never use it.
+    scriptNode.setAttribute("httpOnlyCookies", "true");
   }
   if (this._broken) {
     // Persisted only for broken scripts so a healthy script's config

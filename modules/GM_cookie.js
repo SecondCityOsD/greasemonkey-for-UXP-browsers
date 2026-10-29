@@ -180,10 +180,14 @@ function listCookiesForHost(aContentWin, aHost) {
  *                                 are cloned into it before return.
  * @param {string}  aFileURL    - Script file URL (for Error attribution).
  * @param {string}  aPageUrl    - Page URL (used to derive the host scope).
+ * @param {string[]} aConnects  - The script's @connect hosts.
+ * @param {boolean} aHttpOnlyCookies - The script's own Options-window
+ *   choice to reach HTTP-only cookies (see httpOnlyAllowed()).
  * @returns {object} Sandbox-side cookie API object with list/set/delete.
  */
 function createGMCookieAPI(
-    aWrappedContentWin, aSandbox, aFileURL, aPageUrl, aConnects) {
+    aWrappedContentWin, aSandbox, aFileURL, aPageUrl, aConnects,
+    aHttpOnlyCookies) {
   let cookiesService;
   try {
     cookiesService = Services.cookies;
@@ -208,6 +212,20 @@ function createGMCookieAPI(
 
   let pageHost = sanitizeHost(getHostFromUrl(aPageUrl));
   let connects = aConnects || [];
+
+  /**
+   * Whether the script may read, set, overwrite or delete HTTP-only
+   * cookies, which pages' own JavaScript can't reach (an XSS defence; they
+   * often hold the session, finding S13).  Only with both switches on, as
+   * in Violentmonkey: the script's Options window and Preferences
+   * (api.GM_cookie.exposeHttpOnly, read live).
+   *
+   * @returns {boolean}
+   */
+  function httpOnlyAllowed() {
+    return !!aHttpOnlyCookies
+        && GM_prefRoot.getValue("api.GM_cookie.exposeHttpOnly", false);
+  }
 
   /**
    * Whether the script may touch cookies for aHost.  The page's own host is
@@ -313,17 +331,14 @@ function createGMCookieAPI(
       safeCall(aCallback, null, err);
       throw err;
     }
-    let raw = listCookiesForHost(aWrappedContentWin, host);
-    // HttpOnly cookies are deliberately hidden from page JavaScript (an
-    // XSS defense).  GM_cookie runs with elevated privilege and CAN read
-    // them (matching Tampermonkey), but that exposes session-cookie VALUES
-    // to any script granted GM_cookie (finding S13).  When the pref
-    // api.GM_cookie.exposeHttpOnly is false, the cookie metadata is still
-    // returned but the secret value is redacted.
-    let exposeHttpOnly = GM_prefRoot.getValue(
-        "api.GM_cookie.exposeHttpOnly", true);
+    // Without leave to reach HTTP-only cookies, the list leaves them out,
+    // as Violentmonkey's does.
+    let allowed = httpOnlyAllowed();
+    let raw = listCookiesForHost(aWrappedContentWin, host)
+        .filter(function (aCookie) {
+          return allowed || !aCookie.isHttpOnly;
+        });
     let cookies = raw.map(function (aCookie) {
-      let redact = aCookie.isHttpOnly && !exposeHttpOnly;
       return {
         "creationTime": aCookie.creationTime,
         "expires":      aCookie.expires,
@@ -340,7 +355,7 @@ function createGMCookieAPI(
         "rawHost":      aCookie.rawHost,
         "sameSite":     aCookie.sameSite,
         "status":       aCookie.status,
-        "value":        redact ? "" : aCookie.value,
+        "value":        aCookie.value,
       };
     });
     let cloned = Cu.cloneInto(cookies, aSandbox);
@@ -415,6 +430,19 @@ function createGMCookieAPI(
       throw err;
     }
 
+    // An HTTP-only cookie, new or one this would overwrite, needs leave.
+    if (!httpOnlyAllowed() && (httpOnly
+        || listCookiesForHost(aWrappedContentWin, host).some(function (aC) {
+          return aC.isHttpOnly && (aC.name === name) && (aC.path === path);
+        }))) {
+      let err = new aWrappedContentWin.Error(
+          "GM_cookie.set: HTTP-only cookies need both Greasemonkey "
+          + "Preferences and this script's Options window to allow them.",
+          aFileURL, null);
+      safeCall(aCallback, null, err);
+      throw err;
+    }
+
     let sameSite = sameSiteToInt(aDetails.sameSite);
     try {
       let oa = aWrappedContentWin.document.nodePrincipal.originAttributes;
@@ -483,12 +511,15 @@ function createGMCookieAPI(
     }
 
     let count = 0;
+    // HTTP-only cookies are left alone without leave (not counted).
+    let allowed = httpOnlyAllowed();
     try {
       let raw = listCookiesForHost(aWrappedContentWin, host);
       for (let i = 0; i < raw.length; i++) {
         let cookie = raw[i];
         if (cookie.name !== name) continue;
         if (path && cookie.path !== path) continue;
+        if (cookie.isHttpOnly && !allowed) continue;
         cookiesService.remove(
             cookie.host, cookie.name, cookie.path, false,
             cookie.originAttributes);

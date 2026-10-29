@@ -386,6 +386,7 @@ Config.prototype.install = function (
     // The first install outlives updates; _installTime, set below, is this
     // version's.
     aScript._firstInstallTime = aOldScript.firstInstallTime;
+    aScript.httpOnlyCookies = aOldScript.httpOnlyCookies;
 
     // Uninstall the old script.
     this.uninstall(aOldScript, true);

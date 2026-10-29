@@ -69,6 +69,8 @@ function IPCScript(aScript, aAddonVersion) {
   this.homepage = ((aScript.homepageURL && (aScript.homepageURL != ""))
       ? aScript.homepageURL
       : null);
+  // The Options window's HTTP-only cookie choice, for GM_cookie.
+  this.httpOnlyCookies = !!aScript.httpOnlyCookies;
   this.id = aScript.id;
   this.injectInto = aScript.injectInto || "auto";
   this.supportURL = aScript._supportURL || null;
