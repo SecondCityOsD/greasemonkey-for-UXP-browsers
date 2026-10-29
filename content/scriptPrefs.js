@@ -1061,10 +1061,10 @@ function onDialogAccept() {
 // The Values tab shows every GM_setValue key for this script with type +
 // value columns and Add / Edit / Delete buttons.  Backed by
 // modules/storageBack.js (one shared connection per dialog instance,
-// closed on window.onunload).  Add / Edit prompt for the JSON-encoded
-// value; Delete is a single confirm.  All mutations go through the
-// existing setValue / deleteValue paths so the script's GM_setValue
-// observers (val-set / val-del) fire correctly.
+// closed on window.onunload).  Add / Edit (or a double-click) open the
+// value editor, valueEditor.xul; Delete is a single confirm.  All
+// mutations go through the existing setValue / deleteValue paths so the
+// script's GM_setValue observers (val-set / val-del) fire correctly.
 
 function populateValuesTab() {
   // Lazy-open the storage connection.
@@ -1084,6 +1084,10 @@ function populateValuesTab() {
   // Add button is enabled whenever the storage connection is alive;
   // Edit / Delete only when a row is selected.
   document.getElementById("values-add").disabled = !gValuesStorage;
+  if (gValuesStorage) {
+    document.getElementById("values-tree")
+        .addEventListener("dblclick", onValueDblClick, false);
+  }
   onValueSelect();
 }
 
@@ -1266,116 +1270,69 @@ function selectedValueRow() {
 
 function onValueAdd() {
   if (!gValuesStorage) return;
-  let prompts = Services.prompt;
-  let bundle = bundleForValuesDialogs();
-
-  // 1) Ask for the key.
-  let keyHolder = { "value": "" };
-  let confirmed = prompts.prompt(window,
-      bundleStr(bundle, "scriptPrefs.values.addTitle", "Add value"),
-      bundleStr(bundle, "scriptPrefs.values.addKey",   "Enter the key name:"),
-      keyHolder, null, {});
-  if (!confirmed || !keyHolder.value) return;
-  let key = keyHolder.value;
-
-  // Refuse to silently overwrite an existing key — guide the user to
-  // Edit instead.
-  for (let i = 0; i < gValuesData.length; i++) {
-    if (gValuesData[i].name === key) {
-      prompts.alert(window,
-          bundleStr(bundle, "scriptPrefs.values.addTitle", "Add value"),
-          bundleStr(bundle, "scriptPrefs.values.addKeyExists",
-              "A value already exists for that key.  Use Edit to change it."));
-      return;
-    }
-  }
-
-  // 2) Ask for the JSON-encoded value.  Pre-fill with empty string for
-  //    a sane default that immediately parses.
-  let valHolder = { "value": "\"\"" };
-  confirmed = prompts.prompt(window,
-      bundleStr(bundle, "scriptPrefs.values.addTitle", "Add value"),
-      bundleStr(bundle, "scriptPrefs.values.addValue",
-          "Enter the JSON-encoded value:"),
-      valHolder, null, {});
-  if (!confirmed) return;
-
-  let parsed;
-  try {
-    parsed = JSON.parse(valHolder.value);
-  } catch (e) {
-    prompts.alert(window,
-        bundleStr(bundle, "scriptPrefs.values.addTitle", "Add value"),
-        bundleStr(bundle, "scriptPrefs.values.invalidJson",
-            "Invalid JSON: %1").replace("%1", "" + e));
-    return;
-  }
-
-  try {
-    gValuesStorage.setValue(key, parsed);
-  } catch (e) {
-    prompts.alert(window,
-        bundleStr(bundle, "scriptPrefs.values.addTitle", "Add value"),
-        "" + e);
-    return;
-  }
-
-  loadValuesFromStorage();
-  rebuildValuesTree();
+  openValueEditor({
+    "existingKeys": gValuesData.map(function (aRow) { return aRow.name; }),
+  });
 }
 
 function onValueEdit() {
   let row = selectedValueRow();
   if (!row || !gValuesStorage) return;
-  let prompts = Services.prompt;
-  let bundle = bundleForValuesDialogs();
+  openValueEditor({"key": row.name, "raw": row.raw, "type": row.type});
+}
 
-  // Pre-fill with the current JSON.  Object / array values get pretty-
-  // printed with 2-space indent so the user can edit comfortably.
-  let initial;
-  try {
-    if (row.type === "object" || row.type === "array") {
-      initial = JSON.stringify(row.value, null, 2);
-    } else if (row.type === "invalid") {
-      initial = row.raw || "";
-    } else {
-      initial = JSON.stringify(row.value);
-    }
-  } catch (e) {
-    initial = row.raw || "";
+/** Double-clicking a row edits it, like the Edit button. */
+function onValueDblClick(aEvent) {
+  let tree = document.getElementById("values-tree");
+  if ((aEvent.button == 0)
+      && (tree.treeBoxObject.getRowAt(aEvent.clientX, aEvent.clientY) >= 0)) {
+    onValueEdit();
   }
+}
 
-  let valHolder = { "value": initial };
-  let confirmed = prompts.prompt(window,
-      bundleStr(bundle, "scriptPrefs.values.editTitle", "Edit value")
-          + " — " + row.name,
-      bundleStr(bundle, "scriptPrefs.values.editValue",
-          "Edit the JSON-encoded value:"),
-      valHolder, null, {});
-  if (!confirmed) return;
-
-  let parsed;
-  try {
-    parsed = JSON.parse(valHolder.value);
-  } catch (e) {
-    prompts.alert(window,
-        bundleStr(bundle, "scriptPrefs.values.editTitle", "Edit value"),
-        bundleStr(bundle, "scriptPrefs.values.invalidJson",
-            "Invalid JSON: %1").replace("%1", "" + e));
-    return;
-  }
+/**
+ * Opens the value editor (valueEditor.xul) on aArgs, described in
+ * valueEditor.js (no key: add one), then stores what it saved and selects
+ * that row.  The editor hands back strings only: an object made in its
+ * window would be dead once the window closed.
+ */
+function openValueEditor(aArgs) {
+  window.openDialog("chrome://greasemonkey/content/valueEditor.xul", "",
+      "chrome,titlebar,dialog=no,modal,resizable,centerscreen", aArgs);
+  if (typeof aArgs.resultKey != "string") return;
 
   try {
-    gValuesStorage.setValue(row.name, parsed);
+    gValuesStorage.setValue(aArgs.resultKey, JSON.parse(aArgs.resultJson));
   } catch (e) {
-    prompts.alert(window,
-        bundleStr(bundle, "scriptPrefs.values.editTitle", "Edit value"),
+    let bundle = bundleForValuesDialogs();
+    Services.prompt.alert(window, (typeof aArgs.key == "string")
+        ? bundleStr(bundle, "scriptPrefs.values.editTitle", "Edit value")
+        : bundleStr(bundle, "scriptPrefs.values.addTitle", "Add value"),
         "" + e);
     return;
   }
 
   loadValuesFromStorage();
   rebuildValuesTree();
+  selectValueRow(aArgs.resultKey);
+}
+
+/** Selects the row for aKey (after a rebuild, which drops the selection)
+ *  and scrolls to it. */
+function selectValueRow(aKey) {
+  let tree = document.getElementById("values-tree");
+  let index = gValuesData.findIndex(function (aRow) {
+    return aRow.name === aKey;
+  });
+  try {
+    if (index >= 0) {
+      tree.view.selection.select(index);
+      tree.treeBoxObject.ensureRowIsVisible(index);
+    }
+  } catch (e) {
+    // Only a convenience: the value is stored either way.
+  }
+  onValueSelect();
 }
 
 function onValueDelete() {

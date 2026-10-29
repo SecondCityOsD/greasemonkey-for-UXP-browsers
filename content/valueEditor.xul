@@ -1,0 +1,81 @@
+<?xml version="1.0"?>
+
+<?xml-stylesheet href="chrome://global/skin/"
+  type="text/css"?>
+
+<!DOCTYPE window [
+  <!ENTITY % cludesDTD SYSTEM
+    "chrome://greasemonkey/locale/gmCludes.dtd">
+  %cludesDTD;
+]>
+
+<!-- The Values tab's editor for one key and its value (valueEditor.js;
+     scriptPrefs.js opens it, modal).  A <window>, not a <dialog>, for the
+     same reason as scriptPrefs.xul: Pale Moon gives a <dialog> no
+     Maximize button, and long values want the room.  Labels without an
+     entity come from greasemonkey.properties in init(); the English here
+     is their fallback. -->
+<window xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul"
+  id="greasemonkey-value-editor"
+  title="Edit value"
+  persist="width height sizemode"
+  width="640" height="480"
+  style="padding: 8px;"
+  onload="GM_ValueEditor.init();">
+
+<script type="application/x-javascript"
+  src="chrome://greasemonkey/content/valueEditor.js" />
+
+<!-- Escape cancels.  Enter is a new line in the value, so Ctrl+Enter
+     saves. -->
+<keyset id="value-editor-keys">
+  <key id="key-cancel" keycode="VK_ESCAPE" oncommand="window.close();"/>
+  <key id="key-save" keycode="VK_RETURN" modifiers="accel"
+    oncommand="GM_ValueEditor.accept();"/>
+</keyset>
+
+<grid>
+  <columns>
+    <column/>
+    <column flex="1"/>
+  </columns>
+  <rows>
+    <row align="center">
+      <label value="&scriptPrefs.values.key;" control="ve-key"/>
+      <textbox id="ve-key" oninput="GM_ValueEditor.update();"/>
+    </row>
+    <row align="center">
+      <label id="ve-mode-label" value="Edit as" control="ve-mode"/>
+      <hbox align="center">
+        <radiogroup id="ve-mode" orient="horizontal"
+          oncommand="GM_ValueEditor.switchMode(this.value);">
+          <radio id="ve-mode-text" value="text" label="Text"/>
+          <radio id="ve-mode-json" value="json" label="JSON"/>
+        </radiogroup>
+        <spacer flex="1"/>
+        <button id="ve-format" label="Format"
+          oncommand="GM_ValueEditor.reformat(2);"/>
+        <button id="ve-compact" label="Compact"
+          oncommand="GM_ValueEditor.reformat(0);"/>
+      </hbox>
+    </row>
+  </rows>
+</grid>
+
+<textbox id="ve-value" multiline="true" flex="1" spellcheck="false"
+  style="font-family: monospace;"
+  oninput="GM_ValueEditor.update();"/>
+
+<!-- Says what stops OK (invalid JSON, a key in use); empty otherwise. -->
+<hbox align="center" id="ve-buttons">
+  <label id="ve-problem" flex="1" crop="end" value=""/>
+  <button id="ve-cancel"
+    label="&scriptPrefs.button.cancel;"
+    oncommand="window.close();"/>
+  <button id="ve-ok"
+    label="&scriptPrefs.button.ok;"
+    default="true"
+    oncommand="GM_ValueEditor.accept();"/>
+</hbox>
+
+</window>
