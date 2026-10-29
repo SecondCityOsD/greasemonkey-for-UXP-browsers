@@ -102,6 +102,14 @@
 * Messages about ignored metadata no longer garble values that contain
   `%2`-like sequences, such as URLs with `%20`.
 
+**Toolbar menu**
+* **User Script Commands can be folded per script.**  Click a script's
+  name in the list (or press Enter on it) to fold its commands away, and
+  again to bring them back; the menu stays open.  ▲ means its commands
+  are shown, ▼ that they're folded.  Greasemonkey remembers which
+  scripts you folded, also across updates, and new scripts start
+  unfolded.  This helps when a few scripts register many commands.
+
 **Source viewer**
 * **A dark theme that follows the browser.**  The viewer's dark colours
   were tied to Pale Moon's "Web Page Color Scheme" setting, which themes

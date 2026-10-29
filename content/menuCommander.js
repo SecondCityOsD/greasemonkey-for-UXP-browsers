@@ -13,6 +13,7 @@ if (typeof Cu === "undefined") {
 // Cu.import("resource://gre/modules/Services.jsm");
 
 Cu.import("chrome://greasemonkey-modules/content/menuCommand.js");
+Cu.import("chrome://greasemonkey-modules/content/prefManager.js");
 Cu.import("chrome://greasemonkey-modules/content/util.js");
 
 
@@ -23,6 +24,15 @@ var GM_MenuCommander = {
   "popup": null,
 };
 
+/** The script ids (namespace/name) whose commands are folded away: a JSON
+ *  array.  Keyed by id, not uuid, because the uuid changes with every
+ *  update.  Relative to extensions.greasemonkey. */
+GM_MenuCommander.COLLAPSED_PREF = "menuCommands.collapsed";
+
+/** The header's arrow: ▲ folds the commands up, ▼ drops them down. */
+GM_MenuCommander.ARROW_EXPANDED = "▲";
+GM_MenuCommander.ARROW_COLLAPSED = "▼";
+
 // Chrome ↔ sandbox menu-command transport on UXP single-process:
 //   chrome → CustomEvent dispatched onto the active tab's content window
 //   sandbox → Services.obs.notifyObservers("greasemonkey:menu-command-
@@ -30,11 +40,16 @@ var GM_MenuCommander = {
 // Both legs stay in-process and avoid any messageManager indirection.
 //
 // Display model: commands are grouped per owning script.  Each script gets
-// a bold non-clickable header row with its commands beneath it, separators
-// between groups; groups are sorted by script name, commands keep their
+// a bold header row with its commands beneath it, separators between
+// groups; groups are sorted by script name, commands keep their
 // registration order.  Responses arrive in one batch per sandbox (script ×
 // frame), so the popup is rebuilt from the accumulated groups on every
 // batch.
+//
+// A header row folds its script's commands away and back (▲ / ▼ on the
+// right).  It keeps the menu open (closemenu="none"), works from the
+// keyboard too, and only hides or shows rows; the folded scripts are
+// remembered in the menuCommands.collapsed pref.
 
 /**
  * Bridge object passed to Services.obs.addObserver.  The platform calls
@@ -123,6 +138,7 @@ GM_MenuCommander.messageMenuCommandResponse = function (aMessage) {
       group = groups[command.scriptUuid] = {
         "byName": Object.create(null),
         "order": [],
+        "scriptId": GM_MenuCommander.scriptIdForUuid(command.scriptUuid),
         "scriptName": String(command.scriptName),
       };
     }
@@ -149,25 +165,99 @@ GM_MenuCommander.rebuildPopup = function () {
     return groups[aA].scriptName.localeCompare(groups[aB].scriptName);
   });
 
+  let collapsedIds = GM_MenuCommander.collapsedIds();
   let total = 0;
   for (let u = 0, uLen = uuids.length; u < uLen; u++) {
     let group = groups[uuids[u]];
     if (u > 0) {
       popup.appendChild(document.createElement("menuseparator"));
     }
+    let collapsed = collapsedIds.indexOf(group.scriptId) != -1;
     let header = document.createElement("menuitem");
     header.setAttribute("class", "greasemonkey-command-script-header");
-    header.setAttribute("disabled", "true");
     header.setAttribute("label", group.scriptName);
+    // Clicking it folds or unfolds, and leaves the menu open.
+    header.setAttribute("closemenu", "none");
     popup.appendChild(header);
+    let items = [];
     for (let c = 0, cLen = group.order.length; c < cLen; c++) {
-      popup.appendChild(
-          GM_MenuCommander.createMenuItem(group.byName[group.order[c]]));
+      let item = GM_MenuCommander.createMenuItem(
+          group.byName[group.order[c]]);
+      items.push(item);
+      popup.appendChild(item);
       total++;
     }
+    GM_MenuCommander.showCollapsed(header, items, collapsed);
+    header.addEventListener("command", function () {
+      let fold = (header.getAttribute("collapsed-commands") != "true");
+      GM_MenuCommander.showCollapsed(header, items, fold);
+      GM_MenuCommander.setCollapsed(group.scriptId, fold);
+    }, false);
   }
 
   popup.parentNode.disabled = (total == 0);
+};
+
+/**
+ * Folds a script's commands away (or shows them) and sets its header's
+ * arrow.
+ * @param {Element} aHeader - The script's header row.
+ * @param {Element[]} aItems - Its command rows.
+ * @param {boolean} aCollapsed
+ */
+GM_MenuCommander.showCollapsed = function (aHeader, aItems, aCollapsed) {
+  aHeader.setAttribute("collapsed-commands", String(aCollapsed));
+  aHeader.setAttribute("acceltext", aCollapsed
+      ? GM_MenuCommander.ARROW_COLLAPSED : GM_MenuCommander.ARROW_EXPANDED);
+  for (let i = 0, iLen = aItems.length; i < iLen; i++) {
+    aItems[i].hidden = aCollapsed;
+  }
+};
+
+/** @returns {string[]} The ids of the scripts whose commands are folded. */
+GM_MenuCommander.collapsedIds = function () {
+  try {
+    let ids = JSON.parse(
+        GM_prefRoot.getValue(GM_MenuCommander.COLLAPSED_PREF, "[]"));
+    return Array.isArray(ids) ? ids : [];
+  } catch (e) {
+    return [];
+  }
+};
+
+/**
+ * Remembers whether a script's commands are folded.  Ids of scripts that
+ * are no longer installed are dropped on the way, so uninstalls clean up
+ * after themselves.
+ * @param {string} aScriptId
+ * @param {boolean} aCollapsed
+ */
+GM_MenuCommander.setCollapsed = function (aScriptId, aCollapsed) {
+  let installed = GM_util.getService().config.scripts.map(function (aScript) {
+    return aScript.id;
+  });
+  let ids = GM_MenuCommander.collapsedIds().filter(function (aId) {
+    return (aId != aScriptId) && (installed.indexOf(aId) != -1);
+  });
+  if (aCollapsed) {
+    ids.push(aScriptId);
+  }
+  GM_prefRoot.setValue(GM_MenuCommander.COLLAPSED_PREF, JSON.stringify(ids));
+};
+
+/**
+ * @param {string} aUuid - A command's scriptUuid.
+ * @returns {string} The script's id (namespace/name), which survives
+ *          updates; the uuid itself for a script the config doesn't know.
+ */
+GM_MenuCommander.scriptIdForUuid = function (aUuid) {
+  let scripts = GM_util.getService().config.scripts;
+  for (let i = 0, iLen = scripts.length; i < iLen; i++) {
+    if (scripts[i].uuid == aUuid) {
+      return scripts[i].id;
+    }
+  }
+  return String(aUuid);
 };
 
 GM_MenuCommander.onPopupHiding = function () {
