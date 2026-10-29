@@ -62,18 +62,18 @@
 <!ENTITY scriptPrefs.label.antifeatures     "Antifeatures">
 
 <!-- Values tab -->
-<!ENTITY scriptPrefs.values.add             "Add…">
-<!ENTITY scriptPrefs.values.edit            "Edit…">
-<!ENTITY scriptPrefs.values.delete          "Delete">
-<!ENTITY scriptPrefs.values.key             "Key">
-<!ENTITY scriptPrefs.values.type            "Type">
-<!ENTITY scriptPrefs.values.value           "Value">
-<!ENTITY scriptPrefs.values.empty           "This script has no stored values.">
+<!ENTITY scriptPrefs.values.add             "Ekle…">
+<!ENTITY scriptPrefs.values.edit            "Düzenle…">
+<!ENTITY scriptPrefs.values.delete          "Sil">
+<!ENTITY scriptPrefs.values.key             "Anahtar">
+<!ENTITY scriptPrefs.values.type            "Tür">
+<!ENTITY scriptPrefs.values.value           "Değer">
+<!ENTITY scriptPrefs.values.empty           "Bu betiğin kayıtlı değeri yok.">
 <!ENTITY scriptPrefs.label.noFramesTooltip  "When checked, the script runs only in the top-level page and is skipped inside iframes / child frames.  Maps to the @noframes metadata directive.">
 <!ENTITY scriptPrefs.label.noFramesTooltip.short "@noframes — skip iframes / child frames">
 <!ENTITY scriptPrefs.label.metaSize          "Size">
-<!ENTITY scriptPrefs.button.ok              "OK">
-<!ENTITY scriptPrefs.button.cancel          "Cancel">
+<!ENTITY scriptPrefs.button.ok              "Tamam">
+<!ENTITY scriptPrefs.button.cancel          "Vazgeç">
 <!ENTITY scriptPrefs.copy                   "Copy">
 <!ENTITY scriptPrefs.copy.accesskey         "C">
 <!ENTITY scriptPrefs.selectAll              "Select All">
