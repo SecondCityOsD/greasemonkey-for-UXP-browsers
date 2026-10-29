@@ -137,8 +137,17 @@ body {
   display: none;
 }
 
-/* Name, version, then the address; a long name gives way first, and the
-   address takes the rest and crops at its end. */
+/* Icon, name, version, then the address; a long name gives way first,
+   and the address takes the rest and crops at its end. */
+#gm-sv-icon {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  margin-right: 6px;
+}
+#gm-sv-icon[hidden] {
+  display: none;
+}
 #gm-sv-name,
 #gm-sv-source {
   overflow: hidden;

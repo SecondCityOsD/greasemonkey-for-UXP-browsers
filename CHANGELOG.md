@@ -117,9 +117,11 @@
     recolour native ones and they stayed light in Dark.
 * **The toolbar says what you're looking at.**  It used to show the path
   of a temporary copy, which put your Windows user name in screenshots.
-  It now shows the script's name and version (a library's file name) and
-  the address it was downloaded from, with the site in bold, as in the
-  install window.  The tab is titled after the script too.  The status
+  It now shows the script's `@icon`, name and version (a library's file
+  name) and the address it was downloaded from, with the site in bold, as
+  in the install window.  The icon is the copy the install window already
+  downloaded, so it isn't fetched again.  The tab is titled after the
+  script too.  The status
   strip at the bottom now only appears for a note, such as "shown as
   plain text".
 * **A metadata header above the code** lists what the script declares,
