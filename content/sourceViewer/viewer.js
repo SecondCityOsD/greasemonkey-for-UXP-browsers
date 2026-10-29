@@ -56,9 +56,6 @@
  * ==UserScript== block as text too).
  */
 
-if (typeof Cc === "undefined") {
-  var Cc = Components.classes;
-}
 if (typeof Ci === "undefined") {
   var Ci = Components.interfaces;
 }
