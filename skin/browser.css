@@ -25,10 +25,11 @@ toolbar[iconsize="small"] #greasemonkey-tbb {
   list-style-image: url("chrome://greasemonkey/skin/icon32.png");
 }
 
-/* "User Script Commands…" popup: one bold header row per script (disabled,
-   so the native theme renders it muted and non-interactive), its commands
-   indented beneath.  margin-inline-start mirrors automatically under RTL;
-   the -moz- alias covers older UXP builds. */
+/* "User Script Commands…" popup: one bold header row per script, its
+   commands indented beneath.  The header folds them away and back
+   (menuCommander.js; the ▲ / ▼ sits in its accelerator-text slot).
+   margin-inline-start mirrors automatically under RTL; the -moz- alias
+   covers older UXP builds. */
 menuitem.greasemonkey-command-script-header {
   font-weight: bold;
 }
