@@ -20,7 +20,6 @@ Cu.import("resource://gre/modules/Services.jsm");
 
 Cu.import("chrome://greasemonkey-modules/content/addons.js");
 Cu.import("chrome://greasemonkey-modules/content/prefManager.js");
-Cu.import("chrome://greasemonkey-modules/content/sourceViewerTabs.js");
 Cu.import("chrome://greasemonkey-modules/content/thirdParty/droppedUrls.js");
 Cu.import("chrome://greasemonkey-modules/content/util.js");
 
@@ -319,12 +318,6 @@ function init() {
       "isEnabled": addonIsInstalledScript,
       "doCommand": function (aAddon) {
         GM_util.openInEditor(aAddon._script);
-      }
-    };
-  gViewController.commands.cmd_userscript_viewSource = {
-      "isEnabled": addonIsInstalledScript,
-      "doCommand": function (aAddon) {
-        gmViewScriptSource(aAddon._script);
       }
     };
   gViewController.commands.cmd_userscript_show = {
@@ -634,82 +627,44 @@ function onViewChanged(aEvent) {
   } else {
     document.documentElement.classList.remove("greasemonkey");
   }
-  updateDetailScriptButtons();
+  updateDetailEditButton();
 };
 
-/** The detail pane's buttons that only user scripts get. */
-const GM_DETAIL_SCRIPT_BUTTONS = [
-  "gm-detail-edit-btn",
-  "gm-detail-source-btn",
-];
-
 /**
- * Shows / hides the "Edit" and "View User Script Source" buttons next to
- * the built-in Options button in the Add-ons Manager detail (About) pane.
- * They only make sense for Greasemonkey user scripts (they have an on-disk
- * .user.js file), so they're hidden for every other add-on type and for
- * non-detail views.
+ * Shows / hides the "Edit" button next to the built-in Options button in
+ * the Add-ons Manager detail (About) pane.  The button only makes sense
+ * for Greasemonkey user scripts (they have an on-disk .user.js file that
+ * the user's configured external editor can open), so we hide it for
+ * every other add-on type and for non-detail views.
  *
- * Wired to cmd_userscript_edit / cmd_userscript_viewSource via the
- * command= attribute on each button (see addonsOverlay.xul), so no click
- * handler is needed here — the command dispatcher uses gDetailView._addon
- * as its argument.
+ * Wired to cmd_userscript_edit via the command= attribute on the button
+ * itself (see addonsOverlay.xul), so no click handler is needed here —
+ * the command dispatcher uses gDetailView._addon as its argument.
  */
-function updateDetailScriptButtons() {
+function updateDetailEditButton() {
+  let btn = document.getElementById("gm-detail-edit-btn");
+  if (!btn) { return; }
+
   let viewId = gViewController.currentViewId;
   let isDetail = viewId
       && (viewId.indexOf(GM_CONSTANTS.scriptViewIDDetailPrefix) == 0);
+  if (!isDetail) {
+    btn.hidden = true;
+    return;
+  }
 
   let addon = null;
   try {
     // gDetailView is the extensions.js view controller for the detail
     // pane.  Its _addon is the add-on currently being shown.
-    if (isDetail && (typeof gDetailView != "undefined") && gDetailView) {
+    if (typeof gDetailView != "undefined" && gDetailView) {
       addon = gDetailView._addon || null;
     }
   } catch (e) {
     addon = null;
   }
 
-  let isScript = !!addon && (addon.type == GM_CONSTANTS.scriptAddonType);
-  GM_DETAIL_SCRIPT_BUTTONS.forEach(function (aId) {
-    let button = document.getElementById(aId);
-    if (button) {
-      button.hidden = !isScript;
-    }
-  });
-};
-
-/**
- * Opens an installed script in the read-only source viewer, in a tab of
- * the browser window: its installed file, the address it updates from
- * (for the viewer's toolbar) and its downloaded @icon.
- * @param {Script} aScript
- * @returns {void}
- */
-function gmViewScriptSource(aScript) {
-  let win = GM_util.getBrowserWindow();
-  if (!win) {
-    return;
-  }
-  let icon = null;
-  try {
-    // A data: icon has no file; the viewer reads it from the metadata.
-    if (aScript.icon && aScript.icon._filename
-        && aScript.icon.file.exists()) {
-      icon = GM_util.getUriFromFile(aScript.icon.file).spec;
-    }
-  } catch (e) {
-    icon = null;
-  }
-  // "none" (an old GreasyFork version) is no address to show.
-  let url = aScript.downloadURL;
-  GM_openSourceViewer(win.gBrowser, {
-    "icon": icon,
-    "path": aScript.file.path,
-    "url": (url && !/^none$/i.test(url)) ? url : null,
-  });
-  win.focus();
+  btn.hidden = !(addon && (addon.type == GM_CONSTANTS.scriptAddonType));
 };
 
 /**

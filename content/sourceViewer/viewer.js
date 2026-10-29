@@ -2,20 +2,17 @@
  * @file sourceViewer/viewer.js
  * @overview Read-only, syntax-highlighted viewer for user-script source.
  *   Colours live in theme.js, the themed scrollbars in scrollbars.js, the
- *   metadata header in meta.js, find / go to line in find.js, and folding,
- *   wrap and text size in view.js, all loaded first.  This file loads the
- *   file, CodeMirror, the toolbar and the status bar.
+ *   metadata header in meta.js and find / go to line in find.js, all
+ *   loaded first.  This file loads the file, CodeMirror, the toolbar and
+ *   the status bar.
  *
- * Loaded as a chrome XHTML document in a browser tab, opened through
- * GM_openSourceViewer() (modules/sourceViewerTabs.js) as
- *   chrome://greasemonkey/content/sourceViewer.xhtml?id=<id>
- * where the id stands for the file's path, the address it came from and
- * its icon, so the path (and the Windows user name in it) stays out of the
- * address bar.  The older ?path=&url=&icon= form still works, for viewer
- * tabs restored from an earlier version.
+ * Loaded as a chrome XHTML document in a browser tab via
+ *   chrome://greasemonkey/content/sourceViewer.xhtml?path=<encoded OS path>
+ *       &url=<encoded address it was downloaded from>
+ *       &icon=<encoded file: URL of the downloaded @icon>
  * The toolbar shows the script's icon, name and version (from its
- * metadata, or the file name for a library) and that address; without an
- * address it shows the path.
+ * metadata, or the file name for a library) and that address.  url and
+ * icon are optional; without url the toolbar shows the path.
  *
  * Opened from:
  *   - RemoteScript.showSource()  — the install-time "Show Script Source"
@@ -71,7 +68,6 @@ if (typeof Cu === "undefined") {
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/osfile.jsm");
 Cu.import("chrome://greasemonkey-modules/content/constants.js");
-Cu.import("chrome://greasemonkey-modules/content/sourceViewerTabs.js");
 Cu.import("chrome://greasemonkey-modules/content/util.js");
 
 /** The browser's CodeMirror bundle, JavaScript mode included. */
@@ -122,16 +118,12 @@ function GM_sourceViewerLoad() {
 
   SvTheme.init(document.body, svString);
 
-  let target = readTarget();
-  if (!target) {
-    showNote(readQueryParam("id")
-        ? svString("sourceViewer.error.expired",
-            "This view is from an earlier session.  Open the source again.")
-        : svString("sourceViewer.error.noPath",
-            "No script source to display."));
+  let path = readQueryParam("path");
+  if (!path) {
+    showNote(svString("sourceViewer.error.noPath",
+        "No script source to display."));
     return;
   }
-  let path = target.path;
 
   // Defense in depth: this privileged page reads whatever path it's handed,
   // so only ever read from the user-scripts directory or the OS temp area —
@@ -146,7 +138,7 @@ function GM_sourceViewerLoad() {
 
   // The address it came from, not the temp copy's path (which means nothing
   // to the reader and shows the Windows user name in screenshots).
-  let url = target.url;
+  let url = readQueryParam("url");
   showSourceAddress(url || path);
 
   // Read the raw bytes (the status bar shows the size and any byte-order
@@ -159,7 +151,7 @@ function GM_sourceViewerLoad() {
         showStatus(text, bytes);
         let script = parseSource(text, url);
         showSourceName(script, url, path);
-        showSourceIcon(target.icon, script);
+        showSourceIcon(readQueryParam("icon"), script);
         SvMeta.init({
           "jumpTo": jumpToLine,
           "relayout": function () {
@@ -180,29 +172,9 @@ function GM_sourceViewerLoad() {
 }
 
 /**
- * What to show: the file, the address it came from and its icon, from
- * the ?id= that GM_openSourceViewer() opened this page with (or from the
- * older ?path=&url=&icon= form).
- * @returns {{icon: string|null, path: string, url: string|null}|null}
- *          null without either, or for an id this session doesn't know.
- */
-function readTarget() {
-  let id = readQueryParam("id");
-  if (id) {
-    return GM_sourceViewerTarget(id);
-  }
-  let path = readQueryParam("path");
-  return path ? {
-    "icon": readQueryParam("icon"),
-    "path": path,
-    "url": readQueryParam("url"),
-  } : null;
-}
-
-/**
  * Reads one parameter out of the document's URL query string.
  * Prefers location.search, falling back to the full href.
- * @param {string} aName - "id", or the older "path", "url" and "icon".
+ * @param {string} aName - "path" or "url".
  * @returns {string|null} The decoded value, or null when absent/invalid.
  */
 function readQueryParam(aName) {
@@ -425,7 +397,6 @@ function renderSource(aText) {
         } catch (e) { /* non-fatal */ }
       }, 0);
       SvFind.init(gCMInstance, svString);
-      SvView.init({"cm": gCMInstance, "string": svString, "textarea": null});
       return;
     } catch (e) {
       // Construction failed — fall through to the textarea.
@@ -481,7 +452,6 @@ function mountTextareaFallback(aText, aHighlighterMissing) {
   ta.spellcheck = false;
   ta.value = aText;
   host.appendChild(ta);
-  SvView.init({"cm": null, "string": svString, "textarea": ta});
 
   if (aHighlighterMissing) {
     showNote(svString("sourceViewer.note.plainText",

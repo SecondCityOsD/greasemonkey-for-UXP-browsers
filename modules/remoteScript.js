@@ -61,7 +61,6 @@ Cu.import("chrome://greasemonkey-modules/content/addons.js");
 Cu.import("chrome://greasemonkey-modules/content/GM_notification.js");
 Cu.import("chrome://greasemonkey-modules/content/script.js");
 Cu.import("chrome://greasemonkey-modules/content/scriptIcon.js");
-Cu.import("chrome://greasemonkey-modules/content/sourceViewerTabs.js");
 Cu.import("chrome://greasemonkey-modules/content/prefManager.js");
 Cu.import("chrome://greasemonkey-modules/content/util.js");
 
@@ -897,15 +896,19 @@ RemoteScript.prototype.showSource = function (aBrowser) {
   // viewer falls back to plain read-only text if CodeMirror can't load.
   // Its toolbar shows the address the script came from, and the @icon once
   // that has downloaded (a data: icon the viewer reads from the metadata).
+  let viewerUrl = "chrome://greasemonkey/content/sourceViewer.xhtml?path="
+      + encodeURIComponent(this._scriptFile.path)
+      + "&url=" + encodeURIComponent(this._url);
   let icon = this.script && this.script.icon;
   let iconReport = this._dependencyReports.filter(function (aReport) {
     return (aReport.dependency === icon) && (aReport.state == "done");
   })[0];
-  let tab = GM_openSourceViewer(tabBrowser, {
-    "icon": iconReport ? GM_util.getUriFromFile(iconReport.file).spec : null,
-    "path": this._scriptFile.path,
-    "url": this._url,
-  });
+  if (iconReport) {
+    viewerUrl += "&icon=" + encodeURIComponent(
+        GM_util.getUriFromFile(iconReport.file).spec);
+  }
+  let tab = tabBrowser.addTab(viewerUrl);
+  tabBrowser.selectedTab = tab;
 
   // Ensure any temporary files are deleted after the tab is closed.
   var cleanup = this.cleanup.bind(this);
