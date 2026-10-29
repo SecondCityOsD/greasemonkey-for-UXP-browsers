@@ -248,6 +248,17 @@
 * Pale Moon 35 is now within the declared compatibility range
   (`maxVersion 35.*`).
 
+**Translations**
+* The new 3.10 text is translated into 20 languages: Bulgarian, Czech,
+  German, Spanish (Spain), French, Indonesian, Italian, Japanese, Dutch,
+  Polish, Portuguese (Brazil and Portugal), Russian, Slovak, Slovenian,
+  Serbian, Swedish, Turkish and Chinese (Simplified and Traditional).
+  That covers the install window, the source viewer, the Options window
+  and the messages.  The same goes for some older text that had stayed
+  English everywhere: the backup import window, "Recover orphans" and
+  the "no built-in editor" message.  The other locales, whose files are
+  still largely English, show these in English as before.
+
 #### 3.9
 
 **about:addons "User Scripts" pane**
