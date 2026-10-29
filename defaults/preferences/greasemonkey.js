@@ -4,11 +4,12 @@ pref("extensions.greasemonkey.api.@match.hash", true);
 // Phase 7b: GM_cookie is now a native methods-object built on
 // Services.cookies (see modules/GM_cookie.js).  Default true.
 pref("extensions.greasemonkey.api.GM_cookie", true);
-// When false, GM_cookie.list() redacts the value of HttpOnly cookies (still
-// reporting their presence and metadata) so a script granted GM_cookie
-// cannot read session-cookie secrets (security finding S13).  Default true
-// preserves the Tampermonkey-compatible behavior.
-pref("extensions.greasemonkey.api.GM_cookie.exposeHttpOnly", true);
+// HTTP-only cookies for GM_cookie (Preferences > Script APIs): a script
+// may read their values and set or delete them only when this is true AND
+// its own Options window allows it, as in Violentmonkey.  Otherwise list()
+// still reports them, value redacted (security finding S13).  Default
+// false since 3.10; 3.9 gave them to every script.
+pref("extensions.greasemonkey.api.GM_cookie.exposeHttpOnly", false);
 // Phase 7c: GM_download is now a native callable built on
 // nsIWebBrowserPersist + nsIFilePicker (see modules/GM_download.js),
 // replacing the script-side polyfill.  Default true.
@@ -196,9 +197,12 @@ pref("extensions.greasemonkey.sync.values", false);
 pref("extensions.greasemonkey.sync.values.deleteNonExistentValues", false);
 pref("extensions.greasemonkey.sync.values.maxSizePerScript", 65536);
 pref("extensions.greasemonkey.timeoutUpdatesInSeconds", 45);
-// The toolbar button's badge: how many scripts ran on the current tab
-// (each script once, frames included).  false hides it.
-pref("extensions.greasemonkey.toolbarBadge", true);
+// The toolbar button's badge (Preferences > Toolbar button): how many
+// scripts ran on the current tab, frames included.  "unique" counts each
+// script once, "total" once per frame it ran in, "none" hides the badge.
+// color is its #rrggbb background; the figures go black or white.
+pref("extensions.greasemonkey.toolbarBadge.show", "unique");
+pref("extensions.greasemonkey.toolbarBadge.color", "#d90000");
 pref("extensions.greasemonkey.unmhtIsGreaseable", false);
 // Greasemonkey-owned script-update scheduling (modules/updateScheduler.js):
 // check every N days; 0 disables scheduled checks entirely.  lastCheck is

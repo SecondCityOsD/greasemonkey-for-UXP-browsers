@@ -110,6 +110,85 @@ function GM_loadOptions() {
   document.getElementById("new-script-template")
       .value = GM_prefRoot.getValue("newScript.template");
   // PARKED for 3.9 (scheduled backups): backup pref load removed here.
+
+  // Localised first, so the menulist shows its item's translated label.
+  GM_localizeOptions();
+  document.getElementById("notify-updates")
+      .checked = !GM_prefRoot.getValue("notification.muted.script.updated",
+          false);
+  let badgeShow = GM_prefRoot.getValue("toolbarBadge.show", "unique");
+  document.getElementById("badge-show").value =
+      (BADGE_SHOW_VALUES.indexOf(badgeShow) != -1) ? badgeShow : "unique";
+  document.getElementById("badge-color").value = GM_badgeColor(
+      GM_prefRoot.getValue("toolbarBadge.color", BADGE_COLOR_DEFAULT));
+  GM_syncBadgeControls();
+  document.getElementById("http-only-cookies")
+      .checked = GM_prefRoot.getValue("api.GM_cookie.exposeHttpOnly", false);
+}
+
+/** What the toolbar badge can count ("none" hides it), and its colour as
+ *  in defaults/preferences, for a stored value that isn't #rrggbb. */
+const BADGE_SHOW_VALUES = ["none", "total", "unique"];
+const BADGE_COLOR_DEFAULT = "#d90000";
+
+/** aColor when it's a #rrggbb colour, else the default. */
+function GM_badgeColor(aColor) {
+  return /^#[0-9a-f]{6}$/i.test(aColor)
+      ? aColor.toLowerCase() : BADGE_COLOR_DEFAULT;
+}
+
+/** The colour means nothing without a badge. */
+function GM_syncBadgeControls() {
+  let none = document.getElementById("badge-show").value == "none";
+  document.getElementById("badge-color").disabled = none;
+  let label = document.getElementById("badge-color-label");
+  if (none) {
+    label.setAttribute("disabled", "true");
+  } else {
+    label.removeAttribute("disabled");
+  }
+}
+
+/**
+ * Labels added in 3.10 come from greasemonkey.properties, not a DTD (a
+ * missing entity would break this window in the locales without it).  The
+ * English in options.xul stays where a locale lacks a string.
+ */
+function GM_localizeOptions() {
+  let bundle = null;
+  try {
+    bundle = GM_CONSTANTS.localeStringBundle.createBundle(
+        GM_CONSTANTS.localeGreasemonkeyProperties);
+  } catch (e) {
+    return undefined;
+  }
+  [
+    ["notify-updates", "label", "options.notifyUpdates"],
+    ["toolbar-button-caption", "label", "options.toolbarButton"],
+    ["badge-show-label", "value", "options.badge"],
+    ["badge-show-none", "label", "options.badge.none"],
+    ["badge-show-total", "label", "options.badge.total"],
+    ["badge-show-unique", "label", "options.badge.unique"],
+    ["badge-color-label", "value", "options.badgeColor"],
+    ["script-apis-caption", "label", "options.scriptApis"],
+    ["http-only-cookies", "label", "options.httpOnlyCookies"],
+    ["http-only-cookies", "tooltiptext", "options.httpOnlyCookies.tip"],
+    ["http-only-cookies-note", null, "options.httpOnlyCookies.scriptOption"],
+    ["http-only-cookies-note", "tooltiptext", "options.httpOnlyCookies.tip"],
+  ].forEach(function ([aId, aAttribute, aKey]) {
+    let text;
+    try {
+      text = bundle.GetStringFromName(aKey);
+    } catch (e) {
+      return undefined;
+    }
+    let element = document.getElementById(aId);
+    if (aAttribute) {
+      element.setAttribute(aAttribute, text);
+    } else {
+      element.textContent = text;
+    }
+  });
 }
 
 /* PARKED for 3.9 (scheduled backups): shows the effective backup
@@ -153,6 +232,14 @@ function GM_saveOptions() {
       !!document.getElementById("new-script-remove-unused").checked);
   GM_prefRoot.setValue("newScript.template",
       document.getElementById("new-script-template").value);
+  GM_prefRoot.setValue("notification.muted.script.updated",
+      !document.getElementById("notify-updates").checked);
+  GM_prefRoot.setValue("toolbarBadge.show",
+      document.getElementById("badge-show").value);
+  GM_prefRoot.setValue("toolbarBadge.color",
+      GM_badgeColor(document.getElementById("badge-color").value));
+  GM_prefRoot.setValue("api.GM_cookie.exposeHttpOnly",
+      !!document.getElementById("http-only-cookies").checked);
   // PARKED for 3.9 (scheduled backups): backup pref save removed here.
   // Changes to global excludes should be active after tab reload.
   // UXP is single-process, so we call broadcastScriptUpdates() directly

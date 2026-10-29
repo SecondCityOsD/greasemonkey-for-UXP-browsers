@@ -123,6 +123,9 @@
   window, from the toolbar menu and from the Add-ons Manager, so you can
   keep browsing with it open.  Opening it again brings the open window
   forward.
+* **Notify script updates** turns the "… updated successfully" message
+  on or off.  Before, it could only be silenced from the message's own
+  "Never show again".
 
 **Source viewer**
 * **A dark theme that follows the browser.**  The viewer's dark colours
