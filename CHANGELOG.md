@@ -110,12 +110,13 @@
   scripts you folded, also across updates, and new scripts start
   unfolded.  This helps when a few scripts register many commands.
 * **The toolbar button shows how many scripts ran on the current tab**,
-  as a small badge in your theme's own style.  It counts scripts that
-  actually ran in the page and its frames, each one once, so a script
-  enabled after the page loaded doesn't count until it runs.  It follows
-  you between tabs and pages, Back and Forward included, and is hidden
-  when nothing ran or Greasemonkey is off.  Set
-  `extensions.greasemonkey.toolbarBadge` to false to turn it off.
+  as a small red count in the bottom corner of its icon, clear of the
+  dropdown arrow.  It counts scripts that actually ran in the page and
+  its frames, each one once, so a script enabled after the page loaded
+  doesn't count until it runs.  It follows you between tabs and pages,
+  Back and Forward included, and is hidden when nothing ran or
+  Greasemonkey is off.  Set `extensions.greasemonkey.toolbarBadge` to
+  false to turn it off.
 
 **Source viewer**
 * **A dark theme that follows the browser.**  The viewer's dark colours
