@@ -29,6 +29,8 @@
   <script type="application/javascript"
     src="chrome://greasemonkey/content/sourceViewer/meta.js"></script>
   <script type="application/javascript"
+    src="chrome://greasemonkey/content/sourceViewer/find.js"></script>
+  <script type="application/javascript"
     src="chrome://greasemonkey/content/sourceViewer/viewer.js"></script>
 </head>
 <body class="theme-light">
@@ -58,24 +60,38 @@
     <!-- CodeMirror (or the textarea fallback) is mounted into this div. -->
     <div id="gm-sv-host"></div>
 
-    <!-- Find bar (overlay, top-right of the code).  Opened with Ctrl+F or
-         the toolbar's Find button when CodeMirror is active; viewer.js
-         searches the full document model and drives the selection
-         (CodeMirror virtualises its DOM, so the browser's native find can't
-         see off-screen lines).  The placeholder text is set at runtime. -->
+    <!-- Find bar and go-to-line box (find.js; overlays, top-right of the
+         code), for CodeMirror only.  Tooltips and placeholders are set at
+         runtime. -->
     <div id="gm-sv-find" hidden="hidden">
       <input id="gm-sv-find-input" type="text"/>
+      <span id="gm-sv-find-options">
+        <button id="gm-sv-find-case" type="button" aria-pressed="false">Aa</button>
+        <button id="gm-sv-find-word" type="button" aria-pressed="false">W</button>
+        <button id="gm-sv-find-regex" type="button" aria-pressed="false">.*</button>
+      </span>
       <span id="gm-sv-find-count"></span>
-      <button id="gm-sv-find-prev" type="button" title="Previous">&#x25B2;</button>
-      <button id="gm-sv-find-next" type="button" title="Next">&#x25BC;</button>
-      <button id="gm-sv-find-close" type="button" title="Close">&#x2715;</button>
+      <button id="gm-sv-find-prev" type="button">&#x25B2;</button>
+      <button id="gm-sv-find-next" type="button">&#x25BC;</button>
+      <button id="gm-sv-find-close" type="button">&#x2715;</button>
+    </div>
+    <div id="gm-sv-goto" hidden="hidden">
+      <label id="gm-sv-goto-label" for="gm-sv-goto-input"></label>
+      <input id="gm-sv-goto-input" type="text"/>
     </div>
   </div>
 
-  <!-- Thin status strip; hidden until there is a note to show ("plain
-       text", a read error). -->
+  <!-- Status bar: a note ("plain text", a read error) on the left; the
+       cursor, lines, size, line endings, BOM and a minified hint on the
+       right.  Hidden until a file is read. -->
   <div id="gm-sv-status" hidden="hidden">
     <span id="gm-sv-note"></span>
+    <span id="gm-sv-cursor"></span>
+    <span id="gm-sv-lines"></span>
+    <span id="gm-sv-size"></span>
+    <span id="gm-sv-eol"></span>
+    <span id="gm-sv-bom"></span>
+    <span id="gm-sv-minified"></span>
   </div>
 </body>
 </html>
