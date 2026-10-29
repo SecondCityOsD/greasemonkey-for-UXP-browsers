@@ -184,14 +184,9 @@ pref("extensions.greasemonkey.requireTimeoutUpdates", true);
 pref("extensions.greasemonkey.showGrantsWarning", true);
 pref("extensions.greasemonkey.sniffGrants", false);
 pref("extensions.greasemonkey.sortBy", "uiState,name");
-// Source viewer, all set from the viewer itself and shared by every open
-// one: whether the metadata header is shown; colours, "auto" (follow the
-// browser's toolbars), "light" or "dark"; wrapping long lines; the code's
-// text size in percent (50-300, the steps Ctrl++ / Ctrl+- go through).
-pref("extensions.greasemonkey.sourceViewer.metadata", true);
+// Source viewer colours: "auto" (follow the browser's toolbars), "light" or
+// "dark".  Set from the viewer's toolbar.
 pref("extensions.greasemonkey.sourceViewer.theme", "auto");
-pref("extensions.greasemonkey.sourceViewer.wrap", false);
-pref("extensions.greasemonkey.sourceViewer.zoom", 100);
 pref("extensions.greasemonkey.sync.enabled", true);
 pref("extensions.greasemonkey.sync.values", false);
 pref("extensions.greasemonkey.sync.values.deleteNonExistentValues", false);

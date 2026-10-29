@@ -121,7 +121,7 @@
   name) and the address it was downloaded from, with the site in bold, as
   in the install window.  The icon is the copy the install window already
   downloaded, so it isn't fetched again.  The tab is titled after the
-  script too, and its address no longer contains the file's path either.
+  script too.
 * **A status bar** at the bottom shows the cursor's line and column (and
   how much is selected), the number of lines, the size, the line endings
   (LF, CRLF, or mixed, with counts on hover), a UTF-8 byte order mark, and
@@ -149,23 +149,6 @@
     through the matches.  A short selection fills in the search when
     find opens.
   - **Ctrl+G** goes to a line, or `line:column`.
-* **Reading long scripts is easier.**
-  - Code can be folded from a gutter beside the line numbers: braces,
-    and the whole `==UserScript==` block.
-  - A **Wrap** button (or Alt+Z) wraps long lines.
-  - Ctrl++, Ctrl+-, Ctrl+0 and Ctrl+wheel change the code's text size,
-    leaving the toolbar as it is.  The status bar shows the size when it
-    isn't 100%; click it to reset.
-  - Wrap, the text size and whether the metadata header is shown are
-    remembered, and apply to every open viewer.
-* **Copy** puts the whole file on the clipboard.  Web addresses in the
-  code are underlined, and **Ctrl+click** opens one in a new tab.  A
-  plain click still just places the cursor.  The **?** button (or the ?
-  key) lists the keyboard shortcuts.
-* **Installed scripts can be opened in the viewer from about:addons**:
-  **View User Script Source** in a script's right-click menu, and as a
-  button beside **Edit** in its details.  Until now about:addons only
-  offered Edit, which opens the external editor.
 
 **about:addons "User Scripts" pane**
 * **Homepage links go to the right pages.**  For a script that declares no
