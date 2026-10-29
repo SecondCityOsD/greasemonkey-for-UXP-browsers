@@ -3,303 +3,71 @@
 #### 3.10
 
 **Script updates**
-* **Updates no longer install without your consent.** After a manual
-  **Check for Updates** listed an update, Greasemonkey's own update check
-  (the scheduled one, or **Check now** in Greasemonkey Preferences) could
-  later install it anyway.  That included scripts whose Automatic Updates
-  was **Off**, and scripts with local edits, which were overwritten.
-  Greasemonkey's checks now install only what the browser's own rule
-  allows: the script's Automatic Updates setting, or **Update Add-ons
-  Automatically** when it's set to Default.  Anything else stays listed
-  under Available Updates.  This corrects the 3.9 entry below, which said
-  these protections applied unchanged.
-* **Update Now asks before overwriting a script you edited**, unless you
-  already agreed, either by switching its Automatic Updates back on (which
-  warns you) or by confirming "Overwrite with remote contents?" when finding
-  updates.  Cancelling keeps your edits, and the update stays available.
-* Update checks now notice edits made in an external editor straight away.
-  Before, they were only noticed on the next page load, so an update check
-  in between could overwrite them.
-* Scheduled checks are skipped while the browser-wide
-  `extensions.update.enabled` switch is off, just like the browser's own
-  add-on checks.  **Check now** still works.
-* **Old versions installed from GreasyFork are no longer treated as
-  updatable.**  GreasyFork serves an older version with `@downloadURL none`.
-  Greasemonkey ignored that line, so the copy used the old version's own
-  address as its update URL and was checked against itself forever.  Such
-  a copy now counts as not updatable, as in Violentmonkey: no automatic
-  checks, no Find Updates and no Automatic Updates setting.  Its Options
-  window shows the Update URL as "none" and says why the script won't
-  update.  Copies you already have are recognised on the first start.
-* A script without an update address could store the text "null" as its
-  update URL.  That no longer happens, and stored ones are cleaned up on
-  start.
+- Never install an update without consent: Greasemonkey's own checks follow each script's Automatic Updates setting (corrects the 3.9 note below)
+- Ask before Update Now overwrites a script you edited
+- Notice edits made in an external editor straight away
+- Skip scheduled checks while `extensions.update.enabled` is off
+- Treat `@downloadURL none` (old versions on GreasyFork) as not updatable
+- Stop saving "null" as an update URL; clean up stored ones
 
 **Script injection**
-* **Back/Forward no longer runs scripts a second time.**  Since 3.7.0, a
-  page restored from the back-forward cache re-ran its document-end and
-  document-idle scripts, while the copies from the first visit were still
-  running.  That repeated alerts and other side effects, and added
-  duplicate menu commands and value-change listeners with every Back.
-  Restored pages now keep their original scripts, as in Violentmonkey and
-  Tampermonkey.  A script that wants to react to a restore can listen for
-  `pageshow` itself.
+- Don't run scripts again when Back/Forward restores a page from the cache
 
-**Installing scripts**
-* **The install window shows what else a script brings with it.**  Before,
-  it listed only the pages a script runs on, its `@grant` and its
-  `@connect`.  It now also shows:
-  - the script's `@icon`, beside its name;
-  - where the script is installed from, with the site in bold;
-  - an amber "not encrypted" mark on any `http://` address, whether the
-    script's own or a file it loads, since anyone on the network could
-    change what it serves.  With `requireSecureDependencies` on, a file's
-    mark says that it will be refused;
-  - the code (`@require`) and files (`@resource`) it loads, one line each
-    with the site in bold.  The tooltip shows the whole address and, when
-    the script pins a hash for it, that the download is checked against
-    it.  A line on top names the other sites it runs code from, since that
-    code gets all of the script's permissions.  Each line ends in "…"
-    while its file downloads, then in its size.  Clicking a downloaded
-    code or text file opens it in the source viewer;
-  - its `@antifeature` declarations (ads, tracking, mining…);
-  - metadata it had to ignore, such as an unusable `@match`;
-  - `@exclude-match` rules, with the other pages it doesn't run on;
-  - its `@run-at`, when that isn't the usual document-end.
-* **The Install button is ready sooner.**
-  - Its countdown is now 0.8 seconds instead of two and a half, but it
-    starts again whenever the install window loses the focus.  That
-    restart is what stops a page from popping the window up under your
-    cursor and timing a click onto Install.
-  - You can click Install before the script's `@require` and `@resource`
-    files have finished downloading.  The button then reads
-    "Installing…", and the script installs as soon as they are all in.
-  - Those files, and the `@icon`, now download four at a time instead of
-    one after another.  The first one that fails still stops the install,
-    and cancels the rest.
-  - The countdown is the `extensions.greasemonkey.installDelay` setting,
-    in steps of 0.4 seconds; `0` turns it off.
-* Backups now save only the Greasemonkey settings you have changed.  They
-  used to save every listed setting, so restoring one turned that day's
-  defaults into fixed choices.  A 3.9 backup still brings back the old
-  countdown setting (`installDelay` 5, now 2 seconds), which you can
-  reset in about:config.
-* When Windows briefly locked a new script's folder during the install,
-  the retry meant for that case crashed itself.  The script was then
-  listed, but its files were left behind in a temporary folder.  The
-  retry now works.
-* **An unusable `@match` no longer stops the install.**  A pattern such as
-  `@match https://example.com` (no path) used to abort it, even though the
-  message said it was being ignored.  The same went for a bad
-  `@exclude-match`, `@icon` or `@icon64`, and also for importing a backup.
-  Like Violentmonkey, Greasemonkey now ignores such a line and installs
-  the script.  The "installed" message and the Browser Console list what
-  was ignored.  A broken `@require` or `@resource` still stops the install.
-* A script whose `@match` lines were *all* ignored runs on no page at all,
-  as in Violentmonkey.  It does not fall back to running everywhere, which
-  is what a script with no rules at all does.  The message says so, and
-  you can add your own `@match` in the script's Options.
-* Messages about ignored metadata no longer garble values that contain
-  `%2`-like sequences, such as URLs with `%20`.
-
-**Toolbar menu**
-* **User Script Commands can be folded per script.**  Click a script's
-  name in the list (or press Enter on it) to fold its commands away, and
-  again to bring them back; the menu stays open.  ▲ means its commands
-  are shown, ▼ that they're folded.  Greasemonkey remembers which
-  scripts you folded, also across updates, and new scripts start
-  unfolded.  This helps when a few scripts register many commands.
-* **The toolbar button shows how many scripts ran on the current tab**,
-  as a small red count in the bottom corner of its icon, clear of the
-  dropdown arrow.  It counts scripts that actually ran in the page and
-  its frames, each one once, so a script enabled after the page loaded
-  doesn't count until it runs.  It follows you between tabs and pages,
-  Back and Forward included, and is hidden when nothing ran or
-  Greasemonkey is off.  Preferences chooses what it counts and its
-  colour (below).
-
-**Greasemonkey Preferences**
-* **Preferences no longer blocks the browser.**  It opens as an ordinary
-  window, from the toolbar menu and from the Add-ons Manager, so you can
-  keep browsing with it open.  Opening it again brings the open window
-  forward.
-* **Notify script updates** turns the "… updated successfully" message
-  on or off.  Before, it could only be silenced from the message's own
-  "Never show again".
-* **Toolbar button: Badge** shows the number of unique running scripts
-  (the default), the number of running scripts (a script running in
-  three frames counts three times, as in Violentmonkey) or nothing.
-  **Color** picks the badge's colour; its figures turn black or white to
-  stay readable.
-* **Script APIs: Allow GM_cookie to access HTTP-only cookies.**  3.9 let
-  every script using `GM_cookie` read them, though pages' own scripts
-  can't, since they often hold your login.  Now, as in Violentmonkey, a
-  script reaches them only when this is on *and* its own Options window
-  allows it (a new GM_cookie row, for scripts that use it).  Otherwise
-  `GM_cookie.list()` leaves them out, and `set()` / `delete()` won't
-  create, overwrite or remove them.  Backups keep the per-script choice,
-  and Violentmonkey backups bring theirs.
+**Install window**
+- Show the script's `@icon`, where it comes from, its `@require` / `@resource` files, `@antifeature`, `@exclude-match`, a non-default `@run-at` and ignored metadata
+- Mark `http://` addresses as not encrypted
+- Shorten the Install countdown to 0.8 s; restart it when the window loses focus (`installDelay`, steps of 0.4 s)
+- Allow clicking Install while dependencies are still downloading
+- Download dependencies four at a time
+- Ignore an unusable `@match`, `@exclude-match` or `@icon` instead of refusing the script
+- Run a script whose every `@match` was ignored nowhere, not everywhere
+- Fix the retry when Windows briefly locks a new script's folder
+- Fix garbled `%2`-like text in messages about ignored metadata
 
 **Source viewer**
-* **A dark theme that follows the browser.**  The viewer's dark colours
-  were tied to Pale Moon's "Web Page Color Scheme" setting, which themes
-  don't change, so they almost never showed.  When they did, most of the
-  code kept its light-theme colours and the find bar stayed light.
-  - A new toolbar has **Auto / Light / Dark** buttons.  Auto follows the
-    browser's own toolbars, so a dark complete or lightweight theme makes
-    the viewer dark, and it switches as soon as the theme does.
-  - The choice is remembered (`extensions.greasemonkey.sourceViewer.theme`)
-    and applies to every open viewer.
-  - Both colour sets are complete (VS Code's Light+ and Dark+), scrollbars
-    included: the viewer now draws its own, since this browser can't
-    recolour native ones and they stayed light in Dark.
-* **The toolbar says what you're looking at.**  It used to show the path
-  of a temporary copy, which put your Windows user name in screenshots.
-  It now shows the script's `@icon`, name and version (a library's file
-  name) and the address it was downloaded from, with the site in bold, as
-  in the install window.  The icon is the copy the install window already
-  downloaded, so it isn't fetched again.  The tab is titled after the
-  script too.
-* **A status bar** at the bottom shows the cursor's line and column (and
-  how much is selected), the number of lines, the size, the line endings
-  (LF, CRLF, or mixed, with counts on hover), a UTF-8 byte order mark, and
-  "minified" when a line runs to a thousand characters or more.
-* **A metadata header above the code** lists what the script declares,
-  grouped as in the install window: where it runs and doesn't, `@run-at`
-  and `@noframes`, its `@grant` permissions, `@connect`, the code and
-  files it loads, `@antifeature`, its update addresses, and the lines the
-  parser ignores.
-  - Clicking a value selects the line that declares it.
-  - Permissions that reach past the page (requests to other sites,
-    cookies, downloads, the clipboard, `unsafeWindow`) get a small tag,
-    and `@connect *` is flagged.  Hovering one says what it allows.
-  - `http://` addresses get the install window's "not encrypted" mark,
-    and a `@require` or `@resource` address can be opened in a new tab.
-  - The **Metadata** button in the toolbar shows and hides it.  A
-    library has no metadata, so neither the header nor the button.
-* **Find is more capable.**
-  - Every match is highlighted, the current one more strongly, and the
-    count reads "3 of 17".  It starts from the cursor rather than the top.
-  - **Match case**, **Whole word** and **Regular expression** buttons.
-    These replace the old `/pattern/` syntax.  A pattern that doesn't
-    compile now says so, instead of being searched for as plain text.
-  - Enter / Shift+Enter, F3 / Shift+F3 and the arrow buttons step
-    through the matches.  A short selection fills in the search when
-    find opens.
-  - **Ctrl+G** goes to a line, or `line:column`.
+- Add a dark theme that follows the browser, with Auto / Light / Dark buttons and matching scrollbars
+- Show the script's icon, name, version and source instead of a temporary file path
+- Add a metadata header above the code, with tags on permissions that reach past the page
+- Find: highlight every match; match case, whole word and regex; F3; Ctrl+G to go to a line
+- Add a status bar: cursor position, size, line endings, BOM, minified
 
-**about:addons "User Scripts" pane**
-* **Homepage links go to the right pages.**  For a script that declares no
-  homepage, Greasemonkey guessed one.  It tried the `@namespace` first,
-  which is often a placeholder or an author profile.  As a last resort it
-  used the script's own `.user.js` address, which just reinstalls the
-  script when clicked.  Now:
-  - the **Homepage** link goes to the script's page on GreasyFork,
-    SleazyFork, OpenUserJS, GitHub or Gist, worked out from where it
-    updates from; else to the declared homepage or a web-address
-    `@namespace`;
-  - the **author's name** links to the declared homepage, else to a
-    web-address `@namespace`;
-  - `GM_info.script.homepage` uses Violentmonkey's order: the declared
-    homepage, else the script's page, else a web-address `@namespace`.
+**Toolbar button**
+- Fold a script's commands in User Script Commands
+- Show how many scripts ran on the tab, in the corner of the icon
 
-  IG Helper, for example, now links to its GreasyFork page, and its
-  author's name to github.snkms.com.  Existing scripts are corrected on
-  the first start.  Importing a 3.9 backup no longer turns a guessed
-  homepage into a declared one.
-* **A script's donation link** (`@contributionURL`) is now read, and
-  shows as the Add-ons Manager's own **Contribute** button.
-* A script's Options window shows the **Homepage** it declares and its
-  **Script page** in separate rows.  Without a declared homepage, a
-  web-address `@namespace` stands in, greyed and marked "(from
-  @namespace)".  A **Contribute** row appears when the script has a
-  donation link.
-* A script's Options window now closes when the script is updated or
-  removed while the window is open.  Clicking OK afterwards used to save
-  into the old copy, so the changes were lost.
-* A script's Options window offers no Automatic updates choice when the
-  script can't update at all.  For example, it has no web address to
-  update from.  The window says why instead.
-* **A script's Options window keeps its Installed date across updates.**
-  Installed always showed "—", and every update reset the install date
-  anyway, so it would always have matched Last updated.  Installed now
-  shows when you first installed the script, and updates keep it.  Last
-  updated shows its latest update, or your latest edit to it.
-  Greasemonkey never saved the first-install date before, so scripts you
-  already have start from their last update; their next update moves
-  the two apart.  Backups keep the date, and restoring an older backup
-  uses the earliest date it has.
-* **Stored values get a proper editor.**  Add and Edit on a script's
-  Values tab opened a one-line prompt, far too small for anything longer
-  than a word.  They now open an editor window you can resize or
-  maximise, with the key and the value together and the value in a
-  fixed-width font.  Text values are edited as plain text, so a script
-  that keeps JSON in a string, as 4chan X does, reads without `\"`
-  escapes.  **Edit as JSON** is there for numbers, lists and objects.
-  **Format** and **Compact** lay out JSON, invalid JSON is pointed out
-  before it can be saved, Ctrl+Z undoes either, and Ctrl+Enter saves.
-  Double-clicking a value opens it too.
-* **Options now opens for disabled scripts, from the list as well.**  The
-  Options button on a disabled script's row did nothing, and the detail
-  pane only worked through a separate stand-in button.  Both now use the
-  Add-ons Manager's own Options button, which opens the script's
-  Options window whether the script is enabled or not.
-* **A script's Options window is readable with dark themes.**  Its row
-  labels (Name, Version, Homepage…) and the Included / Matched / Excluded
-  headings used the system's text-field colour, black on Windows, so a
-  dark complete theme such as Blackmoon left them black on black.  The
-  window now takes every colour from the theme, links included, and
-  greyed-out text is dimmed instead of set to a fixed grey.
+**Greasemonkey Preferences**
+- Open as a normal window instead of blocking the browser
+- Add **Notify script updates**
+- Add **Badge** (unique running scripts, running scripts or none) and its **Color**
+- Add **Allow GM_cookie to access HTTP-only cookies**
+
+**Script Options and the Add-ons Manager**
+- Edit stored values in a resizable editor, as text or JSON, with Format / Compact
+- Keep the Installed date across updates
+- Link Homepage to the script's page (GreasyFork, OpenUserJS, GitHub…) and the author's name to their site
+- Read `@contributionURL` for the Contribute button
+- Show Homepage, Script page and Contribute in separate rows
+- Explain why a script can't update instead of offering Automatic updates
+- Open Options for disabled scripts
+- Close Options when its script is updated or removed
+- Fix unreadable labels with dark themes
 
 **Script APIs**
-* **`GM_xmlhttpRequest` upload callbacks work.**  `upload.onload`,
-  `upload.onloadend`, `upload.onabort` and `upload.ontimeout` threw before
-  reaching the script; only `upload.onprogress` and `upload.onerror`
-  worked.  `upload.onloadstart` is now supported too.  Each upload callback
-  gets `loaded` / `total` / `lengthComputable` (the same fix as
-  Greasemonkey 4.14).
-* **`GM_xmlhttpRequest` returns `context` as the same object you passed**,
-  as Tampermonkey, Violentmonkey and Greasemonkey 4.14 do.  It used to be a
-  copy: class methods and identity were lost, a falsy context (`0`, `""`,
-  `false`) came back as `null`, and a context holding a Promise stopped the
-  callback from running at all.
+- Give `GM_cookie` HTTP-only cookies only when both Preferences and the script's Options allow it (3.9 gave them to every script)
+- Fix `GM_xmlhttpRequest` upload callbacks; add `upload.onloadstart`
+- Return `GM_xmlhttpRequest`'s `context` as the object passed in
+- Fill `GM_info.script.homepage` in Violentmonkey's order
 
 **Dependencies and backups**
-* **`@require` / `@resource` / `@icon` addresses survive a restart.**
-  Greasemonkey saved only each dependency's file name.  After a restart,
-  the Options window showed "—" for `@require`, and **backups left out
-  every dependency file**, so the 3.9 offline restore only worked until
-  the first restart.  config.xml now also keeps each dependency's address
-  and pinned hash.
-* The first start fills them in for scripts you already have, from each
-  script's own metadata.  A script whose dependency lines changed after
-  its dependencies were downloaded is skipped; its next update fills them
-  in.  Older versions ignore the new attributes.
-* **Base64 pinned hashes are now checked.**  A `@require` / `@resource`
-  can pin its exact content in the URL.  Greasemonkey only understood
-  Tampermonkey's hex form `#sha256=…`, and silently ignored the base64
-  form `#sha256-…=` (the W3C SRI format used by jsDelivr and scripts such
-  as IG Helper), so those files were never verified.  Both forms are
-  checked now, for sha256, sha384 and sha512 and for lists of several
-  hashes.  A file that doesn't match its pin stops the install or update,
-  with a message naming the file.
+- Keep `@require` / `@resource` / `@icon` addresses and hashes, so backups include dependency files after a restart
+- Check base64 (SRI) pinned hashes: sha256, sha384, sha512
+- Back up only the settings you changed (a 3.9 backup restores `installDelay` 5)
+- Keep the first-install date and the HTTP-only cookie choice in backups; import Violentmonkey's
+- Don't turn a 3.9 backup's guessed homepage into a declared one
 
-**Compatibility**
-* Pale Moon 35 is now within the declared compatibility range
-  (`maxVersion 35.*`).
-
-**Translations**
-* The new 3.10 text is translated into 20 languages: Bulgarian, Czech,
-  German, Spanish (Spain), French, Indonesian, Italian, Japanese, Dutch,
-  Polish, Portuguese (Brazil and Portugal), Russian, Slovak, Slovenian,
-  Serbian, Swedish, Turkish and Chinese (Simplified and Traditional).
-  That covers the install window, the source viewer, the Options
-  window's new text, the value editor and the messages.  The same goes
-  for some older text that had stayed English everywhere: the backup
-  import window, "Recover orphans", the "no built-in editor" message,
-  and the Values tab with its buttons and the Options window's OK and
-  Cancel.  The other locales, whose files are still largely English,
-  show these in English as before.
+**Other**
+- Declare Pale Moon 35 compatibility
+- Translate the new text, and some older text that stayed English, into 20 languages
 
 #### 3.9
 

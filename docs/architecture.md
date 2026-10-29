@@ -533,8 +533,10 @@ Defined in `modules/script.js`. Fields (subset):
 | `grants` | string[] | `@grant` lines, deduped |
 | `connects` | string[] | `@connect` lines |
 | `checkRemoteUpdates` | one of AUTOUPDATE_DEFAULT/_ENABLE/_DISABLE | `@updateURL` + per-script setting |
+| `httpOnlyCookies` | boolean | per-script Options setting (config.xml `httpOnlyCookies`, only when true); GM_cookie also needs `api.GM_cookie.exposeHttpOnly` |
 | `executionIndex` | int | position in `config.scripts` array |
-| `installTime`, `modifiedTime` | ms-since-epoch | timestamps |
+| `installTime`, `modifiedTime` | ms-since-epoch | timestamps: this version's install (the local-edit baseline, reset by updates) and the file's last change |
+| `firstInstallTime` | ms-since-epoch | first install, kept across updates (config.xml `firstInstallTime`; 3.10 configs start from `installTime`) |
 | `file` | nsIFile | `<profile>/gm_scripts/<id>/<id>.user.js` |
 | `fileURL` | string | `file://` URI of the above |
 
