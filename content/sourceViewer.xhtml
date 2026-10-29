@@ -27,15 +27,20 @@
   <script type="application/javascript"
     src="chrome://greasemonkey/content/sourceViewer/scrollbars.js"></script>
   <script type="application/javascript"
+    src="chrome://greasemonkey/content/sourceViewer/meta.js"></script>
+  <script type="application/javascript"
     src="chrome://greasemonkey/content/sourceViewer/viewer.js"></script>
 </head>
 <body class="theme-light">
   <!-- Toolbar: the script's name and version, the address it came from,
-       Find, and the Auto / Light / Dark switch. -->
+       Metadata (shows/hides the header below), Find, and the Auto / Light /
+       Dark switch. -->
   <div id="gm-sv-toolbar">
     <span id="gm-sv-name"></span>
     <span id="gm-sv-version"></span>
     <span id="gm-sv-source"></span>
+    <button id="gm-sv-meta-toggle" type="button" hidden="hidden"
+      aria-pressed="false"></button>
     <button id="gm-sv-find-open" type="button" hidden="hidden"></button>
     <span id="gm-sv-theme" role="group">
       <button type="button" data-mode="auto" aria-pressed="false"></button>
@@ -43,6 +48,10 @@
       <button type="button" data-mode="dark" aria-pressed="false"></button>
     </span>
   </div>
+
+  <!-- What the script declares (meta.js); only for a file with a metadata
+       block. -->
+  <div id="gm-sv-meta" hidden="hidden"></div>
 
   <div id="gm-sv-main">
     <!-- CodeMirror (or the textarea fallback) is mounted into this div. -->

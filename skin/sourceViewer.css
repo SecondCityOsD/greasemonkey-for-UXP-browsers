@@ -248,12 +248,136 @@ body {
   outline-offset: -1px;
 }
 
+#gm-sv-meta-toggle,
 #gm-sv-find-open {
   flex: 0 0 auto;
   margin-left: 8px;
 }
+#gm-sv-meta-toggle[hidden],
 #gm-sv-find-open[hidden] {
   display: none;
+}
+#gm-sv-meta-toggle[aria-pressed="true"] {
+  border-color: var(--sv-accent);
+}
+
+/* ── Metadata header (sourceViewer/meta.js) ────────────────────────────── */
+#gm-sv-meta {
+  flex: 0 0 auto;
+  max-height: 45vh;        /* rows already stop at 6 values: a safety net */
+  overflow-y: auto;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--sv-border);
+  background: var(--sv-chrome-bg);
+  color: var(--sv-chrome-fg);
+  font: message-box;
+  font-size: 12px;
+}
+#gm-sv-meta[hidden] {
+  display: none;
+}
+.gm-sv-meta-row {
+  display: flex;
+  align-items: baseline;
+  padding: 1px 0;
+}
+.gm-sv-meta-key {
+  flex: 0 0 17em;
+  color: var(--sv-muted);
+}
+.gm-sv-meta-values {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.gm-sv-meta-item {
+  display: inline-block;
+  margin-right: 14px;
+  word-wrap: break-word;
+  max-width: 100%;
+  cursor: pointer;
+}
+.gm-sv-meta-list .gm-sv-meta-item {
+  display: block;
+  margin-right: 0;
+}
+.gm-sv-meta-item:hover .gm-sv-meta-code {
+  text-decoration: underline;
+}
+.gm-sv-meta-item:focus {
+  outline: 1px solid var(--sv-accent);
+  outline-offset: 1px;
+}
+/* Values that point at no line. */
+.gm-sv-meta-warning,
+.gm-sv-meta-none {
+  cursor: default;
+}
+.gm-sv-meta-none {
+  color: var(--sv-muted);
+  font-style: italic;
+}
+.gm-sv-meta-code {
+  font-family: monospace;
+  font-size: 11px;
+  color: var(--sv-fg);
+}
+.gm-sv-meta-prefix {
+  color: var(--sv-muted);
+  font-family: monospace;
+  font-size: 11px;
+}
+
+/* A grant that reaches past the page, or @connect *: quiet, the tooltip
+   says what it allows. */
+.gm-sv-tag,
+.gm-sv-chip-warn {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 4px;
+  border-radius: 3px;
+  font-size: 0.9em;
+  line-height: 1.3;
+}
+.gm-sv-tag {
+  border: 1px solid var(--sv-control-border);
+  color: var(--sv-muted);
+}
+/* Antifeatures and "not encrypted": the install window's amber, with its
+   own dark text, so it reads the same in both palettes. */
+.gm-sv-chip-warn {
+  border: 1px solid #f0b400;
+  background: #f0b400;
+  color: #2b2000;
+}
+.gm-sv-meta-item > .gm-sv-chip-warn:first-child {
+  margin-left: 0;
+}
+
+#gm-sv-meta button {
+  -moz-appearance: none;
+  margin-left: 6px;
+  padding: 0 5px;
+  border: 1px solid var(--sv-control-border);
+  border-radius: 3px;
+  background: var(--sv-control-bg);
+  color: var(--sv-chrome-fg);
+  font: inherit;
+  font-size: 11px;
+  line-height: 1.3;
+  cursor: pointer;
+}
+#gm-sv-meta button:hover {
+  background: var(--sv-control-hover);
+}
+#gm-sv-meta button::-moz-focus-inner {
+  border: 0;
+}
+#gm-sv-meta button:-moz-focusring {
+  outline: 1px solid var(--sv-accent);
+  outline-offset: -1px;
+}
+#gm-sv-meta .gm-sv-meta-more {
+  margin-left: 0;
 }
 
 /* Auto / Light / Dark as one segmented control. */
