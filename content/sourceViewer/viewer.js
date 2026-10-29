@@ -2,8 +2,8 @@
  * @file sourceViewer/viewer.js
  * @overview Read-only, syntax-highlighted viewer for user-script source.
  *   Colours live in theme.js, the themed scrollbars in scrollbars.js, the
- *   metadata header in meta.js and find / go to line in find.js, all
- *   loaded first.  This file loads the file, CodeMirror, the toolbar and
+ *   metadata header in meta.js, find / go to line in find.js, and
+ *   folding, wrap and text size in view.js, all loaded first.  This file loads the file, CodeMirror, the toolbar and
  *   the status bar.
  *
  * Loaded as a chrome XHTML document in a browser tab via
@@ -397,6 +397,7 @@ function renderSource(aText) {
         } catch (e) { /* non-fatal */ }
       }, 0);
       SvFind.init(gCMInstance, svString);
+      SvView.init({"cm": gCMInstance, "string": svString, "textarea": null});
       return;
     } catch (e) {
       // Construction failed — fall through to the textarea.
@@ -452,6 +453,7 @@ function mountTextareaFallback(aText, aHighlighterMissing) {
   ta.spellcheck = false;
   ta.value = aText;
   host.appendChild(ta);
+  SvView.init({"cm": null, "string": svString, "textarea": ta});
 
   if (aHighlighterMissing) {
     showNote(svString("sourceViewer.note.plainText",
