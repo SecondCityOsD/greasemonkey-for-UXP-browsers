@@ -1,8 +1,10 @@
 /**
  * @file sourceViewer/viewer.js
  * @overview Read-only, syntax-highlighted viewer for user-script source.
- *   Colours live in theme.js, the themed scrollbars in scrollbars.js and
- *   the metadata header in meta.js, all loaded first.
+ *   Colours live in theme.js, the themed scrollbars in scrollbars.js, the
+ *   metadata header in meta.js and find / go to line in find.js, all
+ *   loaded first.  This file loads the file, CodeMirror, the toolbar and
+ *   the status bar.
  *
  * Loaded as a chrome XHTML document in a browser tab via
  *   chrome://greasemonkey/content/sourceViewer.xhtml?path=<encoded OS path>
@@ -79,6 +81,9 @@ const SV_MAX_CM_BYTES = 1500000;
 /** Longest address shown in the toolbar; a data: URL can be huge. */
 const SV_MAX_URL_CHARS = 200;
 
+/** A line this long makes the status bar call the file minified. */
+const SV_MINIFIED_LINE = 1000;
+
 /** The resolved CodeMirror constructor (or null when it couldn't load). */
 var gCM = null;
 
@@ -136,11 +141,14 @@ function GM_sourceViewerLoad() {
   let url = readQueryParam("url");
   showSourceAddress(url || path);
 
-  // Read the file as UTF-8, then render.  OS.File works in the chrome
-  // document context this page runs in.
-  OS.File.read(path, { "encoding": "UTF-8" }).then(
-      function (text) {
+  // Read the raw bytes (the status bar shows the size and any byte-order
+  // mark), decode them as UTF-8 (TextDecoder drops the mark), then render.
+  // OS.File works in the chrome document context this page runs in.
+  OS.File.read(path).then(
+      function (bytes) {
+        let text = new TextDecoder("utf-8").decode(bytes);
         renderSource(text);
+        showStatus(text, bytes);
         let script = parseSource(text, url);
         showSourceName(script, url, path);
         showSourceIcon(readQueryParam("icon"), script);
@@ -388,7 +396,7 @@ function renderSource(aText) {
           }
         } catch (e) { /* non-fatal */ }
       }, 0);
-      setupFind();
+      SvFind.init(gCMInstance, svString);
       return;
     } catch (e) {
       // Construction failed — fall through to the textarea.
@@ -465,6 +473,91 @@ function showNote(aMessage) {
   }
   if (strip) {
     strip.removeAttribute("hidden");
+  }
+}
+
+/**
+ * Fills the status bar: the cursor position (with CodeMirror), the number
+ * of lines, the size, the line endings, a byte-order mark and a hint that
+ * the file is minified.
+ * @param {string} aText - The decoded contents.
+ * @param {Uint8Array} aBytes - The file as read.
+ * @returns {void}
+ */
+function showStatus(aText, aBytes) {
+  let breaks = aText.match(/\r\n|\r|\n/g) || [];
+  let endings = {"CRLF": 0, "LF": 0, "CR": 0};
+  breaks.forEach(function (aBreak) {
+    endings[(aBreak == "\r\n") ? "CRLF" : ((aBreak == "\n") ? "LF" : "CR")]++;
+  });
+  let kinds = Object.keys(endings).filter(function (aKind) {
+    return endings[aKind] > 0;
+  });
+  let longest = 0;
+  aText.split(/\r\n|\r|\n/).forEach(function (aLine) {
+    longest = Math.max(longest, aLine.length);
+  });
+
+  let lines = breaks.length + 1;
+  setStatus("gm-sv-lines", (lines == 1)
+      ? svString("sourceViewer.status.line", "1 line")
+      : svString("sourceViewer.status.lines", "%1 lines")
+          .replace("%1", lines.toLocaleString()));
+  setStatus("gm-sv-size", svString("install.size.kb", "%1 KB")
+      .replace("%1", Math.ceil(aBytes.length / 1024).toLocaleString()),
+      svString("sourceViewer.status.bytes", "%1 bytes")
+          .replace("%1", aBytes.length.toLocaleString()));
+  if (kinds.length > 1) {
+    setStatus("gm-sv-eol", svString(
+        "sourceViewer.status.eol.mixed", "Mixed line endings"),
+        kinds.map(function (aKind) {
+          return aKind + " " + endings[aKind].toLocaleString();
+        }).join(", "));
+  } else {
+    setStatus("gm-sv-eol", kinds[0] || "", svString(
+        "sourceViewer.status.eol.tooltip", "Line endings"));
+  }
+  let bom = (aBytes.length >= 3) && (aBytes[0] == 0xEF)
+      && (aBytes[1] == 0xBB) && (aBytes[2] == 0xBF);
+  setStatus("gm-sv-bom", bom ? "BOM" : "", svString(
+      "sourceViewer.status.bom.tooltip", "Starts with a UTF-8 byte order mark"));
+  setStatus("gm-sv-minified", (longest >= SV_MINIFIED_LINE)
+      ? svString("sourceViewer.status.minified", "minified") : "",
+      svString("sourceViewer.status.minified.tooltip",
+          "Its longest line has %1 characters, so it's probably minified.")
+          .replace("%1", longest.toLocaleString()));
+
+  if (gCMInstance) {
+    showCursor();
+    gCMInstance.on("cursorActivity", showCursor);
+  }
+  document.getElementById("gm-sv-status").removeAttribute("hidden");
+}
+
+/** The status bar's "Ln, Col" (from 1), and how much is selected. */
+function showCursor() {
+  let cursor = gCMInstance.getCursor("head");
+  let text = svString("sourceViewer.status.cursor", "Ln %1, Col %2")
+      .replace("%1", (cursor.line + 1).toLocaleString())
+      .replace("%2", (cursor.ch + 1).toLocaleString());
+  let selected = gCMInstance.getSelection().length;
+  if (selected) {
+    text += " " + svString("sourceViewer.status.selected", "(%1 selected)")
+        .replace("%1", selected.toLocaleString());
+  }
+  setStatus("gm-sv-cursor", text);
+}
+
+/**
+ * @param {string} aId - A status bar slot.
+ * @param {string} aText - "" hides it.
+ * @param {string} [aTooltip]
+ */
+function setStatus(aId, aText, aTooltip) {
+  let slot = document.getElementById(aId);
+  if (slot) {
+    slot.textContent = aText;
+    slot.title = aTooltip || "";
   }
 }
 
@@ -546,182 +639,4 @@ function isAllowedPath(aPath) {
     }
   }
   return false;
-}
-
-// \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ //
-// ─── Find ────────────────────────────────────────────────────────────────
-// \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ //
-//
-// A small find bar for the CodeMirror surface.  CodeMirror virtualises its
-// DOM (only the visible lines exist), so the browser's native Ctrl+F can't
-// see off-screen matches; we search the full document model ourselves and
-// drive the selection.  The textarea fallback keeps native find (all of its
-// text is in the DOM), so this bar is only wired when CodeMirror is active.
-
-var gFindMatches = [];
-var gFindIdx = -1;
-
-function setupFind() {
-  let input = document.getElementById("gm-sv-find-input");
-  if (!input) {
-    return;
-  }
-  input.setAttribute("placeholder",
-      svString("sourceViewer.find.placeholder", "Find"));
-
-  // A visible "Find" button in the toolbar is the reliable way to open
-  // the bar: in a chrome page hosted in a tab, Ctrl+F may be claimed by the
-  // browser's own (CodeMirror-blind) findbar, so we don't depend on it.
-  let openBtn = document.getElementById("gm-sv-find-open");
-  if (openBtn) {
-    openBtn.textContent = svString("sourceViewer.find.open", "Find");
-    openBtn.removeAttribute("hidden");
-    openBtn.addEventListener("click", showFind, false);
-  }
-
-  input.addEventListener("input", function () {
-    recomputeFind(input.value);
-    gotoMatch(1);
-  }, false);
-  input.addEventListener("keydown", function (aEvent) {
-    if (aEvent.keyCode == 13) {          // Enter
-      aEvent.preventDefault();
-      gotoMatch(aEvent.shiftKey ? -1 : 1);
-    } else if (aEvent.keyCode == 27) {   // Escape
-      aEvent.preventDefault();
-      hideFind();
-    }
-  }, false);
-
-  bindFindClick("gm-sv-find-next", function () { gotoMatch(1); });
-  bindFindClick("gm-sv-find-prev", function () { gotoMatch(-1); });
-  bindFindClick("gm-sv-find-close", hideFind);
-
-  // Ctrl+F / Cmd+F opens the bar (only meaningful with CodeMirror active).
-  window.addEventListener("keydown", function (aEvent) {
-    if ((aEvent.ctrlKey || aEvent.metaKey) && !aEvent.altKey
-        && (aEvent.keyCode == 70 /* F */)) {
-      if (gCMInstance) {
-        aEvent.preventDefault();
-        aEvent.stopPropagation();
-        showFind();
-      }
-    }
-  }, true);
-}
-
-function bindFindClick(aId, aFn) {
-  let el = document.getElementById(aId);
-  if (el) {
-    el.addEventListener("click", aFn, false);
-  }
-}
-
-function recomputeFind(aQuery) {
-  gFindMatches = [];
-  gFindIdx = -1;
-  if (aQuery && gCMInstance) {
-    let text = gCMInstance.getValue();
-    // A /pattern/flags query is treated as a regular expression; anything
-    // else is a plain case-insensitive substring search.  Each match is
-    // stored as {index, length} so variable-length regex matches select
-    // correctly.
-    let re = parseRegexQuery(aQuery);
-    if (re) {
-      let m;
-      while ((m = re.exec(text)) !== null) {
-        gFindMatches.push({ "index": m.index, "length": m[0].length });
-        // Guard against an infinite loop on a zero-width match.
-        if (m.index === re.lastIndex) {
-          re.lastIndex++;
-        }
-      }
-    } else {
-      let hay = text.toLowerCase();
-      let needle = aQuery.toLowerCase();
-      let from = 0;
-      let at;
-      while ((at = hay.indexOf(needle, from)) !== -1) {
-        gFindMatches.push({ "index": at, "length": needle.length });
-        from = at + (needle.length || 1);
-      }
-    }
-  }
-  updateFindCount();
-}
-
-/**
- * Parses a /pattern/flags find query into a global RegExp, or returns null
- * when the query is not in /.../ form (so it's a plain substring search) or
- * the pattern doesn't compile.
- *
- * @param {string} aQuery
- * @returns {RegExp|null}
- */
-function parseRegexQuery(aQuery) {
-  let m = (/^\/(.+)\/([gimsuy]*)$/).exec(aQuery);
-  if (!m) {
-    return null;
-  }
-  let flags = m[2];
-  if (flags.indexOf("g") === -1) {
-    flags += "g";
-  }
-  try {
-    return new RegExp(m[1], flags);
-  } catch (e) {
-    return null;
-  }
-}
-
-function gotoMatch(aDir) {
-  if (!gCMInstance || !gFindMatches.length) {
-    updateFindCount();
-    return;
-  }
-  let len = gFindMatches.length;
-  gFindIdx = ((gFindIdx + aDir) % len + len) % len;
-  let match = gFindMatches[gFindIdx];
-  let from = gCMInstance.posFromIndex(match.index);
-  let to = gCMInstance.posFromIndex(match.index + match.length);
-  gCMInstance.setSelection(from, to);
-  gCMInstance.scrollIntoView({ "from": from, "to": to }, 40);
-  updateFindCount();
-}
-
-function updateFindCount() {
-  let countEl = document.getElementById("gm-sv-find-count");
-  if (!countEl) {
-    return;
-  }
-  let input = document.getElementById("gm-sv-find-input");
-  if (!input || !input.value) {
-    countEl.textContent = "";
-  } else if (!gFindMatches.length) {
-    countEl.textContent = "0/0";
-  } else {
-    countEl.textContent = (gFindIdx + 1) + "/" + gFindMatches.length;
-  }
-}
-
-function showFind() {
-  let bar = document.getElementById("gm-sv-find");
-  let input = document.getElementById("gm-sv-find-input");
-  if (bar) {
-    bar.removeAttribute("hidden");
-  }
-  if (input) {
-    input.focus();
-    input.select();
-  }
-}
-
-function hideFind() {
-  let bar = document.getElementById("gm-sv-find");
-  if (bar) {
-    bar.setAttribute("hidden", "hidden");
-  }
-  if (gCMInstance) {
-    gCMInstance.focus();
-  }
 }

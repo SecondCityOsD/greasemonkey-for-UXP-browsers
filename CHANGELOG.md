@@ -121,9 +121,11 @@
   name) and the address it was downloaded from, with the site in bold, as
   in the install window.  The icon is the copy the install window already
   downloaded, so it isn't fetched again.  The tab is titled after the
-  script too.  The status
-  strip at the bottom now only appears for a note, such as "shown as
-  plain text".
+  script too.
+* **A status bar** at the bottom shows the cursor's line and column (and
+  how much is selected), the number of lines, the size, the line endings
+  (LF, CRLF, or mixed, with counts on hover), a UTF-8 byte order mark, and
+  "minified" when a line runs to a thousand characters or more.
 * **A metadata header above the code** lists what the script declares,
   grouped as in the install window: where it runs and doesn't, `@run-at`
   and `@noframes`, its `@grant` permissions, `@connect`, the code and
@@ -137,6 +139,16 @@
     and a `@require` or `@resource` address can be opened in a new tab.
   - The **Metadata** button in the toolbar shows and hides it.  A
     library has no metadata, so neither the header nor the button.
+* **Find is more capable.**
+  - Every match is highlighted, the current one more strongly, and the
+    count reads "3 of 17".  It starts from the cursor rather than the top.
+  - **Match case**, **Whole word** and **Regular expression** buttons.
+    These replace the old `/pattern/` syntax.  A pattern that doesn't
+    compile now says so, instead of being searched for as plain text.
+  - Enter / Shift+Enter, F3 / Shift+F3 and the arrow buttons step
+    through the matches.  A short selection fills in the search when
+    find opens.
+  - **Ctrl+G** goes to a line, or `line:column`.
 
 **about:addons "User Scripts" pane**
 * **Homepage links go to the right pages.**  For a script that declares no

@@ -39,6 +39,8 @@ body.theme-light {
   --sv-scrollbar-thumb: rgba(100, 100, 100, 0.4);
   --sv-scrollbar-thumb-hover: rgba(100, 100, 100, 0.7);
   --sv-scrollbar-thumb-active: rgba(0, 0, 0, 0.6);
+  --sv-find-match: rgba(234, 92, 0, 0.33);
+  --sv-find-current: #a8ac94;
 
   --sv-tok-keyword: #0000ff;
   --sv-tok-atom: #0000ff;
@@ -79,6 +81,8 @@ body.theme-dark {
   --sv-scrollbar-thumb: rgba(121, 121, 121, 0.4);
   --sv-scrollbar-thumb-hover: rgba(100, 100, 100, 0.7);
   --sv-scrollbar-thumb-active: rgba(191, 191, 191, 0.4);
+  --sv-find-match: rgba(234, 92, 0, 0.33);
+  --sv-find-current: #515c6a;
 
   --sv-tok-keyword: #569cd6;
   --sv-tok-atom: #569cd6;
@@ -182,10 +186,6 @@ body {
   margin-left: 0;
 }
 
-#gm-sv-note {
-  flex: 1 1 auto;
-  color: var(--sv-muted);
-}
 
 /* The code fills everything between the toolbar and the status strip;
    min-height:0 lets it shrink instead of growing to its content. */
@@ -229,7 +229,8 @@ body {
 /* ── Controls: our own look, so dark mode doesn't get native light ones ─ */
 #gm-sv-toolbar button,
 #gm-sv-find button,
-#gm-sv-find-input {
+#gm-sv-find-input,
+#gm-sv-goto-input {
   -moz-appearance: none;
   border: 1px solid var(--sv-control-border);
   border-radius: 3px;
@@ -252,9 +253,16 @@ body {
 }
 #gm-sv-toolbar button:-moz-focusring,
 #gm-sv-find button:-moz-focusring,
-#gm-sv-find-input:focus {
+#gm-sv-find-input:focus,
+#gm-sv-goto-input:focus {
   outline: 1px solid var(--sv-accent);
   outline-offset: -1px;
+}
+/* A pattern that doesn't compile, a line number that isn't one. */
+#gm-sv-find-input[aria-invalid="true"],
+#gm-sv-goto-input[aria-invalid="true"] {
+  border-color: var(--sv-tok-error);
+  outline-color: var(--sv-tok-error);
 }
 
 #gm-sv-meta-toggle,
@@ -415,8 +423,9 @@ body {
   color: var(--sv-accent-fg);
 }
 
-/* ── Find bar (overlay, top-right of the code) ─────────────────────────── */
-#gm-sv-find {
+/* ── Find bar and go-to-line box (overlays, top-right of the code) ─────── */
+#gm-sv-find,
+#gm-sv-goto {
   position: absolute;
   top: 8px;
   right: 16px;
@@ -431,30 +440,81 @@ body {
   font: message-box;
   font-size: 12px;
 }
-#gm-sv-find[hidden] {
+#gm-sv-find[hidden],
+#gm-sv-goto[hidden] {
   display: none;
 }
-#gm-sv-find > * {
+#gm-sv-find > *,
+#gm-sv-goto > * {
   margin-left: 4px;
 }
-#gm-sv-find > *:first-child {
+#gm-sv-find > *:first-child,
+#gm-sv-goto > *:first-child {
   margin-left: 0;
 }
-#gm-sv-find-input {
-  min-width: 14em;
+#gm-sv-find-input,
+#gm-sv-goto-input {
   padding: 2px 4px;
   background: var(--sv-bg);
   color: var(--sv-fg);
 }
+#gm-sv-find-input {
+  min-width: 14em;
+}
+#gm-sv-goto-input {
+  width: 8em;
+}
 #gm-sv-find-count {
-  min-width: 3.5em;
+  min-width: 5em;
   text-align: center;
   color: var(--sv-muted);
+}
+#gm-sv-find-count[problem="true"] {
+  color: var(--sv-tok-error);
 }
 #gm-sv-find button {
   font-size: 11px;
   line-height: 1;
   padding: 2px 5px;
+}
+/* Match case / Whole word / Regular expression. */
+#gm-sv-find-options > button + button {
+  margin-left: 2px;
+}
+#gm-sv-find-options > button {
+  min-width: 2.2em;
+  font-family: monospace;
+}
+#gm-sv-find-options > button[aria-pressed="true"] {
+  border-color: var(--sv-accent);
+  background: var(--sv-accent);
+  color: var(--sv-accent-fg);
+}
+
+/* Every match on screen (a CodeMirror overlay, class "cm-gm-find"), and the
+   current one. */
+.cm-gm-find {
+  background: var(--sv-find-match);
+}
+.gm-sv-find-current,
+.cm-gm-find.gm-sv-find-current {
+  background: var(--sv-find-current);
+}
+
+/* ── Status bar ────────────────────────────────────────────────────────── */
+#gm-sv-status > span {
+  flex: 0 0 auto;
+  margin-left: 14px;
+  white-space: nowrap;
+  color: var(--sv-muted);
+}
+#gm-sv-status > #gm-sv-note {
+  flex: 1 1 auto;
+  margin-left: 0;
+  white-space: normal;
+}
+#gm-sv-status > span:empty {
+  display: none;
 }
 
 /* ── CodeMirror surface ────────────────────────────────────────────────── */
