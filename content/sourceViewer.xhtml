@@ -37,8 +37,8 @@
 </head>
 <body class="theme-light">
   <!-- Toolbar: the script's icon, name and version, the address it came
-       from, Metadata (shows/hides the header below), Wrap, Find, and the
-       Auto / Light / Dark switch. -->
+       from, Metadata (shows/hides the header below), Wrap, Copy, Find, the
+       shortcuts list (?) and the Auto / Light / Dark switch. -->
   <div id="gm-sv-toolbar">
     <img id="gm-sv-icon" alt="" hidden="hidden"/>
     <span id="gm-sv-name"></span>
@@ -48,7 +48,10 @@
       aria-pressed="false"></button>
     <button id="gm-sv-wrap" type="button" hidden="hidden"
       aria-pressed="false"></button>
+    <button id="gm-sv-copy" type="button" hidden="hidden"></button>
     <button id="gm-sv-find-open" type="button" hidden="hidden"></button>
+    <button id="gm-sv-help-open" type="button" hidden="hidden"
+      aria-pressed="false">?</button>
     <span id="gm-sv-theme" role="group">
       <button type="button" data-mode="auto" aria-pressed="false"></button>
       <button type="button" data-mode="light" aria-pressed="false"></button>
@@ -83,6 +86,9 @@
       <label id="gm-sv-goto-label" for="gm-sv-goto-input"></label>
       <input id="gm-sv-goto-input" type="text"/>
     </div>
+
+    <!-- The keyboard shortcuts (view.js fills it in), opened by "?". -->
+    <div id="gm-sv-help" hidden="hidden" role="dialog"></div>
   </div>
 
   <!-- Status bar: a note ("plain text", a read error) on the left; the

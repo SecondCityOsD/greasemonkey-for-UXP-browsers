@@ -17,7 +17,8 @@
  * stays relative), and clicking one selects its line in the code.  An
  * http: or ftp: address gets the install window's "not encrypted" chip.
  *
- * The toolbar's Metadata button shows and hides the header.  A file
+ * The toolbar's Metadata button shows and hides the header, and that is
+ * remembered (extensions.greasemonkey.sourceViewer.metadata).  A file
  * without a metadata block (a @require'd library) has neither.
  *
  * Loaded before viewer.js, in the same page scope.
@@ -27,7 +28,12 @@ if (typeof Cu === "undefined") {
   var Cu = Components.utils;
 }
 
+Cu.import("chrome://greasemonkey-modules/content/prefManager.js");
 Cu.import("chrome://greasemonkey-modules/content/util.js");
+
+/** Whether the header is shown; remembered, and shared by every open
+ *  viewer.  Relative to extensions.greasemonkey. */
+const SV_META_PREF = "sourceViewer.metadata";
 
 /** Values a row shows before its "+N more" button. */
 const SV_META_MAX_ITEMS = 6;
@@ -113,10 +119,20 @@ var SvMeta = {
     toggle.title = this._string("sourceViewer.meta.toggle.tooltip",
         "Show or hide what the script declares");
     toggle.removeAttribute("hidden");
+
+    let prefs = new GM_PrefManager();
+    let follow = function () {
+      this._setOpen(!!prefs.getValue(SV_META_PREF, true));
+    }.bind(this);
     toggle.addEventListener("click", function () {
-      this._setOpen(header.hasAttribute("hidden"));
-    }.bind(this), false);
-    this._setOpen(true);
+      // The pref observer opens or closes it, here and in other viewers.
+      prefs.setValue(SV_META_PREF, header.hasAttribute("hidden"));
+    }, false);
+    prefs.watch(SV_META_PREF, follow);
+    window.addEventListener("unload", function () {
+      prefs.unwatch(SV_META_PREF, follow);
+    }, false);
+    follow();
   },
 
   /**

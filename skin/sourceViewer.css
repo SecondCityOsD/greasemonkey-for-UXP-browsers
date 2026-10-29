@@ -267,19 +267,67 @@ body {
 
 #gm-sv-meta-toggle,
 #gm-sv-wrap,
-#gm-sv-find-open {
+#gm-sv-copy,
+#gm-sv-find-open,
+#gm-sv-help-open {
   flex: 0 0 auto;
   margin-left: 8px;
 }
 #gm-sv-meta-toggle[hidden],
 #gm-sv-wrap[hidden],
-#gm-sv-find-open[hidden] {
+#gm-sv-copy[hidden],
+#gm-sv-find-open[hidden],
+#gm-sv-help-open[hidden] {
   display: none;
 }
 /* An on/off button that's on. */
 #gm-sv-meta-toggle[aria-pressed="true"],
-#gm-sv-wrap[aria-pressed="true"] {
+#gm-sv-wrap[aria-pressed="true"],
+#gm-sv-help-open[aria-pressed="true"] {
   border-color: var(--sv-accent);
+}
+
+/* ── Keyboard shortcuts list (view.js), opened by "?" ──────────────────── */
+#gm-sv-help {
+  position: absolute;
+  top: 8px;
+  right: 16px;
+  z-index: 11;
+  padding: 8px 12px;
+  border: 1px solid var(--sv-border);
+  background: var(--sv-chrome-bg);
+  color: var(--sv-chrome-fg);
+  box-shadow: 0 1px 4px var(--sv-shadow);
+  font: message-box;
+  font-size: 12px;
+  cursor: default;
+}
+#gm-sv-help[hidden] {
+  display: none;
+}
+.gm-sv-help-title {
+  margin-bottom: 6px;
+  font-weight: bold;
+}
+#gm-sv-help td {
+  padding: 2px 0;
+  vertical-align: top;
+}
+#gm-sv-help td.gm-sv-help-keys {
+  padding-right: 16px;
+  white-space: nowrap;
+  font-family: monospace;
+  color: var(--sv-muted);
+}
+
+/* Web addresses in the code (an overlay, class "cm-gm-url"): underlined;
+   with Ctrl held they look clickable, and Ctrl+click opens one. */
+.cm-gm-url {
+  text-decoration: underline;
+}
+body.gm-sv-link-key .cm-gm-url {
+  cursor: pointer;
+  color: var(--sv-tok-link);
 }
 
 /* ── Metadata header (sourceViewer/meta.js) ────────────────────────────── */
