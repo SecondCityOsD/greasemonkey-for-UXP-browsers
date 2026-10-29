@@ -38,11 +38,19 @@
  *   urlsOfAllFrames(aContentWin)
  *     Recursive frame-URL collector, called by content/browser.js for
  *     the toolbar popup and tooltip.
+ *
+ *   scriptsRanIn(aTopWin)
+ *     The ids of the scripts that actually ran in a tab's page (top
+ *     document and its frames, each script once), for the toolbar
+ *     button's badge.  Each new one is announced with the
+ *     "greasemonkey:scripts-ran" observer topic (subject: the top
+ *     window).
  */
 
 const EXPORTED_SYMBOLS = [
   "startScriptInjector",
   "injectDelayedScript",
+  "scriptsRanIn",
   "urlsOfAllFrames",
 ];
 
@@ -254,6 +262,52 @@ function urlsOfAllFrames(aContentWin) {
   return urls;
 }
 
+/**
+ * Top-level document -> Set of the ids of the scripts that ran in it or
+ * its frames (the toolbar badge).  Keyed on the document, not the window:
+ * a tab's window is reused when it navigates, its document isn't, and
+ * Back/Forward restores the very same document from the bfcache.  The
+ * WeakMap lets a closed page's set go with it.
+ */
+var gScriptsRan = new WeakMap();
+
+/**
+ * Records that aScript ran in aContentWin (a page or a frame), and
+ * announces it when it's new for the tab's page.
+ * @param {Window}    aContentWin
+ * @param {IPCScript} aScript
+ */
+function noteScriptRan(aContentWin, aScript) {
+  let top;
+  try {
+    top = aContentWin.top;
+    if (!top || !top.document) {
+      return;
+    }
+  } catch (e) {
+    return;
+  }
+  let ran = gScriptsRan.get(top.document);
+  if (!ran) {
+    ran = new Set();
+    gScriptsRan.set(top.document, ran);
+  }
+  if (!ran.has(aScript.id)) {
+    ran.add(aScript.id);
+    Services.obs.notifyObservers(top, "greasemonkey:scripts-ran", null);
+  }
+}
+
+/**
+ * @param {Window} aTopWin - A tab's content window.
+ * @returns {string[]} The ids of the scripts that ran in its current page,
+ *          frames included, each once.
+ */
+function scriptsRanIn(aTopWin) {
+  let ran = aTopWin && aTopWin.document && gScriptsRan.get(aTopWin.document);
+  return ran ? Array.from(ran) : [];
+}
+
 
 /**
  * Injects a @grant none / @inject-into page script directly into the
@@ -265,6 +319,9 @@ function urlsOfAllFrames(aContentWin) {
  * @param {Window}    aContentWin
  * @param {IPCScript} aScript
  * @param {string}    aRunAt
+ * @returns {boolean} Whether the script ran (in the page, or in the
+ *          sandbox it falls back to); false when it was blocked or its
+ *          file couldn't be read.
  */
 function injectScriptIntoPage(aContentWin, aScript, aRunAt) {
   let doc = aContentWin.document;
@@ -344,7 +401,7 @@ function injectScriptIntoPage(aContentWin, aScript, aRunAt) {
           aContentWin, aContentWin.document.documentURI, aScript, aRunAt);
       runScriptInSandbox(sandbox, aScript);
     }
-    return;
+    return warning;
   }
 
   // 4) Prepare script body + GM_info JSON.
@@ -355,7 +412,7 @@ function injectScriptIntoPage(aContentWin, aScript, aRunAt) {
     GM_util.logError(
         "Error loading script " + aScript.fileURL
         + ":\n" + e, false, e.fileName, e.lineNumber);
-    return;
+    return false;
   }
 
   let gmInfoJson = "{}";
@@ -428,7 +485,7 @@ ${safeGlobalsSnapshot}
         ${scriptCode}
       })();`;
   }
-  injectCode(wrappedCode, aScript.fileURL);
+  return injectCode(wrappedCode, aScript.fileURL);
 }
 
 /**
@@ -507,10 +564,13 @@ function injectScripts(aScripts, aRunAt, aContentWin) {
       //     back into the DOM-injection path
       if (script.injectInto == "page"
           && aContentWin.document.documentElement) {
-        injectScriptIntoPage(aContentWin, script, aRunAt);
+        if (injectScriptIntoPage(aContentWin, script, aRunAt)) {
+          noteScriptRan(aContentWin, script);
+        }
       } else {
         let sandbox = createSandbox(aContentWin, url, script, aRunAt);
         runScriptInSandbox(sandbox, script);
+        noteScriptRan(aContentWin, script);
       }
     } catch (e) {
       let scriptName = script.localized && script.localized.name

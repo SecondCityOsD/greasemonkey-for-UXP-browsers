@@ -196,6 +196,9 @@ pref("extensions.greasemonkey.sync.values", false);
 pref("extensions.greasemonkey.sync.values.deleteNonExistentValues", false);
 pref("extensions.greasemonkey.sync.values.maxSizePerScript", 65536);
 pref("extensions.greasemonkey.timeoutUpdatesInSeconds", 45);
+// The toolbar button's badge: how many scripts ran on the current tab
+// (each script once, frames included).  false hides it.
+pref("extensions.greasemonkey.toolbarBadge", true);
 pref("extensions.greasemonkey.unmhtIsGreaseable", false);
 // Greasemonkey-owned script-update scheduling (modules/updateScheduler.js):
 // check every N days; 0 disables scheduled checks entirely.  lastCheck is
