@@ -198,8 +198,15 @@
 * A script's Options window offers no Automatic updates choice when the
   script can't update at all.  For example, it has no web address to
   update from.  The window says why instead.
-* The **Installed** date in a script's Options window always showed "—".
-  It now shows when the script was installed.
+* **A script's Options window keeps its Installed date across updates.**
+  Installed always showed "—", and every update reset the install date
+  anyway, so it would always have matched Last updated.  Installed now
+  shows when you first installed the script, and updates keep it.  Last
+  updated shows its latest update, or your latest edit to it.
+  Greasemonkey never saved the first-install date before, so scripts you
+  already have start from their last update; their next update moves
+  the two apart.  Backups keep the date, and restoring an older backup
+  uses the earliest date it has.
 * **Options now opens for disabled scripts, from the list as well.**  The
   Options button on a disabled script's row did nothing, and the detail
   pane only worked through a separate stand-in button.  Both now use the
