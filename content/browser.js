@@ -78,6 +78,17 @@ GM_BrowserUI.chromeLoad = function (aEvent) {
 
   GM_BrowserUI.showToolbarButton();
 
+  // The toolbar button's badge: how many scripts ran on this tab.
+  gBrowser.tabContainer.addEventListener(
+      "TabSelect", GM_BrowserUI.refreshBadge, false);
+  gBrowser.addProgressListener(GM_BrowserUI.badgeProgressListener);
+  Services.obs.addObserver(
+      GM_BrowserUI.badgeObserver, "greasemonkey:scripts-ran", false);
+  GM_prefRoot.watch("toolbarBadge", GM_BrowserUI.refreshBadge);
+  window.addEventListener(
+      "aftercustomization", GM_BrowserUI.refreshBadge, false);
+  GM_BrowserUI.refreshBadge();
+
   // Make sure this is imported at least once, so its internal timer starts.
   // Cu.import("...stats.js");
 };
@@ -208,6 +219,14 @@ GM_BrowserUI.window = function (aMessage) {
  */
 GM_BrowserUI.chromeUnload = function () {
   GM_prefRoot.unwatch("enabled", GM_BrowserUI.refreshStatus);
+  GM_prefRoot.unwatch("toolbarBadge", GM_BrowserUI.refreshBadge);
+  Services.obs.removeObserver(
+      GM_BrowserUI.badgeObserver, "greasemonkey:scripts-ran");
+  gBrowser.removeProgressListener(GM_BrowserUI.badgeProgressListener);
+  gBrowser.tabContainer.removeEventListener(
+      "TabSelect", GM_BrowserUI.refreshBadge, false);
+  window.removeEventListener(
+      "aftercustomization", GM_BrowserUI.refreshBadge, false);
   GM_MenuCommander.uninitialize();
 };
 
@@ -272,6 +291,59 @@ GM_BrowserUI.refreshStatus = function () {
     checkedElm.setAttribute("checked", false);
     enabledElm.setAttribute("disabled", "yes");
   }
+  // No badge while Greasemonkey is off.  (The first call comes from
+  // chromeLoad before the badge listeners exist, which is fine.)
+  GM_BrowserUI.refreshBadge();
+};
+
+/**
+ * Shows on the toolbar button how many user scripts ran in the selected
+ * tab's page: the top document and its frames, each script counted once
+ * (Violentmonkey's default).  It's the platform's own badge (the
+ * badged-button class in browser.xul), so the theme styles it.  Hidden at
+ * 0, while Greasemonkey is off, with extensions.greasemonkey.toolbarBadge
+ * false, and when the button isn't on a toolbar.
+ */
+GM_BrowserUI.refreshBadge = function () {
+  let button = document.getElementById("greasemonkey-tbb");
+  if (!button) {
+    return;
+  }
+  let count = 0;
+  if (GM_util.getEnabled() && GM_prefRoot.getValue("toolbarBadge", true)) {
+    try {
+      count = scriptsRanIn(gBrowser.selectedBrowser.contentWindow).length;
+    } catch (e) {
+      count = 0;
+    }
+  }
+  if (count > 0) {
+    button.setAttribute("badge", String(count));
+  } else {
+    button.removeAttribute("badge");
+  }
+};
+
+/** A script ran somewhere for the first time on its page: the selected
+ *  tab's count may have grown (counting it is cheap, so no tab check). */
+GM_BrowserUI.badgeObserver = {
+  "observe": function () {
+    GM_BrowserUI.refreshBadge();
+  },
+};
+
+/** The selected tab went to another page (or back to one): its count
+ *  starts again, or is the restored page's. */
+GM_BrowserUI.badgeProgressListener = {
+  "onLocationChange": function (aWebProgress) {
+    if (aWebProgress && aWebProgress.isTopLevel) {
+      GM_BrowserUI.refreshBadge();
+    }
+  },
+  "onProgressChange": function () {},
+  "onSecurityChange": function () {},
+  "onStateChange": function () {},
+  "onStatusChange": function () {},
 };
 
 // See #1507.
