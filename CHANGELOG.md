@@ -37,9 +37,7 @@
 
 **Greasemonkey Preferences**
 - Open as a normal window instead of blocking the browser
-- Add **Notify script updates**
-- Add **Badge** (unique running scripts, running scripts or none) and its **Color**
-- Add **Allow GM_cookie to access HTTP-only cookies**
+- Add an **Advanced** tab: **Notify script updates**, the toolbar button's **Badge** (unique running scripts, running scripts or none) and **Color**, and **Allow GM_cookie to access HTTP-only cookies**
 
 **Script Options and the Add-ons Manager**
 - Edit stored values in a resizable editor, as text or JSON, with Format / Compact

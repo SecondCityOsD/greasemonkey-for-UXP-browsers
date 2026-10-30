@@ -163,6 +163,9 @@ function GM_localizeOptions() {
     return undefined;
   }
   [
+    ["options-tab-general", "label", "options.tab.general"],
+    ["options-tab-advanced", "label", "options.tab.advanced"],
+    ["notifications-caption", "label", "options.notifications"],
     ["notify-updates", "label", "options.notifyUpdates"],
     ["toolbar-button-caption", "label", "options.toolbarButton"],
     ["badge-show-label", "value", "options.badge"],

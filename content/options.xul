@@ -35,7 +35,17 @@
 
 <dialogheader title="Greasemonkey" description="&preferencesCmd2.label;" />
 
-<vbox flex="1">
+<!-- General holds what Preferences had up to 3.9; Advanced the settings
+     added in 3.10, so the window stays its old height.  Labels without an
+     entity come from greasemonkey.properties (options.js); the English
+     here is their fallback. -->
+<tabbox id="options-tabbox" flex="1">
+<tabs>
+  <tab id="options-tab-general" label="General" />
+  <tab id="options-tab-advanced" label="Advanced" />
+</tabs>
+<tabpanels flex="1">
+<tabpanel orient="vertical">
   <groupbox>
     <caption label="&preferencesCmd2.label;" />
     <hbox id="interval-update-box" align="center">
@@ -54,40 +64,7 @@
       <textbox id="timeout-update-value" type="number" min="1" max="60"
         increment="1" size="2" />
       </hbox>
-    <!-- The "… updated successfully" message; its "Never show again"
-         sets the same pref (notification.muted.script.updated). -->
-    <checkbox id="notify-updates" label="Notify script updates" />
     <checkbox id="check-sync" label="&enableSync;" />
-  </groupbox>
-  <!-- New labels here come from greasemonkey.properties (options.js);
-       the English is their fallback. -->
-  <groupbox>
-    <caption id="toolbar-button-caption" label="Toolbar button" />
-    <hbox align="center">
-      <label id="badge-show-label" value="Badge:" control="badge-show" />
-      <menulist id="badge-show" oncommand="GM_syncBadgeControls();">
-        <menupopup>
-          <menuitem id="badge-show-none" value="none" label="none" />
-          <menuitem id="badge-show-total" value="total"
-            label="number of running scripts" />
-          <menuitem id="badge-show-unique" value="unique"
-            label="number of unique running scripts" />
-        </menupopup>
-      </menulist>
-      <label id="badge-color-label" value="Color:" />
-      <html:input id="badge-color" type="color" />
-    </hbox>
-  </groupbox>
-  <groupbox>
-    <caption id="script-apis-caption" label="Script APIs" />
-    <!-- The tooltip on both lines, as in Violentmonkey. -->
-    <checkbox id="http-only-cookies"
-      label="Allow GM_cookie to access HTTP-only cookies"
-      tooltiptext="When enabled, scripts can read and write cookies with the HTTP-only flag. This allows scripts to access cookies that cannot be accessed via JavaScript. Use with caution as it may pose security risks." />
-    <description id="http-only-cookies-note"
-      style="opacity: 0.6; -moz-margin-start: 24px; margin-inline-start: 24px;"
-      tooltiptext="When enabled, scripts can read and write cookies with the HTTP-only flag. This allows scripts to access cookies that cannot be accessed via JavaScript. Use with caution as it may pose security risks."
-      >(only for scripts with this option enabled in their settings)</description>
   </groupbox>
 
   <!-- PARKED for 3.9: scheduled-backup UI needs fine-tuning before release.
@@ -144,6 +121,45 @@
     <textbox id="new-script-template"
       multiline="true" rows="5" flex="1" wrap="off" />
   </groupbox>
-</vbox>
+</tabpanel>
+
+<tabpanel orient="vertical">
+  <groupbox>
+    <caption id="notifications-caption" label="Notifications" />
+    <!-- The "… updated successfully" message; its "Never show again"
+         sets the same pref (notification.muted.script.updated). -->
+    <checkbox id="notify-updates" label="Notify script updates" />
+  </groupbox>
+  <groupbox>
+    <caption id="toolbar-button-caption" label="Toolbar button" />
+    <hbox align="center">
+      <label id="badge-show-label" value="Badge:" control="badge-show" />
+      <menulist id="badge-show" oncommand="GM_syncBadgeControls();">
+        <menupopup>
+          <menuitem id="badge-show-none" value="none" label="none" />
+          <menuitem id="badge-show-total" value="total"
+            label="number of running scripts" />
+          <menuitem id="badge-show-unique" value="unique"
+            label="number of unique running scripts" />
+        </menupopup>
+      </menulist>
+      <label id="badge-color-label" value="Color:" />
+      <html:input id="badge-color" type="color" />
+    </hbox>
+  </groupbox>
+  <groupbox>
+    <caption id="script-apis-caption" label="Script APIs" />
+    <!-- The tooltip on both lines, as in Violentmonkey. -->
+    <checkbox id="http-only-cookies"
+      label="Allow GM_cookie to access HTTP-only cookies"
+      tooltiptext="When enabled, scripts can read and write cookies with the HTTP-only flag. This allows scripts to access cookies that cannot be accessed via JavaScript. Use with caution as it may pose security risks." />
+    <description id="http-only-cookies-note"
+      style="opacity: 0.6; -moz-margin-start: 24px; margin-inline-start: 24px;"
+      tooltiptext="When enabled, scripts can read and write cookies with the HTTP-only flag. This allows scripts to access cookies that cannot be accessed via JavaScript. Use with caution as it may pose security risks."
+      >(only for scripts with this option enabled in their settings)</description>
+  </groupbox>
+</tabpanel>
+</tabpanels>
+</tabbox>
 
 </dialog>
