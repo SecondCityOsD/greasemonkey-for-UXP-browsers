@@ -65,7 +65,6 @@ Cu.import("chrome://greasemonkey-modules/content/constants.js");
 
 Cu.import("resource://gre/modules/Services.jsm");
 
-Cu.import("chrome://greasemonkey-modules/content/prefManager.js");
 Cu.import("chrome://greasemonkey-modules/content/util.js");
 
 
@@ -246,11 +245,6 @@ GM_ScriptStorageBack.prototype.deleteValue = function (aName) {
   }
 };
 
-/**
- * Returns all stored key names for this script.
- *
- * @returns {string[]} Array of key names (may be empty).
- */
 /**
  * Batched fetch of multiple stored values in a single SQL query.
  * Returns a plain object mapping each requested name to its raw JSON
@@ -673,11 +667,9 @@ function GM_ScriptStorageFront(aWrappedContentWin, aSandbox, aScript) {
  * try-catch in the script that branched on `e instanceof Error`
  * silently took the false branch every time, masking failures.
  *
- * Falls back through Error sources in order of preference so the
- * helper is safe to call even from the db/dbFile getters that run
- * before sandbox attachment is fully wired (defensive only —
- * `_sandbox` is set in the Front constructor and shouldn't be missing
- * during normal operation).
+ * Falls back through Error sources in order of preference (defensive
+ * only: `_sandbox` is set in the Front constructor and shouldn't be
+ * missing during normal operation).
  *
  * @private
  * @param {string} aMessage - Localised error message text.
@@ -688,42 +680,6 @@ GM_ScriptStorageFront.prototype._throwSandboxError = function (aMessage) {
       || Error;
   let fileURL = this._script ? this._script.fileURL : null;
   throw new ErrorCtor(aMessage, fileURL, null);
-};
-
-/**
- * The db / dbFile / close members are intentionally non-functional from
- * the Front — direct database access is the Back's responsibility.  These
- * are kept as thin throws so a Front exposes the same shape as a Back to
- * any importer that pokes at those names.
- */
-Object.defineProperty(GM_ScriptStorageFront.prototype, "db", {
-  "get": function GM_ScriptStorageFront_getDb() {
-    this._throwSandboxError(
-        MESSAGE_ERROR_PREFIX_FRONT
-        + GM_CONSTANTS.localeStringBundle.createBundle(
-            GM_CONSTANTS.localeGreasemonkeyProperties)
-            .GetStringFromName("error.storage.db.noConnection"));
-  },
-  "enumerable": true,
-});
-
-Object.defineProperty(GM_ScriptStorageFront.prototype, "dbFile", {
-  "get": function GM_ScriptStorageFront_getDbFile() {
-    this._throwSandboxError(
-        MESSAGE_ERROR_PREFIX_FRONT
-        + GM_CONSTANTS.localeStringBundle.createBundle(
-            GM_CONSTANTS.localeGreasemonkeyProperties)
-            .GetStringFromName("error.storage.db.noFile"));
-  },
-  "enumerable": true,
-});
-
-GM_ScriptStorageFront.prototype.close = function () {
-  this._throwSandboxError(
-      MESSAGE_ERROR_PREFIX_FRONT
-      + GM_CONSTANTS.localeStringBundle.createBundle(
-          GM_CONSTANTS.localeGreasemonkeyProperties)
-          .GetStringFromName("error.storage.db.noConnection"));
 };
 
 /**
@@ -867,9 +823,6 @@ GM_ScriptStorageFront.prototype.getValue = function (aName, aDefVal) {
     cacheHitCounter.set(key, count);
   }
 
-  if (typeof aDefVal == "undefined") {
-    aDefVal = undefined;
-  }
   if ((typeof value == "undefined") || (value === null)) {
     return aDefVal;
   }
