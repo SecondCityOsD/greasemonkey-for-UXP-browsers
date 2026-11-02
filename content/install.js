@@ -142,6 +142,9 @@ function onBlur(aEvent) {
 }
 
 function onCancel() {
+  // An early Install click is withdrawn first: cancel()'s last progress
+  // event would otherwise install the half-downloaded script.
+  gInstallQueued = false;
   gRemoteScript.cancel();
   window.close();
 }
@@ -531,6 +534,12 @@ function updateLabel(aOkAllowed) {
   if (typeof aOkAllowed == "undefined") {
     aOkAllowed = true;
   }
+  // After a failed download nothing can be installed, whatever the focus
+  // and the countdown do: Install used to come back on, and clicking it
+  // removed the old version.
+  if (gRemoteScript && gRemoteScript.errorMessage) {
+    aOkAllowed = false;
+  }
 
   if (gInstallQueued) {
     gAcceptButton.label = installString("install.installing", "Installing…");
@@ -561,7 +570,8 @@ function updateLabel(aOkAllowed) {
   gAcceptButton.disabled = disabled;
 }
 
-// See: closeWindow.xul.
+// See: closeWindow.xul.  Closing withdraws an early Install click too.
 function GM_onClose() {
+  gInstallQueued = false;
   gRemoteScript.cleanup();
 }

@@ -516,8 +516,12 @@ RemoteScript.prototype.cleanup = function (aErrorMessage) {
     }
     aChannel.cancel(Cr.NS_BINDING_ABORTED);
   });
-  if (this._tempDir && this._tempDir.exists()) {
-    var _RemoteScript_Cleanup_tempDir = this._tempDir;
+  // The temp folder is about to go: nothing may install from it any more
+  // (an install moved it into gm_scripts, and the timer below then deleted
+  // the freshly installed script).
+  let _RemoteScript_Cleanup_tempDir = this._tempDir;
+  this._tempDir = null;
+  if (_RemoteScript_Cleanup_tempDir && _RemoteScript_Cleanup_tempDir.exists()) {
     GM_util.timeout(function () {
       if (_RemoteScript_Cleanup_tempDir
           && _RemoteScript_Cleanup_tempDir.exists()) {
@@ -616,7 +620,9 @@ RemoteScript.prototype.install = function (aOldScript, aOnlyDependencies) {
             .GetStringFromName("error.remoteScript.notDownloaded"));
   }
   // Part 2/3 (install.js - Part 1/3, remoteScript.js - Part 3/3).
-  if (!this._tempDir) {
+  // Nothing to install after a cancel or a failed download: cleanup() has
+  // dropped (and is about to delete) the temp files.
+  if (!this._tempDir || this._cancelled || this.errorMessage) {
     return undefined;
   }
   if (typeof aOnlyDependencies == "undefined") {
@@ -663,92 +669,163 @@ RemoteScript.prototype.install = function (aOldScript, aOnlyDependencies) {
               .GetStringFromName("error.remoteScript.nameUnknown"));
     }
 
-    GM_util.getService().config.install(this.script, aOldScript, this._tempDir);
+    // The new files go into place first; only then does Config.install()
+    // swap the scripts and remove the old version, so a failed move can
+    // never cost the installed copy.
+    let config = GM_util.getService().config;
+    let scriptDir = GM_util.scriptDir();
+    let newScript = this.script;
+    // The copy this replaces: the one given (Update Now), else the
+    // installed script with the same id, as Config.install() finds it.
+    let oldScript = aOldScript || config.getMatchingScripts(function (aS) {
+      return aS.id == newScript.id;
+    })[0] || null;
 
-    var suffix = 0;
-    var file = GM_util.scriptDir();
-    file.append(this._baseName);
-    // See #2400.
-    while (file.exists()
-        || (file.leafName.substr(
-            file.leafName.length - GM_CONSTANTS.fileScriptDBExtension.length)
-            .toLowerCase() == GM_CONSTANTS.fileScriptDBExtension)) {
-      suffix++;
-      file = GM_util.scriptDir();
-      file.append(this._baseName + "-" + suffix);
+    // An update keeps its folder, so its stored values (<folder>.db) stay
+    // with it even when @name changes or a "-1" suffix has come free; they
+    // were orphaned otherwise.  The old version steps aside meanwhile.
+    let baseName = null;
+    let asideName = null;
+    let oldDir = oldScript ? oldScript.baseDirFile : null;
+    if (oldDir && (oldScript._basedir != ".") && oldDir.exists()
+        && !oldDir.equals(scriptDir)) {
+      asideName = uniqueEntryName(scriptDir, oldDir.leafName + ".old");
+      try {
+        oldDir.moveTo(scriptDir, asideName);
+        baseName = oldScript._basedir;
+      } catch (e) {
+        // Held open (on Windows, an editor or a scanner): install beside
+        // it, the old way.
+        asideName = null;
+      }
     }
-    this._baseName = file.leafName;
+    if (!baseName) {
+      baseName = uniqueEntryName(scriptDir, this._baseName);
+    }
+    this._baseName = baseName;
+    this.script.setFilename(baseName, this._scriptFile.leafName);
 
-    this.script.setFilename(this._baseName, this._scriptFile.leafName);
-    /*
-    Part 3/3 (install.js - Part 1/3, remoteScript.js - Part 2/3).
-    See #1919.
-    Sometimes - throws an errors:
-      NS_ERROR_FILE_IS_LOCKED: Component returned failure code:
-        0x8052000e (NS_ERROR_FILE_IS_LOCKED) [nsIFile.moveTo]
-        remoteScript.js
-    */
-    let _baseName = this._baseName;
-    // A local: the retry below runs without `this`, after this._tempDir
-    // has been cleared.
+    let putBack = function () {
+      if (asideName) {
+        try {
+          let aside = scriptDir.clone();
+          aside.append(asideName);
+          aside.moveTo(scriptDir, baseName);
+        } catch (e) {
+          GM_util.logError("RemoteScript.install: couldn't restore \""
+              + baseName + "\" from \"" + asideName + "\": " + e, false);
+        }
+      }
+    };
+    let finish = function () {
+      if (asideName) {
+        // Config.install() removes the old version's folder: the set-aside
+        // one.  Then back to the name the files are under, for any stale
+        // reference (such as a cached storage connection) to oldScript.
+        oldScript._basedir = asideName;
+      }
+      config.install(newScript, oldScript, null);
+      if (asideName) {
+        oldScript._basedir = baseName;
+      }
+      this._finishInstall();
+    }.bind(this);
+
+    // A local: the retry below runs after this._tempDir has been cleared.
     let tempDir = this._tempDir;
+    this._tempDir = null;
     try {
-      tempDir.moveTo(GM_util.scriptDir(), _baseName);
-    } catch (e if (e.name == "NS_ERROR_FILE_IS_LOCKED")) {
+      tempDir.moveTo(scriptDir, baseName);
+    } catch (e) {
+      if (e.name != "NS_ERROR_FILE_IS_LOCKED") {
+        putBack();
+        throw e;
+      }
+      // See #1919: a virus scanner can hold fresh files for a moment.  The
+      // rest of the install runs once the move has worked.
       GM_util.timeout(function () {
         try {
-          tempDir.moveTo(GM_util.scriptDir(), _baseName);
-        } catch (e) {
-          throw new Error(
-              "RemoteScript.install:" + "\n"
-              + e.message + "\n"
-              + 'tempDir.moveTo: "' + _baseName + '"',
-              e.fileName, e.lineNumber);
+          tempDir.moveTo(scriptDir, baseName);
+        } catch (e2) {
+          putBack();
+          GM_util.logError("RemoteScript.install:\n" + e2.message
+              + "\ntempDir.moveTo: \"" + baseName + "\"", true);
+          return undefined;
         }
+        finish();
       }, TIMEOUT);
+      return undefined;
     }
-    this._tempDir = null;
+    finish();
+  }
+};
 
-    this.script.fixTimestampsOnInstall();
-    this.script.checkConfig();
+/**
+ * A name in aDir that no file or folder has yet: aBase, else aBase-1,
+ * aBase-2…  Names ending in the values database's extension are skipped
+ * too (see #2400).
+ *
+ * @param {nsIFile} aDir
+ * @param {string}  aBase
+ * @returns {string}
+ */
+function uniqueEntryName(aDir, aBase) {
+  let dbExt = GM_CONSTANTS.fileScriptDBExtension;
+  for (let suffix = 0; ; suffix++) {
+    let name = suffix ? (aBase + "-" + suffix) : aBase;
+    let file = aDir.clone();
+    file.append(name);
+    if (!file.exists()
+        && (name.substr(name.length - dbExt.length).toLowerCase() != dbExt)) {
+      return name;
+    }
+  }
+}
 
-    // Now that we've fully populated the new state, update the AOM
-    // and config data based on that.
-    ScriptAddonFactoryByScript(this.script, true);
-    this.script._changed("modified", this.script.id);
+/**
+ * The rest of a full install, once the files are in place and the config
+ * holds the new script: timestamps, about:addons and the message.
+ */
+RemoteScript.prototype._finishInstall = function () {
+  this.script.fixTimestampsOnInstall();
+  this.script.checkConfig();
 
-    // Metadata lines the parser ignored (an unusable @match, say) don't
-    // stop the install, but the user must hear about them.
-    let warnings = this.script.parseWarnings;
+  // Now that we've fully populated the new state, update the AOM
+  // and config data based on that.
+  ScriptAddonFactoryByScript(this.script, true);
+  this.script._changed("modified", this.script.id);
+
+  // Metadata lines the parser ignored (an unusable @match, say) don't
+  // stop the install, but the user must hear about them.
+  let warnings = this.script.parseWarnings;
+  if (warnings.length) {
+    GM_util.logError(
+        "(" + this.script.localized.name + ")\n" + warnings.join("\n"),
+        true, this.script.fileURL, null);
+  }
+
+  // Let the user know we're all done.
+  if (!this._silent) {
+    let message = "(" + this.script.localized.name + ") "
+        + GM_CONSTANTS.localeStringBundle.createBundle(
+            GM_CONSTANTS.localeGmBrowserProperties)
+            .GetStringFromName(this.messageName);
+    let topic = this.messageName;
+    let notificationOptions = null;
     if (warnings.length) {
-      GM_util.logError(
-          "(" + this.script.localized.name + ")\n" + warnings.join("\n"),
-          true, this.script.fileURL, null);
+      // The popup collapses line breaks, hence the dashes.  Own topic,
+      // so muting plain "installed" messages doesn't hide warnings.
+      message += " — " + warnings.join(" — ");
+      topic = "script.parseWarnings";
     }
-
-    // Let the user know we're all done.
-    if (!this._silent) {
-      let message = "(" + this.script.localized.name + ") "
-          + GM_CONSTANTS.localeStringBundle.createBundle(
-              GM_CONSTANTS.localeGmBrowserProperties)
-              .GetStringFromName(this.messageName);
-      let topic = this.messageName;
-      let notificationOptions = null;
-      if (warnings.length) {
-        // The popup collapses line breaks, hence the dashes.  Own topic,
-        // so muting plain "installed" messages doesn't hide warnings.
-        message += " — " + warnings.join(" — ");
-        topic = "script.parseWarnings";
-      }
-      if ((this.messageName == "script.updated") || warnings.length) {
-        notificationOptions = {
-          "persistence": -1,
-          "persistWhileVisible": true,
-          "learnMoreURL": this.script.homepageURL,
-        };
-      }
-      GM_notification(message, topic, notificationOptions);
+    if ((this.messageName == "script.updated") || warnings.length) {
+      notificationOptions = {
+        "persistence": -1,
+        "persistWhileVisible": true,
+        "learnMoreURL": this.script.homepageURL,
+      };
     }
+    GM_notification(message, topic, notificationOptions);
   }
 };
 
@@ -1102,6 +1179,21 @@ RemoteScript.prototype._downloadDependency = function (
       "state": aState,
     });
   }.bind(this);
+  // An @icon that can't be had is no reason to stop, but without its file
+  // the script shows the default icon: keeping the empty (or 404 page)
+  // temp file made it a broken image.
+  let skipIcon = function () {
+    aDependency._filename = null;
+    try {
+      if (file.exists()) {
+        file.remove(false);
+      }
+    } catch (e) {
+      // It goes with the temp folder.
+    }
+    report("skipped");
+    aDone(null);
+  };
 
   // S5: optionally refuse insecure (http/ftp) @require / @resource
   // downloads.  Off by default so legacy http dependencies keep working;
@@ -1111,8 +1203,7 @@ RemoteScript.prototype._downloadDependency = function (
   if (GM_prefRoot.getValue("requireSecureDependencies", false)
       && ((uri.scheme == "http") || (uri.scheme == "ftp"))) {
     if (isIcon) {
-      report("skipped");
-      aDone(null);
+      skipIcon();
       return undefined;
     }
     aDone("RemoteScript: refusing insecure dependency "
@@ -1159,8 +1250,7 @@ RemoteScript.prototype._downloadDependency = function (
     }
     if (!aSuccess) {
       if (isIcon) {
-        report("skipped");
-        aDone(null);
+        skipIcon();
       } else {
         aDone(aErrorMessage);
       }
