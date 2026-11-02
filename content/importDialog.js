@@ -25,7 +25,7 @@ if (typeof Cu === "undefined") {
 }
 
 Cu.import("chrome://greasemonkey-modules/content/backup.js");
-
+Cu.import("chrome://greasemonkey-modules/content/util.js");
 
 var GM_ImportDialog = {
   "_bundle": null,
@@ -225,7 +225,7 @@ var GM_ImportDialog = {
         message = self.s("backup.failed",
             "Backup operation failed.\n\n%1", [aErr || ""]);
       }
-      alert(message);
+      GM_util.prompt.alert(message);
       window.close();
     });
 

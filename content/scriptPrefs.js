@@ -496,10 +496,7 @@ function onAutoUpdateChange() {
   }
   let bundle = GM_CONSTANTS.localeStringBundle.createBundle(
       GM_CONSTANTS.localeGmAddonsProperties);
-  let confirmed = Services.prompt.confirm(
-      null,
-      "Greasemonkey",
-      bundle.GetStringFromName("confirmEnableAutoUpdate"));
+  let confirmed = GM_util.prompt.confirm0(bundle.GetStringFromName("confirmEnableAutoUpdate"));
   if (!confirmed) {
     // Snap back to Off.  A programmatic .value assignment doesn't re-fire
     // oncommand, and even if it did, "disable" can't satisfy the
@@ -1305,10 +1302,10 @@ function openValueEditor(aArgs) {
     gValuesStorage.setValue(aArgs.resultKey, JSON.parse(aArgs.resultJson));
   } catch (e) {
     let bundle = bundleForValuesDialogs();
-    Services.prompt.alert(window, (typeof aArgs.key == "string")
+    GM_util.prompt.alert("" + e, (typeof aArgs.key == "string")
         ? bundleStr(bundle, "scriptPrefs.values.editTitle", "Edit value")
-        : bundleStr(bundle, "scriptPrefs.values.addTitle", "Add value"),
-        "" + e);
+        : bundleStr(bundle, "scriptPrefs.values.addTitle", "Add value")
+        );
     return;
   }
 
@@ -1338,19 +1335,18 @@ function selectValueRow(aKey) {
 function onValueDelete() {
   let row = selectedValueRow();
   if (!row || !gValuesStorage) return;
-  let prompts = Services.prompt;
   let bundle = bundleForValuesDialogs();
 
   let title = bundleStr(bundle, "scriptPrefs.values.deleteTitle",
       "Delete value");
   let body = bundleStr(bundle, "scriptPrefs.values.deleteConfirm",
       "Delete the value for key '%1'?").replace("%1", row.name);
-  if (!prompts.confirm(window, title, body)) return;
+  if (!GM_util.prompt.confirm(body, title)) return;
 
   try {
     gValuesStorage.deleteValue(row.name);
   } catch (e) {
-    prompts.alert(window, title, "" + e);
+    GM_util.prompt.alert("" + e, title);
     return;
   }
 

@@ -27,7 +27,7 @@ AddonManager.getAddonByID(GM_CONSTANTS.addonGUID, function (aAddon) {
 
 
 const FILE_SCRIPT_EXTENSION_1_REGEXP = new RegExp(
-    GM_CONSTANTS.fileScriptExtensionRegexp + "$", ""); 
+    GM_CONSTANTS.fileScriptExtensionRegexp + "$", "");
 const FILE_SCRIPT_EXTENSION_2_REGEXP = new RegExp(
     GM_CONSTANTS.fileScriptExtensionRegexp + "(\\?|$)", "");
 const FILE_SCRIPT_CONTENT_TYPE_NO_REGEXP = new RegExp(
@@ -361,7 +361,7 @@ GM_BrowserUI.viewContextItemClicked = function () {
       if (aSuccess) {
         rs.showSource(gBrowser);
       } else {
-        alert(rs.errorMessage);
+        GM_util.prompt.alert0(rs.errorMessage);
       }
     });
   });

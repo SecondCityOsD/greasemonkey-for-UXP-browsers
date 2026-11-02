@@ -71,7 +71,7 @@ function setEditor(aScratchpad) {
       GM_prefRoot.setValue("editor", filePicker.file.path);
       return true;
     } else {
-      GM_util.alert(
+      GM_util.prompt.alert0(
           GM_CONSTANTS.localeStringBundle.createBundle(
               GM_CONSTANTS.localeGmBrowserProperties)
               .GetStringFromName("editor.pleasePickExecutable"));

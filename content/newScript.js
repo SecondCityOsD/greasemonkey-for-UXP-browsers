@@ -72,7 +72,7 @@ function doInstall() {
   var script = scope.parse(scriptSrc);
   // ...make sure entered details will not ruin an existing file.
   if (config.installIsUpdate(script)) {
-    let overwrite = confirm(gBundle.getString("newScript.exists"));
+    let overwrite = GM_util.prompt.confirm0(gBundle.getString("newScript.exists"));
     if (!overwrite) {
       return false;
     }
@@ -179,7 +179,7 @@ function createScriptSource() {
     replaceMultiVal("exclude");
   } catch (e) {
     if (e.name && (e.name == METADATA_VALUE_ERROR)) {
-      GM_util.alert(e.message);
+      GM_util.prompt.alert0(e.message);
       return false;
     } else {
       throw e;

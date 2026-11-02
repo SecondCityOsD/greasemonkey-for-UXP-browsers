@@ -161,7 +161,7 @@ function showInstallDialog(aUrlOrRemoteScript, aBrowser, aRequest) {
           msg += "\n" + url;
         }
       }
-      GM_util.alert(msg);
+      GM_util.prompt.alert0(msg);
     }
   });
 }

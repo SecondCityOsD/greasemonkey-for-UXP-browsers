@@ -40,7 +40,7 @@ const SCRIPT_DETAIL_VIEW_REGEXP = new RegExp(
     "");
 
 const FILE_SCRIPT_EXTENSION_REGEXP = new RegExp(
-    GM_CONSTANTS.fileScriptExtensionRegexp + "$", ""); 
+    GM_CONSTANTS.fileScriptExtensionRegexp + "$", "");
 
 window.addEventListener("focus", focus, false);
 window.addEventListener("load", init, false);
@@ -400,7 +400,7 @@ function init() {
         let hasLocalEdits = script
             && (script._modifiedTime > script._installTime);
         if (hasLocalEdits) {
-          let result = confirm(
+          let result = GM_util.prompt.confirm0(
               GM_CONSTANTS.localeStringBundle.createBundle(
                     GM_CONSTANTS.localeGmAddonsProperties)
                     .GetStringFromName("confirmForceUpdate"));
@@ -424,7 +424,7 @@ function init() {
   gViewController.commands.cmd_userscript_forcedFindItemUpdates = {
       "isEnabled": addonUpdateCanBeForced,
       "doCommand": function (aAddon) {
-        let result = confirm(
+        let result = GM_util.prompt.confirm0(
             GM_CONSTANTS.localeStringBundle.createBundle(
                   GM_CONSTANTS.localeGmAddonsProperties)
                   .GetStringFromName("confirmForceUpdate"));
@@ -911,8 +911,7 @@ function GM_installFromUrlGo() {
   if (!valid) {
     let bundle = GM_CONSTANTS.localeStringBundle.createBundle(
         GM_CONSTANTS.localeGreasemonkeyProperties);
-    Services.prompt.alert(null, "Greasemonkey",
-        bundle.GetStringFromName("error.invalidUrl").replace("%1", url));
+    GM_util.prompt.alert0(bundle.GetStringFromName("error.invalidUrl").replace("%1", url));
     return;
   }
   if (panel) {
@@ -1090,11 +1089,11 @@ function GM_backupExport() {
       if (aErr) {
         msg += "\n\n" + aErr.split("; ").join("\n");
       }
-      alert(msg);
+      GM_util.prompt.alert0(msg);
     } else {
       let msg = bundle.GetStringFromName("backup.failed")
           .replace("%1", aErr || "");
-      alert(msg);
+      GM_util.prompt.alert0(msg);
     }
   });
 }
@@ -1133,7 +1132,7 @@ function GM_backupImport() {
       function (aSuccess, aResult, aErr) {
     let bundle = GM_backup_stringBundle();
     if (!aSuccess) {
-      alert(bundle.GetStringFromName("backup.failed").replace("%1", aErr || ""));
+      GM_util.prompt.alert0(bundle.GetStringFromName("backup.failed").replace("%1", aErr || ""));
       return;
     }
     let msg = bundle.GetStringFromName("backup.imported")
@@ -1142,7 +1141,7 @@ function GM_backupImport() {
     if (aResult.errors && aResult.errors.length) {
       msg += "\n\n" + aResult.errors.join("\n");
     }
-    alert(msg);
+    GM_util.prompt.alert0(msg);
   });
 }
 
@@ -1176,11 +1175,11 @@ function GM_recoverOrphans() {
   let config = GM_util.getService().config;
   let orphans = config.getOrphans ? config.getOrphans() : [];
   if (orphans.length == 0) {
-    alert("No orphaned scripts to recover.");
+    GM_util.prompt.alert0("No orphaned scripts to recover.");
     return;
   }
 
-  let proceed = confirm(
+  let proceed = GM_util.prompt.confirm0(
       "Found " + orphans.length + " orphaned script director"
       + (orphans.length == 1 ? "y" : "ies")
       + " under <profile>/gm_scripts/.\n\n"
@@ -1201,7 +1200,7 @@ function GM_recoverOrphans() {
   // simple property reference grabs the bound implementation.
   let installScriptFromSource = GM_util.installScriptFromSource;
   if (typeof installScriptFromSource !== "function") {
-    alert("Internal error: installScriptFromSource is unavailable.");
+    GM_util.prompt.alert0("Internal error: installScriptFromSource is unavailable.");
     return;
   }
 
@@ -1218,7 +1217,7 @@ function GM_recoverOrphans() {
       if (errors.length > 0) {
         msg += "\n\nErrors:\n" + errors.join("\n");
       }
-      alert(msg);
+      GM_util.prompt.alert0(msg);
       // Re-scan now that every recovered directory has been renamed to
       // ".recovered" (which the scanner skips).  Without this, the
       // in-memory orphan list would still hold the original entries

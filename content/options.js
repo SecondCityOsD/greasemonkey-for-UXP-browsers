@@ -171,10 +171,10 @@ function GM_backupNow() {
   GM_backupScheduler.backupNow(folder, function (aOk, aPath, aErr) {
     button.disabled = false;
     if (aOk) {
-      alert(GM_backupString("backup.now.done", "Backup written to:\n%1")
+      GM_util.prompt.alert0(GM_backupString("backup.now.done", "Backup written to:\n%1")
           .replace("%1", aPath));
     } else {
-      alert(GM_backupString("backup.failed", "Backup operation failed.\n\n%1")
+      GM_util.prompt.alert0(GM_backupString("backup.failed", "Backup operation failed.\n\n%1")
           .replace("%1", aErr || ""));
     }
   });

@@ -1617,7 +1617,7 @@ Script.prototype.updateFromNewScript = function (
       this._namespace = newScript._namespace;
     } else {
       // Notify the user of the conflict.
-      GM_util.alert(GM_CONSTANTS.localeStringBundle.createBundle(
+      GM_util.prompt.alert0(GM_CONSTANTS.localeStringBundle.createBundle(
           GM_CONSTANTS.localeGreasemonkeyProperties)
           .GetStringFromName("error.script.duplicateInstalled")
           .replace("%1", newScript._name)

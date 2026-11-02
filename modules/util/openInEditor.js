@@ -63,7 +63,7 @@ function openInEditor(aScript) {
             + "choose a local text editor (for example Notepad, or a code "
             + "editor such as VS Code) to open user scripts with.";
       }
-      GM_util.alert(msg);
+      GM_util.prompt.alert0(msg);
       if (GM_util.setEditor(0)) {
         openInEditor(aScript);
       }
@@ -89,7 +89,7 @@ function openInEditor(aScript) {
   } catch (e) {
     // Something may be wrong with the editor the user selected.
     // Remove so that next time they can pick a different one.
-    GM_util.alert(GM_CONSTANTS.localeStringBundle.createBundle(
+    GM_util.prompt.alert0(GM_CONSTANTS.localeStringBundle.createBundle(
         GM_CONSTANTS.localeGmBrowserProperties)
         .GetStringFromName("editor.couldNotLaunch")
         + "\n" + e);

@@ -281,9 +281,7 @@ Object.defineProperty(ScriptAddon.prototype, "applyBackgroundUpdates", {
     if (reenablingWhileEdited) {
       let bundle = GM_CONSTANTS.localeStringBundle.createBundle(
           GM_CONSTANTS.localeGmAddonsProperties);
-      let confirmed = Services.prompt.confirm(
-          null,
-          "Greasemonkey",
+      let confirmed = GM_util.prompt.confirm0(
           bundle.GetStringFromName("confirmEnableAutoUpdate"));
       if (!confirmed) {
         // No mutation — but fire onPropertyChanged so the AOM re-reads the
@@ -606,9 +604,7 @@ ScriptInstall.prototype._script = null;
  */
 ScriptInstall.prototype.install = function () {
   if (this._script.hasUnacceptedLocalEdits()) {
-    let confirmed = Services.prompt.confirm(
-        null,
-        "Greasemonkey",
+    let confirmed = GM_util.prompt.confirm0(
         GM_CONSTANTS.localeStringBundle.createBundle(
             GM_CONSTANTS.localeGmAddonsProperties)
             .GetStringFromName("confirmForceUpdate"));
