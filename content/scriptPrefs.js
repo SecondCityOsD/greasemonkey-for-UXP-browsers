@@ -69,10 +69,19 @@ var gScript = GM_util.getService().config.getMatchingScripts(
  *  reorder delta on OK without doing redundant work when unchanged. */
 var gInitialPosition = -1;
 
-/** Lazy-instantiated GM_ScriptStorageBack for the Values tab.  Closed
- *  on window unload.  Each call to getValues / setValues / deleteValue
- *  reuses this single connection. */
-var gValuesStorage = null;
+/** True once the Values tab could read the script's values; Add / Edit /
+ *  Delete need it. */
+var gValuesReadable = false;
+
+/**
+ * The script's storage Back (modules/storageBack.js), looked up on each
+ * use.  It is the one the script's pages use, so an edit here reaches
+ * them at once: their cached reads and their value-change listeners.  A
+ * private Back (its own connection) used to leave them on the old value.
+ */
+function valuesStorage() {
+  return getStorageBackForScript(gScript);
+}
 
 /** In-memory snapshot of the script's stored key/value pairs.  Keys come
  *  from listValues(); values are the *parsed* result of JSON.parse on
@@ -171,13 +180,6 @@ window.addEventListener("unload", function () {
   GM_util.getService().config.removeObserver(gScriptObserver, gScript);
 }, false);
 
-window.addEventListener("unload", function () {
-  // Close the SQLite connection cleanly when the dialog is dismissed.
-  if (gValuesStorage) {
-    try { gValuesStorage.close(); } catch (e) {}
-    gValuesStorage = null;
-  }
-}, false);
 
 ////////////////////////////// Pages section //////////////////////////////////
 
@@ -1085,32 +1087,19 @@ function onDialogAccept() {
 ////////////////////////////// Values tab /////////////////////////////////////
 //
 // The Values tab shows every GM_setValue key for this script with type +
-// value columns and Add / Edit / Delete buttons.  Backed by
-// modules/storageBack.js (one shared connection per dialog instance,
-// closed on window.onunload).  Add / Edit (or a double-click) open the
-// value editor, valueEditor.xul; Delete is a single confirm.  All
-// mutations go through the existing setValue / deleteValue paths so the
-// script's GM_setValue observers (val-set / val-del) fire correctly.
+// value columns and Add / Edit / Delete buttons.  Backed by the script's
+// shared storage (valuesStorage()).  Add / Edit (or a double-click) open
+// the value editor, valueEditor.xul; Delete is a single confirm.  Every
+// change goes through the Back's setValue / deleteValue, so running
+// pages see it and the script's val-set / val-del observers fire.
 
 function populateValuesTab() {
-  // Lazy-open the storage connection.
-  if (!gValuesStorage) {
-    try {
-      gValuesStorage = new GM_ScriptStorageBack(gScript);
-    } catch (e) {
-      // If the script's storage DB is missing / corrupt, the rest of
-      // the dialog still works; the Values tab just shows empty.
-      gValuesStorage = null;
-      Services.console.logStringMessage(
-          "Greasemonkey scriptPrefs: storage open failed: " + e);
-    }
-  }
   loadValuesFromStorage();
   rebuildValuesTree();
-  // Add button is enabled whenever the storage connection is alive;
-  // Edit / Delete only when a row is selected.
-  document.getElementById("values-add").disabled = !gValuesStorage;
-  if (gValuesStorage) {
+  // Add is enabled whenever the values could be read; Edit / Delete only
+  // when a row is selected.
+  document.getElementById("values-add").disabled = !gValuesReadable;
+  if (gValuesReadable) {
     document.getElementById("values-tree")
         .addEventListener("dblclick", onValueDblClick, false);
   }
@@ -1124,17 +1113,24 @@ function populateValuesTab() {
  */
 function loadValuesFromStorage() {
   gValuesData = [];
-  if (!gValuesStorage) return;
+  let storage = valuesStorage();
   let names;
   try {
-    names = gValuesStorage.listValues() || [];
+    // No file yet: nothing stored.  Don't let the listing create one.
+    names = storage.dbFile.exists() ? (storage.listValues() || []) : [];
+    gValuesReadable = true;
   } catch (e) {
+    // A corrupt file: the rest of the dialog still works; the Values
+    // tab just shows empty.
+    gValuesReadable = false;
+    Services.console.logStringMessage(
+        "Greasemonkey scriptPrefs: reading the values failed: " + e);
     return;
   }
   names.sort();
   for (let i = 0; i < names.length; i++) {
     let raw = null;
-    try { raw = gValuesStorage.getValue(names[i]); } catch (e) { raw = null; }
+    try { raw = storage.getValue(names[i]); } catch (e) { raw = null; }
     let parsed = null;
     let typeName = "null";
     try {
@@ -1282,8 +1278,8 @@ function onValueSelect() {
   let delBtn  = document.getElementById("values-delete");
   let hasSelection = tree && tree.currentIndex >= 0
       && tree.currentIndex < gValuesData.length;
-  if (editBtn) editBtn.disabled = !hasSelection || !gValuesStorage;
-  if (delBtn)  delBtn.disabled  = !hasSelection || !gValuesStorage;
+  if (editBtn) editBtn.disabled = !hasSelection || !gValuesReadable;
+  if (delBtn)  delBtn.disabled  = !hasSelection || !gValuesReadable;
 }
 
 function selectedValueRow() {
@@ -1295,7 +1291,7 @@ function selectedValueRow() {
 ////////////////////////////// Add / Edit / Delete /////////////////////////////
 
 function onValueAdd() {
-  if (!gValuesStorage) return;
+  if (!gValuesReadable) return;
   openValueEditor({
     "existingKeys": gValuesData.map(function (aRow) { return aRow.name; }),
   });
@@ -1303,7 +1299,7 @@ function onValueAdd() {
 
 function onValueEdit() {
   let row = selectedValueRow();
-  if (!row || !gValuesStorage) return;
+  if (!row || !gValuesReadable) return;
   openValueEditor({"key": row.name, "raw": row.raw, "type": row.type});
 }
 
@@ -1328,7 +1324,7 @@ function openValueEditor(aArgs) {
   if (typeof aArgs.resultKey != "string") return;
 
   try {
-    gValuesStorage.setValue(aArgs.resultKey, JSON.parse(aArgs.resultJson));
+    valuesStorage().setValue(aArgs.resultKey, JSON.parse(aArgs.resultJson));
   } catch (e) {
     let bundle = bundleForValuesDialogs();
     Services.prompt.alert(window, (typeof aArgs.key == "string")
@@ -1363,7 +1359,7 @@ function selectValueRow(aKey) {
 
 function onValueDelete() {
   let row = selectedValueRow();
-  if (!row || !gValuesStorage) return;
+  if (!row || !gValuesReadable) return;
   let prompts = Services.prompt;
   let bundle = bundleForValuesDialogs();
 
@@ -1374,7 +1370,7 @@ function onValueDelete() {
   if (!prompts.confirm(window, title, body)) return;
 
   try {
-    gValuesStorage.deleteValue(row.name);
+    valuesStorage().deleteValue(row.name);
   } catch (e) {
     prompts.alert(window, title, "" + e);
     return;

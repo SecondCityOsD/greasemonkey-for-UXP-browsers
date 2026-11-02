@@ -2260,6 +2260,11 @@ Script.prototype.uninstall = function (aForUpdate) {
   }
 
   if (!aForUpdate) {
+    // Close and forget its storage first: an open connection kept the
+    // .db from being deleted on Windows (it was queued, then deleted a
+    // reinstalled script's values at the next start), and a cached one
+    // kept a reinstall in this session writing to the old file.
+    releaseStorageForScript(this.id);
     let storage = new GM_ScriptStorageBack(this);
     let file = storage.dbFile;
     GM_util.enqueueRemove(file);

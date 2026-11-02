@@ -218,28 +218,35 @@ ScriptStore.prototype = {
       record.cleartext.userOverride = script.userOverride;
 
       if (GM_prefRoot.getValue("sync.values")) {
-        let storage = new GM_ScriptStorageBack(script);
+        // The shared Back, not a private one: no second connection (each
+        // ran a full VACUUM and was never closed), and no .db created for
+        // a script that never stored anything.
+        let storage = getStorageBackForScript(script);
         let totalSize = 0;
         let maxSize = GM_prefRoot.getValue("sync.values.maxSizePerScript");
         record.cleartext.values = {};
         record.cleartext.valuesTooBig = false;
-        let names = storage.listValues();
+        let names = storage.dbFile.exists() ? storage.listValues() : [];
         for (let i = 0, iLen = names.length; i < iLen; i++) {
           let name = names[i];
-          let val = storage.getValue(name);
+          let raw = storage.getValue(name);
+          if (raw === null) {
+            // The read failed (and was logged).
+            continue;
+          }
+          let val;
           try {
-            val = JSON.parse(val);
+            val = JSON.parse(raw);
           } catch (e) {
             dump("Sync:" + "\n" + uneval(e) + "\n");
             continue;
           }
           record.cleartext.values[name] = val;
-          totalSize += name.length;
-          // 4 for number / bool (no length).
-          totalSize += val.length || 4;
+          // The stored JSON is what gets uploaded, objects included.
+          totalSize += name.length + raw.length;
 
           if (totalSize > maxSize) {
-            record.cleartext.values = [];
+            record.cleartext.values = {};
             record.cleartext.valuesTooBig = true;
             break;
           }
@@ -410,20 +417,15 @@ function syncId(aScript) {
 function setScriptValuesFromSyncRecord(aScript, aRecord) {
   if (GM_prefRoot.getValue("sync.values")
       && !aRecord.cleartext.valuesTooBig) {
-    let storage = new GM_ScriptStorageBack(aScript);
-    let valuesOld = storage.listValues();
-    let valuesNew = [];
-    for (let name in aRecord.cleartext.values) {
-      storage.setValue(name, aRecord.cleartext.values[name]);
-      valuesNew.push(name);
-    }
+    // The shared Back: running pages see the synced values at once (their
+    // cached reads and value-change listeners).  One transaction each.
+    let storage = getStorageBackForScript(aScript);
+    let values = aRecord.cleartext.values || {};
+    storage.setValuesBatch(values);
     if (GM_prefRoot.getValue("sync.values.deleteNonExistentValues")) {
-      for (let i = 0, iLen = valuesOld.length; i < iLen; i++) {
-        let valueOld = valuesOld[i];
-        if (!valuesNew.includes(valueOld)) {
-          storage.deleteValue(valueOld);
-        }
-      }
+      storage.deleteValuesBatch(storage.listValues().filter(function (aName) {
+        return !Object.prototype.hasOwnProperty.call(values, aName);
+      }));
     }
   }
 }
