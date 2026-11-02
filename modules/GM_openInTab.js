@@ -35,6 +35,9 @@ Cu.import("chrome://greasemonkey-modules/content/constants.js");
 Cu.import("chrome://greasemonkey-modules/content/thirdParty/getChromeWinForContentWin.js");
 
 
+/** The schemes GM_openInTab may open, besides about:blank. */
+const OPEN_IN_TAB_SCHEMES = new Set(["ftp", "http", "https"]);
+
 // Tab tracking for .close() and .onclose support.
 var gTabIdCounter = 0;
 var gOpenTabs = {};
@@ -60,6 +63,8 @@ var gOpenTabs = {};
  *   - closed  {boolean}  — true after the tab is closed.
  *   - onclose {function} — called when the tab is closed.
  *   - close() {function} — closes the tab programmatically.
+ * @throws {Error} (in the content window's realm) for an address that is
+ *   not http, https, ftp or about:blank.
  */
 function GM_openInTab(aContentWin, aBaseUrl, aUrl, aOptions) {
   let loadInBackground = null;
@@ -83,6 +88,17 @@ function GM_openInTab(aContentWin, aBaseUrl, aUrl, aOptions) {
   // Resolve URL relative to the location of the content window.
   let baseUri = GM_CONSTANTS.ioService.newURI(aBaseUrl, null, null);
   let uri = GM_CONSTANTS.ioService.newURI(aUrl, null, baseUri);
+
+  // The tab is opened from chrome, with chrome's rights, so a page script
+  // must not reach chrome:, file:, javascript:, data: or about:config
+  // through it.  Firefox's tabs.create (Violentmonkey) refuses the same.
+  if (!OPEN_IN_TAB_SCHEMES.has(uri.scheme) && (uri.spec != "about:blank")) {
+    throw new aContentWin.Error(
+        GM_CONSTANTS.localeStringBundle.createBundle(
+            GM_CONSTANTS.localeGreasemonkeyProperties)
+            .GetStringFromName("error.disallowedScheme")
+            .replace("%1", uri.spec));
+  }
 
   let tabId = ++gTabIdCounter;
 

@@ -50,6 +50,8 @@ const GM_CONSTANTS = {
     "GM_download",
     "GM_getResourceText",
     "GM_getResourceURL",
+    "GM_getTab",
+    "GM_getTabs",
     "GM_getValue",
     "GM_getValues",
     // This is a separate API:
@@ -60,6 +62,7 @@ const GM_CONSTANTS = {
     "GM_openInTab",
     "GM_registerMenuCommand",
     "GM_removeValueChangeListener",
+    "GM_saveTab",
     "GM_setClipboard",
     "GM_unregisterMenuCommand",
     "GM_setValue",

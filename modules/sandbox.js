@@ -41,12 +41,16 @@
  *        Cu.exportFunction installs a Promise-returning wrapper as GM.<name>.
  *        Each wrapper runs in chrome scope and constructs the Promise via
  *        aSandbox.Promise so it integrates with the sandbox microtask queue.
+ *        The exceptions: SYNC_RETURN_GM_APIS return their value directly,
+ *        and GM.xmlHttpRequest / GM.download get GMRequestPromiseSandbox,
+ *        a fixed function evaluated in the sandbox, whose Promise settles
+ *        with the response.
  *     3. Copies GM_info directly (not a function — no Promise needed).
  *     4. aSandbox.Object.freeze(GM) prevents script tampering.
  *
- *   Errors carry real chrome stack traces and there is no eval-attack
- *   surface, because the object is built natively rather than from a
- *   constructed-at-runtime JS string.
+ *   Errors carry real chrome stack traces.  Nothing is built from a
+ *   runtime-constructed string: the one evaluated source is a fixed
+ *   function in this module.
  *
  * ── GM_info injection (injectGMInfo) ──────────────────────────────────────
  *
@@ -133,6 +137,62 @@ const GM_API_MAPPING = (function () {
 })();
 
 /**
+ * GM.xmlHttpRequest / GM.download: a Promise for the response, as in
+ * Violentmonkey and Tampermonkey.  It resolves with the onload response and
+ * rejects with the onerror / ontimeout / onabort one; the script's own
+ * callbacks still run, and the Promise carries .abort().
+ *
+ * Injected into the sandbox by source (see MenuCommandSandbox), never run
+ * in chrome: the callbacks it hands the request then belong to the script,
+ * so the request's same-principal check accepts them, and the Promise is
+ * the script's own.  It must not use anything outside its own body.
+ *
+ * @param {object}   aGM      - The sandbox's GM object.
+ * @param {string}   aName    - The GM.* name to define ("xmlHttpRequest").
+ * @param {function} aRequest - The sandbox's GM_* function.
+ */
+function GMRequestPromiseSandbox(aGM, aName, aRequest) {
+  let assign = Object.assign;
+  let SandboxPromise = Promise;
+  let settlers = [
+    ["onload", 0], ["onerror", 1], ["ontimeout", 1], ["onabort", 1],
+  ];
+  aGM[aName] = function (aDetails, aExtra) {
+    let control = null;
+    let promise = new SandboxPromise(function (aResolve, aReject) {
+      // GM.download(url, name) takes a bare address.
+      let own = (typeof aDetails == "string") ? { "url": aDetails } : aDetails;
+      let details = own;
+      if (own && (typeof own == "object")) {
+        details = assign({}, own);
+        settlers.forEach(function (aSettler) {
+          let callback = own[aSettler[0]];
+          if ((callback != null) && (typeof callback != "function")) {
+            // Left for the request to report.
+            return;
+          }
+          let settle = aSettler[1] ? aReject : aResolve;
+          details[aSettler[0]] = function (aResponse) {
+            settle(aResponse);
+            if (callback) {
+              return callback.call(own, aResponse);
+            }
+            return undefined;
+          };
+        });
+      }
+      control = aRequest(details, aExtra);
+    });
+    promise.abort = function () {
+      if (control && (typeof control.abort == "function")) {
+        control.abort();
+      }
+    };
+    return promise;
+  };
+}
+
+/**
  * Creates and returns the JavaScript sandbox for a userscript.
  *
  * @param {Window}    aContentWin - The content window the script runs in;
@@ -147,7 +207,11 @@ const GM_API_MAPPING = (function () {
 function createSandbox(aContentWin, aUrl, aScript, aRunAt) {
   let _API1 = "";
   let _API2 = "";
-  let unsafeWindowDefault = "const unsafeWindow = window;";
+  // A plain property, not a `const`: a script that declares its own
+  // `var unsafeWindow` (the old Chrome-compat idiom) would otherwise fail
+  // to compile ("redeclaration of const").
+  let unsafeWindowDefault = "Object.defineProperty(this, \"unsafeWindow\", "
+      + "{\"configurable\": true, \"value\": window, \"writable\": true});";
 
   // Pre-compute a lowercased Set of @grant entries once per sandbox
   // construction.  Pre-fix, every API-grant check did:
@@ -350,8 +414,9 @@ function createSandbox(aContentWin, aUrl, aScript, aRunAt) {
   }
 
   // GM_getTab / GM_saveTab / GM_getTabs: per-tab, per-script in-memory
-  // store (Tampermonkey / ScriptCat).  Plain callables, so GM.getTab /
-  // GM.saveTab / GM.getTabs are wrapped automatically by buildGMObject.
+  // store (Tampermonkey / ScriptCat).  Plain callables listed in
+  // GM_CONSTANTS.addonAPI, so buildGMObject wraps them as GM.getTab /
+  // GM.saveTab / GM.getTabs.
   if (GM_prefRoot.getValue("api.GM_getTab", true)) {
     let gmTabId;
     try {
@@ -396,6 +461,10 @@ function createSandbox(aContentWin, aUrl, aScript, aRunAt) {
     let _openInTabFn = GM_openInTab.bind(null, aContentWin, aUrl);
     sandbox[_API1] = function (aTabUrl, aTabOptions) {
       let chromeHandle = _openInTabFn(aTabUrl, aTabOptions);
+      if (!chromeHandle) {
+        // No browser window to open it in.
+        return null;
+      }
       // Create a sandbox-side tab handle that proxies to the chrome one.
       let sandboxHandle = Cu.createObjectIn(sandbox);
       sandboxHandle.closed = false;
@@ -406,9 +475,13 @@ function createSandbox(aContentWin, aUrl, aScript, aRunAt) {
       // Wire up the chrome handle's onclose to update the sandbox handle.
       chromeHandle.onclose = function () {
         sandboxHandle.closed = true;
-        if (typeof sandboxHandle.onclose == "function") {
+        // Read the script's callback through the waiver: the Xray view
+        // hides function-valued properties, so a plain read is always
+        // undefined.
+        let onclose = Cu.waiveXrays(sandboxHandle).onclose;
+        if (typeof onclose == "function") {
           try {
-            Cu.waiveXrays(sandboxHandle).onclose();
+            onclose.call(Cu.waiveXrays(sandboxHandle));
           } catch (e) {
             // Ignore callback errors.
           }
@@ -468,7 +541,6 @@ function createSandbox(aContentWin, aUrl, aScript, aRunAt) {
         null, aContentWin, aScript.fileURL);
   }
 
-  // See #2538 (an alternative).
   // See #2538 (an alternative).
   // Also accept @grant window.close / window.focus (Tampermonkey/VM compat).
   _API1 = "GM_windowClose";
@@ -727,19 +799,41 @@ function runScriptInSandbox(aSandbox, aScript) {
     return true;
   }
 
+  // GM.* methods that return their value directly, as in Violentmonkey,
+  // because scripts use it at once:
+  //   - addElement / addStyle: the Element, which scripts chain calls on
+  //     (.appendChild, .style.X = Y); TM, VM and upstream Greasemonkey
+  //     4.11+ all return it synchronously.
+  //   - openInTab: the tab handle (GM.openInTab(u).close()).
+  //   - registerMenuCommand / addValueChangeListener: the id that
+  //     GM.unregisterMenuCommand / GM.removeValueChangeListener take.
+  // `await GM.x(...)` still works: awaiting a non-Promise gives the value.
+  // `GM.x(...).then(...)` does not, as in VM.  No one-shot `.then` is
+  // attached (VM's gm-api.js trick): an expando set from chrome is not
+  // visible to the script through the Xray view.
+  const SYNC_RETURN_GM_APIS = new Set([
+    "GM_addElement", "GM_addStyle", "GM_addValueChangeListener",
+    "GM_openInTab", "GM_registerMenuCommand",
+  ]);
+  // GM.* methods that return a Promise for the response: see
+  // GMRequestPromiseSandbox.
+  const REQUEST_PROMISE_GM_APIS = new Set(["GM_download", "GM_xmlhttpRequest"]);
+
   /**
    * Builds the script-facing GM4 surface (the `GM` object exposing
-   * GM.getValue / GM.setValue / GM.xmlHttpRequest / etc. as Promise-
-   * returning methods) for the given sandbox.
+   * GM.getValue / GM.setValue / GM.xmlHttpRequest / etc.) for the given
+   * sandbox.
    *
    *   - Uses Cu.createObjectIn + Cu.exportFunction (native chrome →
-   *     sandbox object construction; no eval).
+   *     sandbox object construction).
    *   - Iterates the pre-computed module-level GM_API_MAPPING instead
    *     of rebuilding the legacy→modern map on every call.
-   *   - Constructs each GM.X wrapper as a chrome-side closure that
-   *     `new aSandbox.Promise(...)` — so the script's `await GM.X(...)`
-   *     integrates with the sandbox microtask queue and stack traces
-   *     point at this function rather than at an eval'd string.
+   *   - SYNC_RETURN_GM_APIS pass through unchanged.
+   *     REQUEST_PROMISE_GM_APIS get the sandbox-side
+   *     GMRequestPromiseSandbox wrapper.
+   *   - Every other GM.X is a chrome-side closure that returns
+   *     `new aSandbox.Promise(...)`, so the script's `await GM.X(...)`
+   *     integrates with the sandbox microtask queue.
    *   - Copies GM_info as a direct property (not Promise-wrapped, since
    *     it's the metadata snapshot).
    *   - Freezes the GM object using the sandbox's own Object.freeze so
@@ -750,32 +844,10 @@ function runScriptInSandbox(aSandbox, aScript) {
    * @returns {boolean} True on success; false if construction failed (the
    *                    caller aborts the script in that case).
    */
-  // APIs whose return value is a DOM Element that scripts chain method
-  // calls on immediately (.appendChild, .style.X = Y, .setAttribute, ...).
-  // Wrapping these in a Promise breaks the call site even if the script
-  // later `await`s, because by the time the script gets the Element it
-  // has already passed the Promise to the next call as a parent.
-  //
-  // TM, VM, and the upstream Greasemonkey 4.11+ reference implementation
-  // all return these synchronously; the original gm4-polyfill on
-  // greasemonkey.github.io omits addElement entirely and only Promise-
-  // wraps addStyle (which never matched TM/VM behaviour either — a
-  // polyfill quirk).  We follow the TM/VM/upstream-GM convention here.
-  //
-  // Side effects for existing scripts:
-  //   - `await GM.addElement(...)` continues to work — `await` on a non-
-  //     Promise resolves to the value directly.
-  //   - `GM.addElement(...).then(el => ...)` breaks — Element has no
-  //     `.then`.  This pattern only worked because of our pre-fix
-  //     Promise-wrap bug; the same code on TM/VM/upstream GM has never
-  //     worked, so portable userscripts wouldn't use it.
-  //   - GM3 `GM_addElement(...)` and `GM_addStyle(...)` (underscore form
-  //     bound at sandbox.js:209-228) are unaffected — they're sync.
-  const SYNC_RETURN_GM_APIS = new Set(["GM_addElement", "GM_addStyle"]);
-
   function buildGMObject(aSandbox, aScript) {
     try {
       let gmObj = Cu.createObjectIn(aSandbox, { "defineAs": "GM" });
+      let defineRequestPromise = null;
 
       for (let i = 0; i < GM_API_MAPPING.length; i++) {
         let pair = GM_API_MAPPING[i];
@@ -788,19 +860,18 @@ function runScriptInSandbox(aSandbox, aScript) {
         }
 
         if (SYNC_RETURN_GM_APIS.has(legacyName)) {
-          // Pass the bound chrome function through unchanged — the script
-          // gets the raw Element synchronously.  See SYNC_RETURN_GM_APIS
-          // comment above for the rationale + behaviour guarantees.
-          //
-          // We do NOT attach a one-shot `.then` à la VM's
-          // injected/web/gm-api.js:219 trick, because the Element
-          // crosses the chrome→content X-ray boundary and any expando
-          // defined from chrome would not be visible to the script
-          // through the X-ray view.  Scripts that want thenable
-          // semantics should write `await GM.addElement(...)` — `await`
-          // on a non-Promise resolves to the value directly and works
-          // identically across TM / VM / this fork.
+          // Pass the function through unchanged: see SYNC_RETURN_GM_APIS.
           Cu.exportFunction(legacyFn, gmObj, { "defineAs": modernName });
+          continue;
+        }
+
+        if (REQUEST_PROMISE_GM_APIS.has(legacyName)) {
+          if (!defineRequestPromise) {
+            // toString, not toSource: see MenuCommandSandbox in createSandbox.
+            defineRequestPromise = Cu.evalInSandbox(
+                "(" + GMRequestPromiseSandbox + ")", aSandbox);
+          }
+          defineRequestPromise(gmObj, modernName, legacyFn);
           continue;
         }
 
