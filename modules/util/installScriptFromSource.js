@@ -39,11 +39,15 @@ Cu.import("chrome://greasemonkey-modules/content/util.js");
  *   the freshly-installed script in the configured editor.  Set by the
  *   Recover-Orphans batch UI so it doesn't spawn N editor windows in a
  *   row when reinstalling a stack of recovered scripts.
+ * @param {boolean}  [aOptions.silent=false] - When true, no "installed
+ *   successfully" message (createUserScript's empty template).
  * @returns {void}
  */
 function installScriptFromSource(aSource, aCallback, aOptions) {
   let opts = aOptions || {};
   let skipEditor = !!opts.skipEditor;
+  // No "installed successfully" (createUserScript's empty template).
+  let silent = !!opts.silent;
 
   var remoteScript;
   var script;
@@ -68,6 +72,7 @@ function installScriptFromSource(aSource, aCallback, aOptions) {
       return undefined;
     }
     remoteScript.setScript(script, tempFile);
+    remoteScript.setSilent(silent);
     remoteScript.download(function (aSuccess) {
       if (!aSuccess) {
         let notificationOptions = {

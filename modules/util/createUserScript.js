@@ -96,7 +96,10 @@ function createUserScript(aWin) {
 
     // installScriptFromSource writes the file, runs the install pipeline,
     // and opens the new script in the editor as its final step.
-    GM_util.installScriptFromSource(source);
+    // Silent: an empty template isn't "installed successfully", and that
+    // message contradicted a duplicate-name warning on the first save
+    // (issue #25).
+    GM_util.installScriptFromSource(source, null, {"silent": true});
   } catch (e) {
     Cu.reportError(
         "Greasemonkey: auto-create failed, falling back to dialog: " + e);

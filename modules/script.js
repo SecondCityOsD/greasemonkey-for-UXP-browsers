@@ -224,6 +224,9 @@ function Script(aConfigNode) {
   // File time the user agreed to lose to a remote copy (see
   // acceptLocalEditsLoss()); in memory only.
   this._editsLossAcceptedTime = null;
+  // Switched off by a local edit whose @name/@namespace clashed with
+  // another installed script (see updateFromNewScript); in memory only.
+  this._disabledForConflict = false;
   this._name = GM_CONSTANTS.scriptType;
   this._namespace = "";
   this._noframes = false;
@@ -1636,14 +1639,37 @@ Script.prototype.updateFromNewScript = function (
       this._name = newScript._name;
       this._namespace = newScript._namespace;
     } else {
-      // Notify the user of the conflict.
-      GM_util.alert(GM_CONSTANTS.localeStringBundle.createBundle(
-          GM_CONSTANTS.localeGreasemonkeyProperties)
-          .GetStringFromName("error.script.duplicateInstalled")
-          .replace("%1", newScript._name)
-          .replace("%2", newScript._namespace));
+      // Another installed script has this @name and @namespace, so the new
+      // metadata isn't applied.  The file's code would then run under this
+      // script's old rules (issue #25: a new script pasted over with an
+      // installed one's source), so it's switched off until a save with a
+      // unique name switches it back on.  Violentmonkey refuses such a
+      // save; an external editor has already written it.
+      if (this._enabled) {
+        this._disabledForConflict = true;
+        this.enabled = false;
+      }
+      let bundle = GM_CONSTANTS.localeStringBundle.createBundle(
+          GM_CONSTANTS.localeGreasemonkeyProperties);
+      let stillOff;
+      try {
+        stillOff = bundle.GetStringFromName("error.script.duplicateDisabled");
+      } catch (e) {
+        stillOff = "This script keeps its old name and stays off until you "
+            + "give it a different @name or @namespace.";
+      }
+      // Functions, so a "$" in a name is taken literally.
+      GM_util.alert(bundle.GetStringFromName("error.script.duplicateInstalled")
+          .replace("%1", function () { return newScript._name; })
+          .replace("%2", function () { return newScript._namespace; })
+          + "\n\n" + stillOff);
       return undefined;
     }
+  }
+  if (this._disabledForConflict) {
+    // This save resolved the clash.
+    this._disabledForConflict = false;
+    this.enabled = true;
   }
 
   // Copy new values.

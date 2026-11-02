@@ -866,7 +866,9 @@ RemoteScript.prototype.setScript = function (aScript, aTempFile) {
  * @param {boolean} [aVal=true] - Pass a falsy value to re-enable notifications.
  */
 RemoteScript.prototype.setSilent = function (aVal) {
-  this._silent = !!aVal;
+  // Called bare by its callers (backup import, Sync), which meant silence
+  // OFF: one "installed" popup per script.  Absent means true, as above.
+  this._silent = (typeof aVal == "undefined") ? true : !!aVal;
 };
 
 /**
