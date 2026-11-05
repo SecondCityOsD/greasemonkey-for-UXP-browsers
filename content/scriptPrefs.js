@@ -188,6 +188,9 @@ function populatePagesSection() {
   // The "moved to user-side via context-menu" callbacks no longer need a
   // tab switch (single-form layout), so the helpers just delegate.
   gElm.scriptIncludes.pages = gScript.includes;
+  gElm.scriptIncludes.onAddUserInclude = function (aPage) {
+    gElm.userIncludes.addPage(aPage);
+  };
   gElm.scriptIncludes.onAddUserExclude = function (aPage) {
     gElm.userExcludes.addPage(aPage);
   };
@@ -197,6 +200,9 @@ function populatePagesSection() {
     matchesPattern.push(gScript.matches[i].pattern);
   }
   gElm.scriptMatches.pages = matchesPattern;
+  gElm.scriptMatches.onAddUserMatch = function (aPage) {
+    gElm.userMatches.addPage(aPage);
+  };
 
   let userMatchesPattern = [];
   for (let i = 0, iLen = gScript.userMatches.length; i < iLen; i++) {
@@ -207,6 +213,9 @@ function populatePagesSection() {
   gElm.scriptExcludes.pages = gScript.excludes;
   gElm.scriptExcludes.onAddUserInclude = function (aPage) {
     gElm.userIncludes.addPage(aPage);
+  };
+  gElm.scriptExcludes.onAddUserExclude = function (aPage) {
+    gElm.userExcludes.addPage(aPage);
   };
   gElm.userExcludes.pages = gScript.userExcludes;
 
