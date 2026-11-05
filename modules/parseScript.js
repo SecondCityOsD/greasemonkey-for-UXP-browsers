@@ -83,8 +83,15 @@ function digestToHex(aValue, aBytes) {
   if ((aValue.length == aBytes * 2) && /^[0-9a-f]+$/i.test(aValue)) {
     return aValue.toLowerCase();
   }
-  let base64 = aValue.replace(/-/g, "+").replace(/_/g, "/")
-      .replace(/=+$/, "");
+  let base64 = aValue.replace( /-|_|=+$/g
+                             , function (ch) {
+                                 switch (ch) {
+                                   case "-": return "+";
+                                   case "_": return "/";
+                                 }
+                                 return "";
+                               }
+                             );
   if ((base64.length != Math.ceil(aBytes * 4 / 3))
       || !/^[A-Za-z0-9+\/]+$/.test(base64)) {
     return null;

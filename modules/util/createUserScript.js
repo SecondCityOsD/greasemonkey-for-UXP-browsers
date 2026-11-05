@@ -126,8 +126,7 @@ function buildSource(aName, aNamespace, aInclude) {
   source = source.split("%include%").join(aInclude);
 
   if (removeUnused) {
-    source = source.replace(/^\/\/[ \t]*@description.*\n?/im, "");
-    source = source.replace(/^\/\/[ \t]*@exclude.*\n?/im, "");
+    source = source.replace(/^\/\/[ \t]*@description.*\n?|^\/\/[ \t]*@exclude.*\n?/im, "");
   } else {
     source = source.split("%description%").join("");
     source = source.split("%exclude%").join("");

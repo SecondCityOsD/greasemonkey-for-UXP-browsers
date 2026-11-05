@@ -248,7 +248,7 @@ function MatchPattern(aPattern) {
         //   - "." should not be treated as a wildcard, so we escape it to \.
         //   - if the hostname only consists of "*" (i.e. full wildcard),
         //     replace it with .*
-        host.replace(/\./g, "\\.").replace(/^\*$/, ".*")
+        host.replace(/\.|^\*$/g, ch => ch == "." ? "\\." : ".*")
         // Then, handle the special case of "*." (any or no subdomain)
         // for match patterns. "*." has been escaped to "*\."
         // by the replace above.
