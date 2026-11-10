@@ -120,8 +120,7 @@ function GM_sourceViewerLoad() {
 
   let path = readQueryParam("path");
   if (!path) {
-    showNote(svString("sourceViewer.error.noPath",
-        "No script source to display."));
+    showNote(svString("sourceViewer.error.noPath"));
     return;
   }
 
@@ -131,8 +130,7 @@ function GM_sourceViewerLoad() {
   // is not contentaccessible, so web content can't reach it; this guards
   // against a future caller passing an unexpected path.)
   if (!isAllowedPath(path)) {
-    showNote(svString("sourceViewer.error.read",
-        "Could not read the script source."));
+    showNote(svString("sourceViewer.error.read"));
     return;
   }
 
@@ -166,8 +164,7 @@ function GM_sourceViewerLoad() {
         });
       },
       function (e) {
-        showNote(svString("sourceViewer.error.read",
-            "Could not read the script source.") + " " + e);
+        showNote(svString("sourceViewer.error.read") + " " + e);
       });
 }
 
@@ -282,9 +279,8 @@ function showSourceName(aScript, aUrl, aPath) {
   let label = version ? (name + " " + version) : name;
   // A function replacement, so a "$&" in a script's name stays as it is.
   document.title = label
-      ? svString("sourceViewer.title.named", "%1 — Source")
-          .replace("%1", function () { return label; })
-      : svString("sourceViewer.title", "User Script Source");
+      ? svString("sourceViewer.title.named", [label])
+      : svString("sourceViewer.title");
 }
 
 /**
@@ -369,8 +365,7 @@ function renderSource(aText) {
   // searches the whole text there.
   if (aText.length > SV_MAX_CM_BYTES) {
     mountTextareaFallback(aText, /*highlighterMissing=*/ false);
-    showNote(svString("sourceViewer.note.large",
-        "Large file — shown as plain text for performance."));
+    showNote(svString("sourceViewer.note.large"));
     return;
   }
 
@@ -454,8 +449,7 @@ function mountTextareaFallback(aText, aHighlighterMissing) {
   host.appendChild(ta);
 
   if (aHighlighterMissing) {
-    showNote(svString("sourceViewer.note.plainText",
-        "Plain text — syntax highlighter unavailable on this build."));
+    showNote(svString("sourceViewer.note.plainText"));
   }
 }
 
@@ -500,32 +494,26 @@ function showStatus(aText, aBytes) {
 
   let lines = breaks.length + 1;
   setStatus("gm-sv-lines", (lines == 1)
-      ? svString("sourceViewer.status.line", "1 line")
-      : svString("sourceViewer.status.lines", "%1 lines")
-          .replace("%1", lines.toLocaleString()));
-  setStatus("gm-sv-size", svString("install.size.kb", "%1 KB")
-      .replace("%1", Math.ceil(aBytes.length / 1024).toLocaleString()),
-      svString("sourceViewer.status.bytes", "%1 bytes")
-          .replace("%1", aBytes.length.toLocaleString()));
+      ? svString("sourceViewer.status.line")
+      : svString("sourceViewer.status.lines", [lines.toLocaleString()]));
+  setStatus("gm-sv-size",
+      svString("install.size.kb", [Math.ceil(aBytes.length / 1024).toLocaleString()]),
+      svString("sourceViewer.status.bytes", [aBytes.length.toLocaleString()]));
   if (kinds.length > 1) {
-    setStatus("gm-sv-eol", svString(
-        "sourceViewer.status.eol.mixed", "Mixed line endings"),
+    setStatus("gm-sv-eol", svString("sourceViewer.status.eol.mixed"),
         kinds.map(function (aKind) {
           return aKind + " " + endings[aKind].toLocaleString();
         }).join(", "));
   } else {
-    setStatus("gm-sv-eol", kinds[0] || "", svString(
-        "sourceViewer.status.eol.tooltip", "Line endings"));
+    setStatus("gm-sv-eol", kinds[0] || "", svString("sourceViewer.status.eol.tooltip"));
   }
   let bom = (aBytes.length >= 3) && (aBytes[0] == 0xEF)
       && (aBytes[1] == 0xBB) && (aBytes[2] == 0xBF);
   setStatus("gm-sv-bom", bom ? "BOM" : "", svString(
-      "sourceViewer.status.bom.tooltip", "Starts with a UTF-8 byte order mark"));
+      "sourceViewer.status.bom.tooltip"));
   setStatus("gm-sv-minified", (longest >= SV_MINIFIED_LINE)
-      ? svString("sourceViewer.status.minified", "minified") : "",
-      svString("sourceViewer.status.minified.tooltip",
-          "Its longest line has %1 characters, so it's probably minified.")
-          .replace("%1", longest.toLocaleString()));
+      ? svString("sourceViewer.status.minified") : "",
+      svString("sourceViewer.status.minified.tooltip", [longest.toLocaleString()]));
 
   if (gCMInstance) {
     showCursor();
@@ -537,13 +525,11 @@ function showStatus(aText, aBytes) {
 /** The status bar's "Ln, Col" (from 1), and how much is selected. */
 function showCursor() {
   let cursor = gCMInstance.getCursor("head");
-  let text = svString("sourceViewer.status.cursor", "Ln %1, Col %2")
-      .replace("%1", (cursor.line + 1).toLocaleString())
-      .replace("%2", (cursor.ch + 1).toLocaleString());
+  let text = svString("sourceViewer.status.cursor",
+      [(cursor.line + 1).toLocaleString(), (cursor.ch + 1).toLocaleString()]);
   let selected = gCMInstance.getSelection().length;
   if (selected) {
-    text += " " + svString("sourceViewer.status.selected", "(%1 selected)")
-        .replace("%1", selected.toLocaleString());
+    text += " " + svString("sourceViewer.status.selected", [selected.toLocaleString()]);
   }
   setStatus("gm-sv-cursor", text);
 }
@@ -562,22 +548,23 @@ function setStatus(aId, aText, aTooltip) {
 }
 
 /**
- * Looks up a localised string in the viewer's bundles, returning an English
- * fallback when no bundle has the key (so this feature ships without
- * touching the 34 locale files; keys can be added later).
+ * Looks up a localised string in the viewer's bundles.
  * @param {string} aKey
- * @param {string} aFallback
+ * @param {array} Params (optional)
  * @returns {string}
  */
-function svString(aKey, aFallback) {
+function svString(aKey, Params) {
   for (let i = 0, iLen = gBundles.length; i < iLen; i++) {
     try {
+      if (Params)
+        return gBundles[i].formatStringFromName(aKey, Params, Params.length);
       return gBundles[i].GetStringFromName(aKey);
     } catch (e) {
+      var lastE = e;
       // Not in this bundle: try the next.
     }
   }
-  return aFallback;
+  throw lastE;
 }
 
 /**

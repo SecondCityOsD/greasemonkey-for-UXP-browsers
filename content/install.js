@@ -85,22 +85,17 @@ function init() {
   // ignore, an unusual @run-at, what it may do (@grant, @connect) and the
   // code and files it loads from elsewhere.
   setUpSource("" + gRemoteScript.url);
-  setUpSection("antifeatures", "install.antifeatures",
-      "Antifeatures (@antifeature):", gScript.antifeatures);
-  setUpSection("warnings", "install.warnings", "Warnings:",
-      gScript.parseWarnings || []);
+  setUpSection("antifeatures", "install.antifeatures", gScript.antifeatures);
+  setUpSection("warnings", "install.warnings", gScript.parseWarnings || []);
   if (gScript.runAt != "document-end") {
-    setUpSection("runat", "install.runAt", "Runs at (@run-at):",
-        [gScript.runAt]);
+    setUpSection("runat", "install.runAt", [gScript.runAt]);
   }
-  setUpSection("grants", "install.grants", "Permissions (@grant):",
-      gScript.grants || []);
-  setUpSection("connects", "install.connects", "Can connect to (@connect):",
-      gScript.connects || []);
+  setUpSection("grants", "install.grants", gScript.grants || []);
+  setUpSection("connects", "install.connects", gScript.connects || []);
   setUpRequiresSummary(setUpDependencies("requires", "install.requires",
-      "Code it loads (@require):", gScript.requires, false));
+      gScript.requires, false));
   setUpDependencies("resources", "install.resources",
-      "Files it loads (@resource):", gScript.resources, true);
+      gScript.resources, true);
   gRemoteScript.onDependency(onDependency);
 
   let notice = document.getElementById("description-notice");
@@ -176,14 +171,13 @@ function onDependency(aRemoteScript, aEventType, aReport) {
   } else if (aReport.state == "done") {
     if (aReport.size !== null) {
       status.appendChild(document.createTextNode(installString(
-          "install.size.kb", "%1 KB")
-          .replace("%1", Math.ceil(aReport.size / 1024).toLocaleString())));
+          "install.size.kb", [Math.ceil(aReport.size / 1024).toLocaleString()])));
     }
     if (entry.code || /^text\/|javascript|json|xml|css/i
         .test(aReport.dependency.mimetype || "")) {
       entry.line.setAttribute("viewable", "true");
       entry.line.setAttribute("tooltiptext", entry.tooltip + "\n"
-          + installString("install.dependency.view", "Click to view it."));
+          + installString("install.dependency.view"));
       entry.line.addEventListener("click", function () {
         viewDependencyFile(aReport.file, aReport.dependency.downloadURL);
       }, false);
@@ -304,15 +298,12 @@ function setUpIncludes(aBox, aLabel, aDescription, aIncludes) {
 }
 
 /**
- * A string from gmBrowser.properties, or aFallback while this locale
- * doesn't have the key yet (strings added since the last locale pass).
+ * A string from gmBrowser.properties
  */
-function installString(aKey, aFallback) {
-  try {
-    return document.getElementById("gm-browser-bundle").getString(aKey);
-  } catch (e) {
-    return aFallback;
-  }
+function installString(aKey, Params) {
+  if (Params)
+    return document.getElementById("gm-browser-bundle").getFormattedString(aKey, Params);
+  return document.getElementById("gm-browser-bundle").getString(aKey);
 }
 
 /**
@@ -320,9 +311,9 @@ function installString(aKey, aFallback) {
  * DTD; its elements are "<aName>", "<aName>-label" and
  * "<aName>-description".
  */
-function setUpSection(aName, aLabelKey, aLabelFallback, aItems) {
+function setUpSection(aName, aLabelKey, aItems) {
   document.getElementById(aName + "-label").setAttribute("value",
-      installString(aLabelKey, aLabelFallback));
+      installString(aLabelKey));
   setUpIncludes(aName, aName + "-label", aName + "-description", aItems);
 }
 
@@ -377,17 +368,15 @@ function appendInsecureChip(aParent, aUrl, aRefused) {
   let chip = document.createElementNS(HTML_NS, "span");
   chip.className = "insecure-chip";
   chip.appendChild(document.createTextNode(aRefused
-      ? installString("install.insecure.refused",
-          "not encrypted: will be refused")
-      : installString("install.insecure", "not encrypted")));
+      ? installString("install.insecure.refused")
+      : installString("install.insecure")));
   aParent.appendChild(chip);
   return true;
 }
 
 /** The line a tooltip gets for an unencrypted URL. */
 function insecureTooltip() {
-  return installString("install.insecure.tooltip",
-      "Sent unencrypted, so anyone on the network could change it.");
+  return installString("install.insecure.tooltip");
 }
 
 /** "From: <url>" under the description: where the script comes from. */
@@ -397,7 +386,7 @@ function setUpSource(aUrl) {
   }
   let source = document.getElementById("script-source");
   source.appendChild(document.createTextNode(
-      installString("install.from", "From:") + " "));
+      installString("install.from") + " "));
   appendUrl(source, aUrl);
   source.setAttribute("tooltiptext", aUrl
       + (appendInsecureChip(source, aUrl, false)
@@ -437,14 +426,14 @@ function showIcon(aUrl) {
  * @returns {string[]} The distinct hosts the dependencies come from.
  */
 function setUpDependencies(
-    aName, aLabelKey, aLabelFallback, aDependencies, aNamed) {
+    aName, aLabelKey, aDependencies, aNamed) {
   let hosts = [];
   if (aDependencies.length == 0) {
     return hosts;
   }
   document.getElementById(aName).style.display = "block";
   document.getElementById(aName + "-label").setAttribute("value",
-      installString(aLabelKey, aLabelFallback));
+      installString(aLabelKey));
   let refuseInsecure = new GM_PrefManager()
       .getValue("requireSecureDependencies", false);
   let list = document.getElementById(aName + "-list");
@@ -465,9 +454,7 @@ function setUpDependencies(
     let tooltip = dependency.downloadURL
         + (insecure ? "\n" + insecureTooltip() : "")
         + (integrity
-            ? "\n" + installString("install.integrity.pinned",
-                "Checked against its pinned %1 hash.")
-                .replace("%1", integrity.algo)
+            ? "\n" + installString("install.integrity.pinned", [integrity.algo])
             : "");
     line.setAttribute("tooltiptext", tooltip);
     let status = document.createElementNS(HTML_NS, "span");
@@ -502,8 +489,7 @@ function setUpRequiresSummary(aHosts) {
   summary.hidden = (others.length == 0);
   if (others.length) {
     summary.appendChild(document.createTextNode(installString(
-        "install.requires.otherSites", "From other sites: %1")
-        .replace("%1", others.join(", "))));
+        "install.requires.otherSites", [others.join(", ")])));
   }
 }
 
@@ -533,7 +519,7 @@ function updateLabel(aOkAllowed) {
   }
 
   if (gInstallQueued) {
-    gAcceptButton.label = installString("install.installing", "Installing…");
+    gAcceptButton.label = installString("install.installing");
   } else if (gCurrentDelay > 0) {
     gAcceptButton.focus();
     gAcceptButton.label = gAcceptButton.baseLabel + " (" + gCurrentDelay + ")";

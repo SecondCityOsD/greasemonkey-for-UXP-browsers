@@ -96,6 +96,16 @@ const PR_WRONLY = 0x02;
 const PR_CREATE_FILE = 0x08;
 const PR_TRUNCATE = 0x20;
 
+let bundle;
+
+function localizedMsg(msgName, Params) {
+  if (!bundle)
+    bundle = GM_CONSTANTS.localeStringBundle.createBundle(GM_CONSTANTS.localeGmAddonsProperties);
+  if (Params)
+    return bundle.formatStringFromName(msgName, Params, Params.length);
+  return bundle.GetStringFromName(msgName);
+}
+
 
 /**
  * Exports all installed user scripts into a ZIP archive.
@@ -145,7 +155,7 @@ function GM_BackupExport(aDestFile, aIncludeValues, aCallback) {
 
       // Skip scripts whose source file is missing on disk.
       if (!script.fileExists(script.file)) {
-        errors.push(script.id + ": source file missing, skipped");
+        errors.push(localizedMsg("backup.noSource", [script.id]));
         continue;
       }
 
@@ -235,8 +245,7 @@ function GM_BackupExport(aDestFile, aIncludeValues, aCallback) {
       if (ok) {
         aCallback(true, exportedCount, errMsg);
       } else {
-        aCallback(false, exportedCount,
-            "compression failed: 0x" + (aStatus >>> 0).toString(16));
+        aCallback(false, exportedCount, localizedMsg("backup.compression", [(aStatus >>> 0).toString(16)]));
       }
       return undefined;
     },
@@ -346,7 +355,7 @@ function GM_BackupImport(aSrcFile, aOptions, aCallback) {
       toInstall.push(all[i]);
     } else {
       result.skipped++;
-      result.errors.push(all[i] + ": no source in archive");
+      result.errors.push(localizedMsg("backup.import.notArchived", [all[i]]));
     }
   }
 
@@ -379,7 +388,7 @@ function GM_BackupImport(aSrcFile, aOptions, aCallback) {
       return;
     }
     _cleanupDir(depDir);
-    aCallback(false, result, "No user scripts found in archive.");
+    aCallback(false, result, localizedMsg("backup.import.nothing"));
     return;
   }
 
@@ -390,7 +399,7 @@ function GM_BackupImport(aSrcFile, aOptions, aCallback) {
       result.snapshotPath = _writeSnapshot();
     } catch (e) {
       GM_util.logError("Backup import: snapshot failed: " + e, false);
-      result.errors.push("safety snapshot failed: " + e);
+      result.errors.push(localizedMsg("backup.import.noSnapshot", [e]));
     }
   }
 
@@ -583,7 +592,7 @@ function GM_BackupPreview(aSrcFile) {
     try {
       let s = parse(entry.source, installUri);
       if (!s || !s._name) {
-        row.error = "no usable script name";
+        row.error = localizedMsg("backup.import.noName");
       } else {
         row.name = (s.localized && s.localized.name) || s._name;
         row.namespace = s._namespace || "";
@@ -866,7 +875,7 @@ function _readZipContents(aSrcFile, aExtractDir) {
         // Unreadable entry record — let the read below throw if it must.
       }
       if (realSize > MAX_ENTRY_BYTES) {
-        skipped.push(name + ": entry too large (" + realSize + " bytes)");
+        skipped.push(localizedMsg("backup.import.bomb", [name, realSize]));
         continue;
       }
       if (name.indexOf(DEPS_INFIX) !== -1) {
@@ -991,9 +1000,7 @@ function _installNext(aIdx, aKeys, aScripts, aDepFiles, aOpts, aResult, aDone) {
           actual = null;
         }
         if (actual !== dep.sha256) {
-          aResult.errors.push(
-              key + ": dependency " + (dep.name || dep.url)
-              + " failed integrity check; re-downloading");
+          aResult.errors.push(localizedMsg("backup.import.brokenDep", [key, dep.name || dep.url]));
           continue;
         }
       }
@@ -1033,13 +1040,13 @@ function _installNext(aIdx, aKeys, aScripts, aDepFiles, aOpts, aResult, aDone) {
     parsedScript = parse(source, installUri);
   } catch (e) {
     aResult.skipped++;
-    aResult.errors.push(key + ": parse failed - " + e);
+    aResult.errors.push(localizedMsg("backup.import.trash", [key, e]));
     next();
     return;
   }
   if (!parsedScript || !parsedScript._name) {
     aResult.skipped++;
-    aResult.errors.push(key + ": parse produced no usable script");
+    aResult.errors.push(localizedMsg("backup.import.notScript", [key]));
     next();
     return;
   }
@@ -1051,8 +1058,7 @@ function _installNext(aIdx, aKeys, aScripts, aDepFiles, aOpts, aResult, aDone) {
   // pipeline: report and skip.
   if (parsedScript.parseErrors && parsedScript.parseErrors.length) {
     aResult.skipped++;
-    aResult.errors.push(
-        key + ": parse errors - " + parsedScript.parseErrors.join("; "));
+    aResult.errors.push(localizedMsg("backup.import.parseErrors", [key, parsedScript.parseErrors.join("; ")]));
     next();
     return;
   }
@@ -1067,7 +1073,7 @@ function _installNext(aIdx, aKeys, aScripts, aDepFiles, aOpts, aResult, aDone) {
   if (config.installIsUpdate(parsedScript)
       && !(aOpts && aOpts.overwrite)) {
     aResult.skipped++;
-    aResult.errors.push(key + ": already installed (overwrite is off)");
+    aResult.errors.push(localizedMsg("backup.import.wasInstalled", [key]));
     next();
     return;
   }
@@ -1083,7 +1089,7 @@ function _installNext(aIdx, aKeys, aScripts, aDepFiles, aOpts, aResult, aDone) {
     tempFile = GM_util.getTempFile(remoteScript._tempDir, tempFileName);
   } catch (e) {
     aResult.skipped++;
-    aResult.errors.push(key + ": setup failed - " + e);
+    aResult.errors.push(localizedMsg("backup.import.setupFailed", [key, e]));
     next();
     return;
   }
@@ -1094,7 +1100,7 @@ function _installNext(aIdx, aKeys, aScripts, aDepFiles, aOpts, aResult, aDone) {
       // sequential chain: next() never ran and the completion callback
       // never fired (silent partial import).
       aResult.skipped++;
-      aResult.errors.push(key + ": temp write failed - " + aWriteErr);
+      aResult.errors.push(localizedMsg("backup.import.notWritten", [key, aWriteErr]));
       next();
       return undefined;
     }
@@ -1110,7 +1116,7 @@ function _installNext(aIdx, aKeys, aScripts, aDepFiles, aOpts, aResult, aDone) {
       remoteScript.download(function (aSuccess) {
         if (!aSuccess) {
           aResult.skipped++;
-          aResult.errors.push(key + ": dependency download failed");
+          aResult.errors.push(localizedMsg("backup.import.depDownloadFailed", [key]));
           next();
           return;
         }
@@ -1123,13 +1129,13 @@ function _installNext(aIdx, aKeys, aScripts, aDepFiles, aOpts, aResult, aDone) {
           aResult.imported++;
         } catch (e) {
           aResult.skipped++;
-          aResult.errors.push(key + ": install failed - " + e);
+          aResult.errors.push(localizedMsg("backup.import.installFailed", [key, e]));
         }
         next();
       });
     } catch (e) {
       aResult.skipped++;
-      aResult.errors.push(key + ": download setup failed - " + e);
+      aResult.errors.push(localizedMsg("backup.import.downloadSetupFailed", [key, e]));
       next();
     }
   });
@@ -1390,7 +1396,7 @@ function _applyImportedSettings(aSettings, aResult) {
       service.broadcastScriptUpdates();
     } catch (e) {
       GM_util.logError("Backup import: global excludes failed: " + e, false);
-      aResult.errors.push("global excludes restore failed: " + e);
+      aResult.errors.push(localizedMsg("exclFailed", [e]));
     }
   }
 
@@ -1410,7 +1416,7 @@ function _applyImportedSettings(aSettings, aResult) {
       } catch (e) {
         GM_util.logError(
             "Backup import: pref " + key + " failed: " + e, false);
-        aResult.errors.push("setting " + key + " restore failed: " + e);
+        aResult.errors.push(localizedMsg("backup.import.settingFailed", [key, e]));
       }
     }
   }
@@ -1442,7 +1448,7 @@ function _writeSnapshot() {
 
   GM_BackupExport(file, /* includeValues */ true, function () {});
   if (!file.exists()) {
-    throw new Error("snapshot was not written: " + file.path);
+    throw new Error(localizedMsg("backup.import.snapshotNotWritten", [file.path]));
   }
 
   _pruneSnapshots(dir);

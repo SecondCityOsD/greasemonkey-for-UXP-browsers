@@ -156,22 +156,21 @@ function integrityFromUri(aUri) {
 }
 
 /**
- * Returns a string from greasemonkey.properties, or aFallback (English)
- * for a key the locale doesn't have yet.  New strings ship in English
- * first and reach the other locales in one pass per release.
+ * Returns a string from greasemonkey.properties.
  *
  * @param {string} aName     - String bundle key.
- * @param {string} aFallback - English text used when the key is missing.
+ * @param {array} Params     - Values for string's placeholders (optional).
  * @returns {string}
  */
-function localizedString(aName, aFallback) {
-  try {
+function localizedString(aName, Params) {
+  if (Params)
     return GM_CONSTANTS.localeStringBundle.createBundle(
-        GM_CONSTANTS.localeGreasemonkeyProperties)
-        .GetStringFromName(aName);
-  } catch (e) {
-    return aFallback;
-  }
+               GM_CONSTANTS.localeGreasemonkeyProperties)
+           .formatStringFromName(aName, Params, Params.length);
+
+  return GM_CONSTANTS.localeStringBundle.createBundle(
+             GM_CONSTANTS.localeGreasemonkeyProperties)
+         .GetStringFromName(aName);
 }
 
 /**
@@ -195,11 +194,10 @@ function fillPlaceholders(aTemplate, aValues) {
  * @returns {string} The parseWarnings entry for an ignored pattern.
  */
 function ignoringMatchWarning(aPattern, aError) {
-  return fillPlaceholders(
-      GM_CONSTANTS.localeStringBundle.createBundle(
-          GM_CONSTANTS.localeGreasemonkeyProperties)
-          .GetStringFromName("error.parse.ignoringMatch"),
-      [aPattern, aError.message || aError]);
+  return GM_CONSTANTS.localeStringBundle.createBundle(
+           GM_CONSTANTS.localeGreasemonkeyProperties)
+         .formatStringFromName("error.parse.ignoringMatch",
+            [aPattern, aError.message || aError], 2);
 }
 
 /**
@@ -208,10 +206,8 @@ function ignoringMatchWarning(aPattern, aError) {
  * @returns {string} The parseWarnings entry for an ignored icon line.
  */
 function ignoringIconWarning(aData, aError) {
-  return fillPlaceholders(
-      localizedString("warning.parse.ignoringIcon",
-          "Ignoring @%1 %2 because: %3"),
-      [aData.keyword, aData.value, aError.message || aError]);
+  return localizedString("warning.parse.ignoringIcon",
+             [aData.keyword, aData.value, aError.message || aError]);
 }
 
 /**
@@ -408,12 +404,9 @@ function parse(aSource, aUri, aFailWhenMissing) {
           // Otherwise this call would be twice.
           if (!aFailWhenMissing) {
             GM_util.logError(
-                "ParseScript" + " - "
-                + GM_CONSTANTS.localeStringBundle.createBundle(
-                    GM_CONSTANTS.localeGreasemonkeyProperties)
-                    .GetStringFromName("error.parse.failed") + ":"
-                + "\n" + data.keyword + ' = "' + data.value + '"'
-                + "\n" + e, false,
+                "ParseScript - failed to parse:\n"
+                + data.keyword + ' = "' + data.value + '"\n' + e,
+                 false,
                 (aUri && aUri.spec) ? aUri.spec : e.fileName,
                 (aUri && aUri.spec) ? null : e.lineNumber);
           }
@@ -440,10 +433,8 @@ function parse(aSource, aUri, aFailWhenMissing) {
               && !checkUrls(aUri, reqUri)) {
             throw GM_CONSTANTS.localeStringBundle.createBundle(
                 GM_CONSTANTS.localeGreasemonkeyProperties)
-                .GetStringFromName(
-                    "error.parse.fileDependencyUrlIsDescendantOfDownloadUrl")
-                .replace("%1", reqUri.spec)
-                .replace("%2", aUri.spec);
+                .formatStringFromName(
+                    "error.parse.fileDependencyUrlIsDescendantOfDownloadUrl", [reqUri.spec, aUri.spec], 2);
           }
           let scriptRequire = new ScriptRequire(script);
           if (!reqUri || !reqUri.spec) {
@@ -458,20 +449,16 @@ function parse(aSource, aUri, aFailWhenMissing) {
           // Otherwise this call would be twice.
           if (!aFailWhenMissing) {
             GM_util.logError(
-                "ParseScript" + " - "
-                + GM_CONSTANTS.localeStringBundle.createBundle(
-                    GM_CONSTANTS.localeGreasemonkeyProperties)
-                    .GetStringFromName("error.parse.failed") + ":"
-                + "\n" + data.keyword + ' = "' + data.value + '"'
-                + "\n" + e, false,
+                "ParseScript - failed to parse:\n"
+                + data.keyword + ' = "' + data.value + '"\n' + e,
+                false,
                 (aUri && aUri.spec) ? aUri.spec : e.fileName,
                 (aUri && aUri.spec) ? null : e.lineNumber);
           }
           script.parseErrors.push(
               GM_CONSTANTS.localeStringBundle.createBundle(
                   GM_CONSTANTS.localeGreasemonkeyProperties)
-                  .GetStringFromName("error.parse.requireFailed")
-                  .replace("%1", data.value)
+                  .formatStringFromName("error.parse.requireFailed", [data.value], 1)
               );
         }
         break;
@@ -484,8 +471,7 @@ function parse(aSource, aUri, aFailWhenMissing) {
           script.parseErrors.push(
               GM_CONSTANTS.localeStringBundle.createBundle(
                   GM_CONSTANTS.localeGreasemonkeyProperties)
-                  .GetStringFromName("error.parse.resourceDuplicate")
-                  .replace("%1", name));
+                  .formatStringFromName("error.parse.resourceDuplicate", [name], 1));
           break;
         }
         resourceNames[name] = true;
@@ -496,10 +482,8 @@ function parse(aSource, aUri, aFailWhenMissing) {
               && !checkUrls(aUri, resUri)) {
             throw GM_CONSTANTS.localeStringBundle.createBundle(
                 GM_CONSTANTS.localeGreasemonkeyProperties)
-                .GetStringFromName(
-                    "error.parse.fileDependencyUrlIsDescendantOfDownloadUrl")
-                .replace("%1", resUri.spec)
-                .replace("%2", aUri.spec);
+                .formatStringFromName(
+                    "error.parse.fileDependencyUrlIsDescendantOfDownloadUrl", [resUri.spec, aUri.spec], 2);
           }
           let scriptResource = new ScriptResource(script);
           scriptResource._name = name;
@@ -515,21 +499,17 @@ function parse(aSource, aUri, aFailWhenMissing) {
           // Otherwise this call would be twice.
           if (!aFailWhenMissing) {
             GM_util.logError(
-                "ParseScript" + " - "
-                + GM_CONSTANTS.localeStringBundle.createBundle(
-                    GM_CONSTANTS.localeGreasemonkeyProperties)
-                    .GetStringFromName("error.parse.failed") + ":"
-                + "\n" + data.keyword + ' = "' + name + " " + url + '"'
-                + "\n" + e, false,
+                "ParseScript - failed to parse:\n"
+                + data.keyword + ' = "' + name + " " + url + '"' + "\n" + e,
+                false,
                 (aUri && aUri.spec) ? aUri.spec : e.fileName,
                 (aUri && aUri.spec) ? null : e.lineNumber);
           }
           script.parseErrors.push(
               GM_CONSTANTS.localeStringBundle.createBundle(
                   GM_CONSTANTS.localeGreasemonkeyProperties)
-                  .GetStringFromName("error.parse.resourceFailed")
-                  .replace("%1", name).replace("%2", url)
-              );
+                  .formatStringFromName("error.parse.resourceFailed", [name, url], 2)
+          );
         }
 
         break;
@@ -552,9 +532,7 @@ function parse(aSource, aUri, aFailWhenMissing) {
   setDefaults(script, ignoredMatch);
   if (ignoredMatch
       && (script._includes.length == 0) && (script._matches.length == 0)) {
-    script.parseWarnings.push(localizedString("warning.parse.noRulesLeft",
-        "None of this script's @match patterns could be used, so it won't"
-        + " run on any page.  You can add your own @match in its Options."));
+    script.parseWarnings.push(localizedString("warning.parse.noRulesLeft"));
   }
   return script;
 }

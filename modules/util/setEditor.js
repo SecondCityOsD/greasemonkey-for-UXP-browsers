@@ -55,7 +55,7 @@ function setEditor(aScratchpad) {
     if (GM_util.getEnvironment().osWindows) {
       filePicker.appendFilter("*.cmd", "*.cmd");
     }
-    
+
     let editor = GM_util.getEditor();
     if (editor) {
       filePicker.defaultString = editor.leafName;
@@ -71,7 +71,7 @@ function setEditor(aScratchpad) {
       GM_prefRoot.setValue("editor", filePicker.file.path);
       return true;
     } else {
-      GM_util.prompt.alert0(
+      GM_util.prompt.alert(null,
           GM_CONSTANTS.localeStringBundle.createBundle(
               GM_CONSTANTS.localeGmBrowserProperties)
               .GetStringFromName("editor.pleasePickExecutable"));

@@ -134,10 +134,7 @@ GM_PrefManager.prototype.setValue = function (aPrefName, aValue) {
   }
 
   if (!goodType) {
-    throw new Error(
-        GM_CONSTANTS.localeStringBundle.createBundle(
-            GM_CONSTANTS.localeGreasemonkeyProperties)
-            .GetStringFromName("error.setValue.unsupportedType"));
+    throw new Error("Unsupported type for GM_setValue(). Supported types are: string, bool, and 32 bit integers.");
   }
 
   // Underlying preferences object throws an exception if new pref has

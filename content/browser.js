@@ -361,7 +361,7 @@ GM_BrowserUI.viewContextItemClicked = function () {
       if (aSuccess) {
         rs.showSource(gBrowser);
       } else {
-        GM_util.prompt.alert0(rs.errorMessage);
+        GM_util.prompt.alert(window, rs.errorMessage);
       }
     });
   });
@@ -665,8 +665,7 @@ function GM_showTooltip(aEvent) {
     versionElm.setAttribute("value",
         GM_CONSTANTS.localeStringBundle.createBundle(
             GM_CONSTANTS.localeGmBrowserProperties)
-            .GetStringFromName("tooltip.greasemonkeyVersion")
-            .replace("%1", gGreasemonkeyVersion)
+            .formatStringFromName("tooltip.greasemonkeyVersion", [gGreasemonkeyVersion], 1)
     );
 
     let enabled = GM_util.getEnabled();
@@ -697,8 +696,7 @@ function GM_showTooltip(aEvent) {
       totalElm.setAttribute("value",
           GM_CONSTANTS.localeStringBundle.createBundle(
               GM_CONSTANTS.localeGmBrowserProperties)
-              .GetStringFromName("tooltip.total")
-              .replace("%1", total)
+              .formatStringFromName("tooltip.total", [total], 1)
       );
 
       var runsOnTopEnable = 0;
@@ -735,8 +733,7 @@ function GM_showTooltip(aEvent) {
       activeFramesElm.setAttribute("value",
           GM_CONSTANTS.localeStringBundle.createBundle(
               GM_CONSTANTS.localeGmBrowserProperties)
-              .GetStringFromName("tooltip.activeFrames")
-              .replace("%1", activeFrames)
+              .formatStringFromName("tooltip.activeFrames", [activeFrames], 1)
       );
       let activeTop = runsOnTopEnable + "/" + runsOnTop.length;
       let activeTopElm = aEvent.target
@@ -744,8 +741,7 @@ function GM_showTooltip(aEvent) {
       activeTopElm.setAttribute("value",
           GM_CONSTANTS.localeStringBundle.createBundle(
               GM_CONSTANTS.localeGmBrowserProperties)
-              .GetStringFromName("tooltip.activeTop")
-              .replace("%1", activeTop)
+              .formatStringFromName("tooltip.activeTop", [activeTop], 1)
       );
     } else {
       aEvent.target.classList.remove("greasemonkey-tooltip-isActive");

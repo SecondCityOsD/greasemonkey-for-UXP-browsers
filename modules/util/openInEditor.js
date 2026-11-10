@@ -53,17 +53,9 @@ function openInEditor(aScript) {
       // No built-in editor (Scratchpad/DevTools unavailable on this build) and
       // none configured.  Explain before throwing the user into a bare file
       // picker, then let them choose a local text editor.
-      let msg;
-      try {
-        msg = GM_CONSTANTS.localeStringBundle.createBundle(
-            GM_CONSTANTS.localeGmBrowserProperties)
-            .GetStringFromName("editor.noBuiltInChoose");
-      } catch (e2) {
-        msg = "This browser has no built-in script editor available. Please "
-            + "choose a local text editor (for example Notepad, or a code "
-            + "editor such as VS Code) to open user scripts with.";
-      }
-      GM_util.prompt.alert0(msg);
+      GM_util.prompt.alert(null,
+        GM_CONSTANTS.localeStringBundle.createBundle(GM_CONSTANTS.localeGmBrowserProperties)
+        .GetStringFromName("editor.noBuiltInChoose"));
       if (GM_util.setEditor(0)) {
         openInEditor(aScript);
       }
@@ -89,10 +81,10 @@ function openInEditor(aScript) {
   } catch (e) {
     // Something may be wrong with the editor the user selected.
     // Remove so that next time they can pick a different one.
-    GM_util.prompt.alert0(GM_CONSTANTS.localeStringBundle.createBundle(
+    GM_util.prompt.alert(null,
+      GM_CONSTANTS.localeStringBundle.createBundle(
         GM_CONSTANTS.localeGmBrowserProperties)
-        .GetStringFromName("editor.couldNotLaunch")
-        + "\n" + e);
+      .formatStringFromName("editor.couldNotLaunch", [e], 1));
     GM_prefRoot.remove("editor");
     throw e;
   }

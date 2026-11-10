@@ -25,7 +25,7 @@ Cu.import("chrome://greasemonkey-modules/content/util.js");
 
 const SCRIPTABLE_INPUT_STREAM = Cc["@mozilla.org/scriptableinputstream;1"]
     .getService(Ci.nsIScriptableInputStream);
-const SCRIPTABLE_UNICODE_CONVERTER = 
+const SCRIPTABLE_UNICODE_CONVERTER =
     Cc["@mozilla.org/intl/scriptableunicodeconverter"]
     .createInstance(Ci.nsIScriptableUnicodeConverter);
 
@@ -40,10 +40,8 @@ const SCRIPTABLE_UNICODE_CONVERTER =
 function getContents(aFile, aCharset, aFatal) {
   if (!aFile.isFile()) {
     throw new Error(
-        "getContents - "
-        + GM_CONSTANTS.info.scriptHandler + " "
-        + "tried to get contents of non-file:"
-        + "\n" + aFile.path);
+        GM_CONSTANTS.localeStringBundle.createBundle(GM_CONSTANTS.localeGreasemonkeyProperties)
+        .formatStringFromName("error.nonFile", ["getContents", GM_CONSTANTS.info.scriptHandler, aFile.path], 3));
   }
   SCRIPTABLE_UNICODE_CONVERTER.charset = aCharset
       || GM_CONSTANTS.fileScriptCharset;

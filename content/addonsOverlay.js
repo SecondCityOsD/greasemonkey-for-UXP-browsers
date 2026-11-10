@@ -400,7 +400,7 @@ function init() {
         let hasLocalEdits = script
             && (script._modifiedTime > script._installTime);
         if (hasLocalEdits) {
-          let result = GM_util.prompt.confirm0(
+          let result = GM_util.prompt.confirm(window,
               GM_CONSTANTS.localeStringBundle.createBundle(
                     GM_CONSTANTS.localeGmAddonsProperties)
                     .GetStringFromName("confirmForceUpdate"));
@@ -424,7 +424,7 @@ function init() {
   gViewController.commands.cmd_userscript_forcedFindItemUpdates = {
       "isEnabled": addonUpdateCanBeForced,
       "doCommand": function (aAddon) {
-        let result = GM_util.prompt.confirm0(
+        let result = GM_util.prompt.confirm(window,
             GM_CONSTANTS.localeStringBundle.createBundle(
                   GM_CONSTANTS.localeGmAddonsProperties)
                   .GetStringFromName("confirmForceUpdate"));
@@ -480,18 +480,8 @@ function init() {
         let n = orphans.length;
         let bundle = GM_CONSTANTS.localeStringBundle.createBundle(
             GM_CONSTANTS.localeGmAddonsProperties);
-        let label, tip;
-        try {
-          label = bundle.GetStringFromName("recoverOrphans.label")
-              .replace("#1", n);
-          tip = bundle.GetStringFromName("recoverOrphans.tooltip");
-        } catch (eL10n) {
-          label = "Recover " + n + " orphan(s)...";
-          tip = "Reinstall script directories that exist in gm_scripts/"
-              + " but have no entry in config.xml";
-        }
-        recoverLink.setAttribute("value", label);
-        recoverLink.setAttribute("tooltiptext", tip);
+        recoverLink.setAttribute("value", bundle.formatStringFromName("recoverOrphans.label", [n], 1));
+        recoverLink.setAttribute("tooltiptext", bundle.GetStringFromName("recoverOrphans.tooltip"));
         recoverLink.hidden = false;
       } else {
         // Defensive: a prior pane open may have unhidden the link;
@@ -911,7 +901,7 @@ function GM_installFromUrlGo() {
   if (!valid) {
     let bundle = GM_CONSTANTS.localeStringBundle.createBundle(
         GM_CONSTANTS.localeGreasemonkeyProperties);
-    GM_util.prompt.alert0(bundle.GetStringFromName("error.invalidUrl").replace("%1", url));
+    GM_util.prompt.alert(window, bundle.formatStringFromName("error.invalidUrl", [url], 1));
     return;
   }
   if (panel) {
@@ -1080,20 +1070,17 @@ function GM_backupExport() {
       function (aSuccess, aCount, aErr) {
     let bundle = GM_backup_stringBundle();
     if (aSuccess) {
-      let msg = bundle.GetStringFromName("backup.exported")
-          .replace("%1", aCount)
-          .replace("%2", fp.file.path);
+      let msg = bundle.formatStringFromName("backup.exported", [aCount, fp.file.path], 2);
       // Per-script export problems (missing source file, zip entry
       // failures) used to be swallowed here — the user saw a clean
       // success dialog for an incomplete backup.
       if (aErr) {
         msg += "\n\n" + aErr.split("; ").join("\n");
       }
-      GM_util.prompt.alert0(msg);
+      GM_util.prompt.alert(window, msg);
     } else {
-      let msg = bundle.GetStringFromName("backup.failed")
-          .replace("%1", aErr || "");
-      GM_util.prompt.alert0(msg);
+      let msg = bundle.formatStringFromName("backup.failed", [aErr || ""], 1);
+      GM_util.prompt.alert(window, msg);
     }
   });
 }
@@ -1132,16 +1119,14 @@ function GM_backupImport() {
       function (aSuccess, aResult, aErr) {
     let bundle = GM_backup_stringBundle();
     if (!aSuccess) {
-      GM_util.prompt.alert0(bundle.GetStringFromName("backup.failed").replace("%1", aErr || ""));
+      GM_util.prompt.alert(window, bundle.formatStringFromName("backup.failed", [aErr || ""], 1));
       return;
     }
-    let msg = bundle.GetStringFromName("backup.imported")
-        .replace("%1", aResult.imported)
-        .replace("%2", aResult.skipped);
+    let msg = bundle.formatStringFromName("backup.imported", [aResult.imported, aResult.skipped], 2);
     if (aResult.errors && aResult.errors.length) {
       msg += "\n\n" + aResult.errors.join("\n");
     }
-    GM_util.prompt.alert0(msg);
+    GM_util.prompt.alert(window, msg);
   });
 }
 
@@ -1174,24 +1159,13 @@ function GM_backupImport() {
 function GM_recoverOrphans() {
   let config = GM_util.getService().config;
   let orphans = config.getOrphans ? config.getOrphans() : [];
+  let bundle = GM_CONSTANTS.localeStringBundle.createBundle(GM_CONSTANTS.localeGmAddonsProperties);
   if (orphans.length == 0) {
-    GM_util.prompt.alert0("No orphaned scripts to recover.");
+    GM_util.prompt.alert(window, bundle.GetStringFromName("recoverOrphans.noOrphans"));
     return;
   }
 
-  let proceed = GM_util.prompt.confirm0(
-      "Found " + orphans.length + " orphaned script director"
-      + (orphans.length == 1 ? "y" : "ies")
-      + " under <profile>/gm_scripts/.\n\n"
-      + "Reinstalling will:\n"
-      + "  • Register each script anew in config.xml.\n"
-      + "  • Create a fresh GM_setValue storage for each.\n"
-      + "  • Permanently delete the original folder and its"
-      + "\n    associated <basedir>.db storage file.\n\n"
-      + "GM_setValue data is NOT migrated.  If a script's stored"
-      + "\nvalues matter to you, back them up before proceeding.\n\n"
-      + "Proceed?");
-  if (!proceed) {
+  if (!GM_util.prompt.confirm(window, bundle.formatStringFromName("recoverOrphans.confirmReinstall", [orphans.length], 1))) {
     return;
   }
 
@@ -1200,7 +1174,7 @@ function GM_recoverOrphans() {
   // simple property reference grabs the bound implementation.
   let installScriptFromSource = GM_util.installScriptFromSource;
   if (typeof installScriptFromSource !== "function") {
-    GM_util.prompt.alert0("Internal error: installScriptFromSource is unavailable.");
+    GM_util.prompt.alert(window, bundle.GetStringFromName("noInstallFunc"));
     return;
   }
 
@@ -1211,13 +1185,11 @@ function GM_recoverOrphans() {
 
   function next(i) {
     if (i >= orphans.length) {
-      let msg = "Orphan recovery complete.\n"
-          + "  Recovered: " + recovered + "\n"
-          + "  Failed: " + failed;
+      let msg = bundle.formatStringFromName("recoverOrphans.result", [recovered, failed], 2);
       if (errors.length > 0) {
-        msg += "\n\nErrors:\n" + errors.join("\n");
+        msg += bundle.formatStringFromName("recoverOrphans.errors", [errors.join("\n")], 1);
       }
-      GM_util.prompt.alert0(msg);
+      GM_util.prompt.alert(window, msg);
       // Re-scan now that every recovered directory has been renamed to
       // ".recovered" (which the scanner skips).  Without this, the
       // in-memory orphan list would still hold the original entries
@@ -1246,13 +1218,13 @@ function GM_recoverOrphans() {
       source = GM_util.getContents(orphan.userJsFile);
     } catch (e) {
       failed++;
-      errors.push(orphan.basedir + ": couldn't read .user.js: " + e);
+      errors.push(bundle.formatStringFromName("recoverOrphans.cantRead", [orphan.basedir, e], 2));
       next(i + 1);
       return;
     }
     if (!source) {
       failed++;
-      errors.push(orphan.basedir + ": .user.js was empty");
+      errors.push(bundle.formatStringFromName("recoverOrphans.emptyFile", [orphan.basedir], 1));
       next(i + 1);
       return;
     }

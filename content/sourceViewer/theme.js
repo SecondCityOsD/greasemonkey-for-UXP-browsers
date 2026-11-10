@@ -45,8 +45,7 @@ var SvTheme = {
    * Applies the saved mode, labels the toolbar buttons and starts following
    * the pref (and, in auto mode, the browser's theme).
    * @param {Element} aBody - Receives the theme-light / theme-dark class.
-   * @param {function(string, string): string} aString - Localised string
-   *        lookup with an English fallback.
+   * @param {string} aString - Localised string.
    * @returns {void}
    */
   "init": function (aBody, aString) {
@@ -184,13 +183,12 @@ var SvTheme = {
 
   "_setUpButtons": function (aString) {
     let text = {
-      "auto": [aString("sourceViewer.theme.auto", "Auto"),
-          aString("sourceViewer.theme.auto.tooltip",
-              "Follow the browser's toolbars")],
-      "light": [aString("sourceViewer.theme.light", "Light"),
-          aString("sourceViewer.theme.light.tooltip", "Always light")],
-      "dark": [aString("sourceViewer.theme.dark", "Dark"),
-          aString("sourceViewer.theme.dark.tooltip", "Always dark")],
+      "auto": [aString("sourceViewer.theme.auto"),
+          aString("sourceViewer.theme.auto.tooltip")],
+      "light": [aString("sourceViewer.theme.light"),
+          aString("sourceViewer.theme.light.tooltip")],
+      "dark": [aString("sourceViewer.theme.dark"),
+          aString("sourceViewer.theme.dark.tooltip")],
     };
     let buttons = this._buttons();
     for (let i = 0, iLen = buttons.length; i < iLen; i++) {

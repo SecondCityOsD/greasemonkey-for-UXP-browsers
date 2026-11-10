@@ -237,7 +237,7 @@ Config.prototype.installIsUpdate = function (aScript) {
 
 Config.prototype._find = function (aScript) {
   for (let i = 0, iLen = this._scripts.length; i < iLen; i++) {
-    let script = this._scripts[i]; 
+    let script = this._scripts[i];
     if (script.id == aScript.id) {
       return i;
     }
@@ -302,9 +302,7 @@ Config.prototype._load = function () {
       // Orphans UI, separate commit).
       let _info = GM_CONSTANTS.localeStringBundle.createBundle(
           GM_CONSTANTS.localeGreasemonkeyProperties)
-          .GetStringFromName("error.scriptIsNotComplete")
-          .replace("%1", script.name)
-          .replace("%2", _allFilesExist);
+          .formatStringFromName("error.scriptIsNotComplete", [script.name, _allFilesExist], 2);
       GM_util.logError(_info, false, script.fileURL, null);
       script.markBroken(_allFilesExist);
       this._scripts.push(script);

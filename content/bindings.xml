@@ -103,10 +103,10 @@
               match = new MatchPattern(aPage);
               _result = this._consolidatePageCommand(aPage, aWhat);
             } catch (e) {
-              GM_util.prompt.alert0(GM_CONSTANTS.localeStringBundle.createBundle(
-                  GM_CONSTANTS.localeGreasemonkeyProperties)
-                  .GetStringFromName("error.parse.ignoringMatch")
-                  .replace("%1", aPage).replace("%2", e));
+              GM_util.prompt.alert(window,
+	          GM_CONSTANTS.localeStringBundle.createBundle(
+                    GM_CONSTANTS.localeGreasemonkeyProperties)
+                  .formatStringFromName("error.parse.ignoringMatch", [aPage, e], 2));
               _result = false;
             }
           } else {
@@ -140,7 +140,7 @@
 
       <method name="_onAddPage">
         <body>
-          let page = GM_util.prompt.prompt0(
+          let page = GM_util.prompt.prompt(window,
               "&promptForNewPage.msg;",
               "&promptForNewPage.defVal;",
               "&promptForNewPage.title;");
@@ -175,7 +175,7 @@
       <method name="_onEditPage">
         <body>
           let _currentIndex = this._box.currentIndex;
-          let page = GM_util.prompt.prompt0(
+          let page = GM_util.prompt.prompt(window,
               "&promptForEdit.msg;",
               this._pages[_currentIndex],
               "&promptForEdit.title;");

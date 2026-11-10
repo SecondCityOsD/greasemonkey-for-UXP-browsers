@@ -654,10 +654,8 @@ Object.defineProperty(Script.prototype, "matches", {
         match_MatchPattern = new MatchPattern(match);
         matches_MatchPattern.push(match_MatchPattern);
       } catch (e) {
-        GM_util.logError(GM_CONSTANTS.localeStringBundle.createBundle(
-            GM_CONSTANTS.localeGreasemonkeyProperties)
-            .GetStringFromName("error.parse.ignoringMatch")
-            .replace("%1", match).replace("%2", e), false,
+        GM_util.logError(
+            "Ignoring @match pattern " + match + " because: " + e, false,
             e.fileName, e.lineNumber);
       }
     }
@@ -865,10 +863,8 @@ Object.defineProperty(Script.prototype, "userMatches", {
         match_MatchPattern = new MatchPattern(match);
         matches_MatchPattern.push(match_MatchPattern);
       } catch (e) {
-        GM_util.logError(GM_CONSTANTS.localeStringBundle.createBundle(
-            GM_CONSTANTS.localeGreasemonkeyProperties)
-            .GetStringFromName("error.parse.ignoringMatch")
-            .replace("%1", match).replace("%2", e), false,
+        GM_util.logError(
+            "Ignoring @match pattern " + match + " because: " + e, false,
             e.fileName, e.lineNumber);
       }
     }
@@ -1617,11 +1613,10 @@ Script.prototype.updateFromNewScript = function (
       this._namespace = newScript._namespace;
     } else {
       // Notify the user of the conflict.
-      GM_util.prompt.alert0(GM_CONSTANTS.localeStringBundle.createBundle(
+      GM_util.prompt.alert(null,
+        GM_CONSTANTS.localeStringBundle.createBundle(
           GM_CONSTANTS.localeGreasemonkeyProperties)
-          .GetStringFromName("error.script.duplicateInstalled")
-          .replace("%1", newScript._name)
-          .replace("%2", newScript._namespace));
+        .formatStringFromName("error.script.duplicateInstalled", [newScript._name, newScript._namespace], 2));
       return undefined;
     }
   }
@@ -1665,7 +1660,7 @@ Script.prototype.updateFromNewScript = function (
     // Store window references for late injection.
     if (this._runAt == "document-start") {
       GM_util.logError(
-          '"' + this.localized.name + '" - ID: ' + this.id
+          '"' + this.name + '" - ID: ' + this.id
           + "\n" + "Not running at document-start; waiting for update...",
           true);
       this.pendingExec.push("document-start update");
@@ -1704,11 +1699,7 @@ Script.prototype.updateFromNewScript = function (
             // Bugs like an empty file name can cause "dep.file" to point
             // to the containing directory.
             // Don't remove that.
-            GM_util.logError(
-                '"' + this.localized.name + '"' + "\n" +
-                GM_CONSTANTS.localeStringBundle.createBundle(
-                GM_CONSTANTS.localeGreasemonkeyProperties)
-                .GetStringFromName("error.script.noDeleteDirectory"));
+            GM_util.logError('"' + this.name + '"\nWarning! Refusing to delete script directory.');
           } else {
             dep.file.remove(false);
           }
@@ -1716,12 +1707,8 @@ Script.prototype.updateFromNewScript = function (
           // Probably a locked file.
           // Ignore, warn.
           GM_util.logError(
-              '"' + this.localized.name + '"' + "\n" +
-              GM_CONSTANTS.localeStringBundle.createBundle(
-              GM_CONSTANTS.localeGreasemonkeyProperties)
-              .GetStringFromName("error.script.deleteFailed")
-              .replace("%1", dep), false,
-              e.fileName, e.lineNumber);
+              '"' + this.name + '"\nWarning, could not delete for update:\n' + dep,
+              false, e.fileName, e.lineNumber);
         }
       }
 
@@ -1751,9 +1738,8 @@ Script.prototype.updateFromNewScript = function (
       while ((pendingExec = pendingExecAry.shift())) {
         if (pendingExec == "document-start update") {
           GM_util.logError(
-              '"' + this.localized.name + '" - ID: ' + this.id
-              + "\n" + "...script update complete "
-              + "(will run at next document-start time).",
+              '"' + this.name + '" - ID: ' + this.id
+              + "\n...script update complete (will run at next document-start time).",
               true);
           continue;
         }
@@ -2189,12 +2175,10 @@ Script.prototype.uninstall = function (aForUpdate) {
       }
     } catch (e) {
       GM_util.logError(
-          "script - Script.uninstall:" + "\n"
-          + GM_CONSTANTS.localeStringBundle.createBundle(
-              GM_CONSTANTS.localeGreasemonkeyProperties)
-              .GetStringFromName("error.script.removeFailed")
-              .replace("%1", this.file.path)
-          + "\n" + e, false,
+          "script - Script.uninstall:\n"
+          + "An uninstall script - remove failed - the path:\n"
+          + this.file.path + "\n" + e,
+          false,
           e.fileName, e.lineNumber);
     }
   } else if (this.baseDirFile.exists()) {
@@ -2203,12 +2187,10 @@ Script.prototype.uninstall = function (aForUpdate) {
       this.baseDirFile.remove(true);
     } catch (e) {
       GM_util.logError(
-          "script - Script.uninstall:" + "\n"
-          + GM_CONSTANTS.localeStringBundle.createBundle(
-              GM_CONSTANTS.localeGreasemonkeyProperties)
-              .GetStringFromName("error.script.removeFailed")
-              .replace("%1", this.baseDirFile.path)
-          + "\n" + e, false,
+          "script - Script.uninstall:\n"
+          + "An uninstall script - remove failed - the path:\n"
+          + this.baseDirFile.path + "\n" + e,
+          false,
           e.fileName, e.lineNumber);
     }
   }

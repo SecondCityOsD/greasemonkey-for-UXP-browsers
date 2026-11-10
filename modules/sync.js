@@ -168,12 +168,11 @@ ScriptStore.prototype = {
     if (aRecord.cleartext.installed) {
       let url = aRecord.cleartext.downloadURL;
       if (!url) {
-        dump("Sync - Ignoring incoming sync record with empty downloadURL."
-            + "\n");
+        dump("Sync - Ignoring incoming sync record with empty downloadURL.\n");
         return undefined;
       }
       if (!GM_util.getUriFromUrl(url)) {
-        dump("Sync - Ignoring incoming sync record with bad downloadURL:" + "\n"
+        dump("Sync - Ignoring incoming sync record with bad downloadURL:\n"
             + url + "\n");
         return undefined;
       }
@@ -230,7 +229,7 @@ ScriptStore.prototype = {
           try {
             val = JSON.parse(val);
           } catch (e) {
-            dump("Sync:" + "\n" + uneval(e) + "\n");
+            dump("Sync:\n" + uneval(e) + "\n");
             continue;
           }
           record.cleartext.values[name] = val;
@@ -286,7 +285,7 @@ ScriptStore.prototype = {
   "update": function (aRecord) {
     let script = scriptForSyncId(aRecord.cleartext.id);
     if (!script) {
-      dump("Sync - Could not find script for record:" + "\n"
+      dump("Sync - Could not find script for record:\n"
           + aRecord.cleartext + "\n");
       return undefined;
     }
@@ -303,7 +302,7 @@ ScriptStore.prototype = {
   },
 
   "wipe": function () {
-    dump(">>> Sync - ScriptStore.wipe..." + "\n");
+    dump(">>> Sync - ScriptStore.wipe...\n");
     // Delete everything!
   },
 };

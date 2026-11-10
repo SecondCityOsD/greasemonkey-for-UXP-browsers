@@ -385,8 +385,7 @@ GM_Resources.prototype._getDependency = function (
   throw new aWrappedContentWin.Error(
       GM_CONSTANTS.localeStringBundle.createBundle(
           GM_CONSTANTS.localeGreasemonkeyProperties)
-          .GetStringFromName("error.missingResource")
-          .replace("%1", aName),
+          .formatStringFromName("error.missingResource", [aName], 1),
           aFileURL, null
       );
 };

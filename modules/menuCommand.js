@@ -221,12 +221,12 @@ function MenuCommandSandbox(
           if (!commandFunc) {
             throw new Error(
                 aMenuCommandCouldNotRunErrorStr.replace(
-                    "%1", commands[detail.cookie].name),
+                    "%S", commands[detail.cookie].name),
                 aScriptFileURL, null);
           } else if (typeof commandFunc != "function") {
             throw new Error(
                 aMenuCommandCallbackIsNotFunctionErrorStr.replace(
-                    "%1", commands[detail.cookie].name),
+                    "%S", commands[detail.cookie].name),
                 aScriptFileURL, null);
           } else {
             commandFunc.call();
@@ -274,7 +274,7 @@ function MenuCommandSandbox(
     if (aAccesskey
         && ((typeof aAccesskey != "string") || (aAccesskey.length != 1))) {
       throw new Error(
-          aMenuCommandInvalidAccesskeyErrorStr.replace("%1", aCommandName),
+          aMenuCommandInvalidAccesskeyErrorStr.replace("%S", aCommandName),
           aScriptFileURL, null);
     }
 

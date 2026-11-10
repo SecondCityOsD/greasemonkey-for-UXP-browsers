@@ -72,7 +72,7 @@ function doInstall() {
   var script = scope.parse(scriptSrc);
   // ...make sure entered details will not ruin an existing file.
   if (config.installIsUpdate(script)) {
-    let overwrite = GM_util.prompt.confirm0(gBundle.getString("newScript.exists"));
+    let overwrite = GM_util.prompt.confirm(window, gBundle.getString("newScript.exists"));
     if (!overwrite) {
       return false;
     }
@@ -108,11 +108,11 @@ function getClipText() {
       clipText = str.data.substring(0, strLen.value / 2);
     }
   } catch (e) {
-    dump("getClipText" + " - "
+    dump("getClipText - "
         + GM_CONSTANTS.localeStringBundle.createBundle(
             GM_CONSTANTS.localeGreasemonkeyProperties)
-            .GetStringFromName("error.clipboard.unsupportedContent") + ":"
-        + "\n" + e + "\n");
+            .GetStringFromName("error.clipboard.unsupportedContent") + ":\n"
+        + e + "\n");
   }
 
   return clipText;
@@ -179,7 +179,7 @@ function createScriptSource() {
     replaceMultiVal("exclude");
   } catch (e) {
     if (e.name && (e.name == METADATA_VALUE_ERROR)) {
-      GM_util.prompt.alert0(e.message);
+      GM_util.prompt.alert(window, e.message);
       return false;
     } else {
       throw e;
