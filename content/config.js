@@ -387,6 +387,11 @@ Config.prototype.install = function (
     // version's.
     aScript._firstInstallTime = aOldScript.firstInstallTime;
     aScript.httpOnlyCookies = aOldScript.httpOnlyCookies;
+    // The user's own Run at / No frames / Inject into outrank the new
+    // version's metadata, as in Violentmonkey.
+    aScript._userRunAt = aOldScript._userRunAt;
+    aScript._userNoframes = aOldScript._userNoframes;
+    aScript._userInjectInto = aOldScript._userInjectInto;
 
     // Uninstall the old script.
     this.uninstall(aOldScript, true);
@@ -480,21 +485,38 @@ Config.prototype.getMatchingScripts = function (aTestFunc) {
   return this._scripts.filter(aTestFunc);
 };
 
+/**
+ * Applies local edits: re-parses every script whose file changed on disk,
+ * whatever its @run-at.  (Called once per phase before, it never saw
+ * document-body scripts, so their edits ran with stale metadata.)  A
+ * script still waiting for an earlier edit's @require files takes the page
+ * into its pendingExec list instead, to run there once they are in.
+ *
+ * @param {string}     [aUrl]      - The page being loaded, if any.
+ * @param {number}     [aWindowId] - Its window, if any.
+ * @param {XULBrowser} [aBrowser]  - Its browser, if any.
+ */
 Config.prototype.updateModifiedScripts = function (
-    aWhen, aUrl, aWindowId, aBrowser) {
-  // Find any updated scripts or scripts with delayed injection.
-  let scripts = this.getMatchingScripts(
-      function (aScript) {
-        return (aScript.runAt == aWhen)
-            && (aScript.isModified() || (aScript.pendingExec.length != 0));
-      });
+    aUrl, aWindowId, aBrowser) {
+  // isModified() records the new file time, so it runs once per script.
+  let edited = new Set();
+  let scripts = this.getMatchingScripts(function (aScript) {
+    if (aScript.isModified()) {
+      edited.add(aScript);
+      return true;
+    }
+    return aScript.pendingExec.length != 0;
+  });
   if (scripts.length == 0) {
     return undefined;
   }
 
   for (let i = 0, iLen = scripts.length; i < iLen; i++) {
     let script = scripts[i];
-    if (script.pendingExec.length == 0) {
+    // A new edit is parsed even while an earlier one's download runs:
+    // waiting for it used to leave the fix unread for good if the
+    // download failed.
+    if (edited.has(script)) {
       let scope = {};
       Cu.import("chrome://greasemonkey-modules/content/parseScript.js", scope);
       let parsedScript = scope.parse(
@@ -544,7 +566,7 @@ Config.prototype.updateModifiedScripts = function (
         GM_util.logError(message, true, script.fileURL, null);
       }
       script.updateFromNewScript(parsedScript, aUrl, aWindowId, aBrowser);
-    } else {
+    } else if (aWindowId) {
       // We are already downloading dependencies for this script
       // so add its window to the list.
       script.pendingExec.push({

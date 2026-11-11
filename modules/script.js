@@ -70,6 +70,15 @@ const UPDATE_META_STATUS_FAIL = "fail";
 // 2: 3.10 (homepageurl holds only a declared homepage; contributionurl).
 const SCRIPT_CONFIG_VERSION = 2;
 
+/** The @run-at values a script can run at. */
+const RUN_AT_REGEXP = /^document-(start|body|end|idle)$/;
+
+// pendingExec markers (see updateFromNewScript).  Its other entries are
+// the {browser, url, windowId} of pages to run the script in once its new
+// @require files are in.
+const PENDING_EXEC_DOCUMENT_START = "document-start update";
+const PENDING_EXEC_DOWNLOAD = "dependency download";
+
 /**
  * Derives the human-readable page of a script from the URL it is
  * downloaded from, for the hosts that have one; mirrors Violentmonkey's
@@ -241,6 +250,19 @@ function Script(aConfigNode) {
   // GM_cookie may touch this script's HTTP-only cookies (when the global
   // Preferences switch allows it too).  Updates keep it.
   this._httpOnlyCookies = false;
+  // The user's own Run at / No frames / Inject into from the Options
+  // window.  They outrank @run-at / @noframes / @inject-into, and updates
+  // and local edits keep them, as Violentmonkey's custom.*; null follows
+  // the script.  See the runAt / noframes / injectInto accessors.
+  this._userRunAt = null;
+  this._userNoframes = null;
+  this._userInjectInto = null;
+  // The older config.xml layout (see SCRIPT_CONFIG_VERSION) of a broken
+  // script, kept until its file is back to upgrade from; null otherwise.
+  this._pendingConfigVersion = null;
+  // The RemoteScript fetching a local edit's new @require files, while it
+  // runs (see updateFromNewScript); in memory only.
+  this._dependencyDownload = null;
   // Non-destructive "files are missing" marker.  Previously the
   // Config._load path removed the entire <Script> node from
   // config.xml when allFilesExist() returned false; the resulting
@@ -467,12 +489,19 @@ Object.defineProperty(Script.prototype, "supportURL", {
   "enumerable": true,
 });
 
+/**
+ * The context the script is injected into: the user's choice
+ * (_userInjectInto) when set, else @inject-into.  Setting it records the
+ * user's choice; choosing the script's own value goes back to following
+ * the script.
+ */
 Object.defineProperty(Script.prototype, "injectInto", {
   "get": function Script_getInjectInto() {
-    return this._injectInto || "auto";
+    return this._userInjectInto || this._injectInto || "auto";
   },
   "set": function Script_setInjectInto(aVal) {
-    this._injectInto = aVal;
+    this._userInjectInto = (aVal && (aVal != (this._injectInto || "auto")))
+        ? aVal : null;
   },
   "configurable": true,
   "enumerable": true,
@@ -707,9 +736,17 @@ Object.defineProperty(Script.prototype, "namespace", {
   "enumerable": true,
 });
 
+/**
+ * Whether the script skips child frames: the user's choice
+ * (_userNoframes) when set, else @noframes.  Setting it works as for
+ * injectInto.
+ */
 Object.defineProperty(Script.prototype, "noframes", {
   "get": function Script_getNoframes() {
-    return this._noframes;
+    return (this._userNoframes === null) ? this._noframes : this._userNoframes;
+  },
+  "set": function Script_setNoframes(aVal) {
+    this._userNoframes = (!!aVal != this._noframes) ? !!aVal : null;
   },
   "enumerable": true,
 });
@@ -786,9 +823,16 @@ Object.defineProperty(Script.prototype, "resources", {
   "enumerable": true,
 });
 
+/**
+ * When the script runs: the user's choice (_userRunAt) when set, else
+ * @run-at.  Setting it works as for injectInto.
+ */
 Object.defineProperty(Script.prototype, "runAt", {
   "get": function Script_getRunAt() {
-    return this._runAt;
+    return this._userRunAt || this._runAt;
+  },
+  "set": function Script_setRunAt(aVal) {
+    this._userRunAt = (aVal && (aVal != this._runAt)) ? aVal : null;
   },
   "enumerable": true,
 });
@@ -984,16 +1028,18 @@ Script.prototype._fromConfigNode = function (aNode) {
   // Older versions could save the string "null" (see the updateURL setter).
   this.updateURL = (updateURL != "null") ? updateURL : null;
 
-  if (!this.fileExists(this.baseDirFile)) {
-    return undefined;
-  }
-  if (!this.fileExists(this.file)) {
-    return undefined;
-  }
+  // A script whose files are missing (a partial backup restore, a
+  // downgrade) is still read in full: Config._load keeps it as "broken",
+  // saves it, and it recovers once the files are back.  Returning early
+  // here used to save it as an empty shell (no name, rules or settings,
+  // run-at "null"), which never recovered.  Only what needs the file is
+  // skipped.
+  let filesExist = this.fileExists(this.baseDirFile)
+      && this.fileExists(this.file);
 
-  if (!aNode.hasAttribute("dependhash")
+  if (filesExist && (!aNode.hasAttribute("dependhash")
       || !aNode.hasAttribute("modified")
-      || !aNode.hasAttribute("version")) {
+      || !aNode.hasAttribute("version"))) {
     let scope = {};
     Cu.import("chrome://greasemonkey-modules/content/parseScript.js", scope);
     let parsedScript = scope.parse(
@@ -1039,6 +1085,23 @@ Script.prototype._fromConfigNode = function (aNode) {
 
   this._uuid = aNode.getAttribute("uuid");
 
+  // A stored pattern this version can't parse (one a newer version saved,
+  // or one the hidden "api.@match.better" parser rejects) skips just that
+  // pattern.  Thrown out of here, it dropped the whole script from
+  // config.xml at the next save.
+  let fileURL = this.fileURL;
+  function pushPattern(aList, aText) {
+    try {
+      aList.push(new MatchPattern(aText));
+    } catch (e) {
+      GM_util.logError(GM_CONSTANTS.localeStringBundle.createBundle(
+          GM_CONSTANTS.localeGreasemonkeyProperties)
+          .GetStringFromName("error.parse.ignoringMatch")
+          .replace("%1", function () { return aText; })
+          .replace("%2", function () { return e; }), false, fileURL, null);
+    }
+  }
+
   for (let i = 0, iLen = aNode.childNodes.length; i < iLen; i++) {
     let childNode = aNode.childNodes[i];
     switch (childNode.nodeName) {
@@ -1076,10 +1139,10 @@ Script.prototype._fromConfigNode = function (aNode) {
         this._topLevelAwait = childNode.textContent == "true";
         break;
       case "ExcludeMatch":
-        this._excludeMatches.push(new MatchPattern(childNode.textContent));
+        pushPattern(this._excludeMatches, childNode.textContent);
         break;
       case "Match":
-        this._matches.push(new MatchPattern(childNode.textContent));
+        pushPattern(this._matches, childNode.textContent);
         break;
       case "Require":
         let scriptRequire = new ScriptRequire(this);
@@ -1103,12 +1166,15 @@ Script.prototype._fromConfigNode = function (aNode) {
         this._userIncludes.push(childNode.textContent);
         break;
       case "UserMatch":
-        this._userMatches.push(new MatchPattern(childNode.textContent));
+        pushPattern(this._userMatches, childNode.textContent);
         break;
     }
   }
 
-  this.checkConfig();
+  if (filesExist) {
+    // It sniffs @grant from the file.
+    this.checkConfig();
+  }
   this._description = aNode.getAttribute("description");
   this._enabled = aNode.getAttribute("enabled") == "true";
   this._name = aNode.getAttribute("name");
@@ -1125,8 +1191,16 @@ Script.prototype._fromConfigNode = function (aNode) {
   this._brokenMissingFiles = _bmf.split(/\s+/).filter(function (s) {
     return s.length > 0;
   });
-  // Legacy default.
-  this._runAt = aNode.getAttribute("runAt") || "document-end";
+  // Legacy default; "null" is what an empty shell (see above) saved.
+  this._runAt = RUN_AT_REGEXP.test(aNode.getAttribute("runAt"))
+      ? aNode.getAttribute("runAt") : "document-end";
+  // The user's own choices (see the constructor); absent = follow the
+  // script.
+  this._userRunAt = RUN_AT_REGEXP.test(aNode.getAttribute("userRunAt"))
+      ? aNode.getAttribute("userRunAt") : null;
+  this._userInjectInto = aNode.getAttribute("userInjectInto") || null;
+  this._userNoframes = aNode.hasAttribute("userNoframes")
+      ? (aNode.getAttribute("userNoframes") == "true") : null;
   this._updateMetaStatus = aNode.getAttribute("updateMetaStatus") || "unknown";
   this._userOverride = aNode.getAttribute("userOverride") == "true";
   this.author = aNode.getAttribute("author") || "";
@@ -1137,7 +1211,13 @@ Script.prototype._fromConfigNode = function (aNode) {
 
   let configVersion = parseInt(aNode.getAttribute("configVersion"), 10) || 0;
   if (configVersion < SCRIPT_CONFIG_VERSION) {
-    this._upgradeConfig(configVersion);
+    if (filesExist) {
+      this._upgradeConfig(configVersion);
+    } else {
+      // The upgrade reads the file: it runs once the file is back, so
+      // until then the old version is what gets saved.
+      this._pendingConfigVersion = configVersion;
+    }
   }
 };
 
@@ -1342,11 +1422,23 @@ Script.prototype.toConfigNode = function (aDoc) {
     }
   }
   scriptNode.setAttribute("runAt", this._runAt);
+  // The user's own choices, only when made (see the constructor).
+  if (this._userRunAt) {
+    scriptNode.setAttribute("userRunAt", this._userRunAt);
+  }
+  if (this._userNoframes !== null) {
+    scriptNode.setAttribute("userNoframes", this._userNoframes);
+  }
+  if (this._userInjectInto) {
+    scriptNode.setAttribute("userInjectInto", this._userInjectInto);
+  }
   scriptNode.setAttribute("updateMetaStatus", this._updateMetaStatus);
   scriptNode.setAttribute("userOverride", this._userOverride);
   scriptNode.setAttribute("uuid", this._uuid);
   scriptNode.setAttribute("version", this._version);
-  scriptNode.setAttribute("configVersion", SCRIPT_CONFIG_VERSION);
+  scriptNode.setAttribute("configVersion",
+      (this._pendingConfigVersion === null)
+          ? SCRIPT_CONFIG_VERSION : this._pendingConfigVersion);
   if (this._updatesDisabled) {
     scriptNode.setAttribute("updatesDisabled", "true");
   }
@@ -1691,10 +1783,16 @@ Script.prototype.updateFromNewScript = function (
   this._noframes = newScript._noframes;
   this._runAt = newScript._runAt;
   this._supportURL = newScript._supportURL;
+  this._topLevelAwait = newScript._topLevelAwait;
   this._unwrap = newScript._unwrap;
   this._version = newScript._version;
   this._updatesDisabled = newScript._updatesDisabled;
-  this.downloadURL = newScript.downloadURL;
+  // Only a URL the edit itself gives replaces the install URL.  A script
+  // installed from a file or made in New Script parses without one, and
+  // losing it broke relative @require / @resource / @icon at the next edit.
+  if (newScript.downloadURL) {
+    this.downloadURL = newScript.downloadURL;
+  }
   // The stored (declared) values, not the derived homepageURL getter.
   this._homepageURL = newScript._homepageURL;
   this._contributionURL = newScript._contributionURL;
@@ -1703,34 +1801,56 @@ Script.prototype.updateFromNewScript = function (
   this.showGrantWarning();
   this.checkConfig();
 
-  // Update the AOM.
-  this._changed("modified", oldScriptId);
-
   let dependhash = GM_util.hash(newScript._rawMeta);
-  if ((dependhash != this._dependhash) && !newScript._dependFail) {
-    // Store window references for late injection.
-    if (this._runAt == "document-start") {
+  let redownload = (dependhash != this._dependhash) && !newScript._dependFail;
+  if (redownload) {
+    // Pages wait for the new @require files.  Recorded before the
+    // broadcast below: the IPC copy of the script takes pendingExec's
+    // length from it, and that is what keeps the edited script (new code,
+    // old @require files) off pages until the download is done.
+    if (this.runAt == "document-start") {
       GM_util.logError(
           '"' + this.localized.name + '" - ID: ' + this.id
           + "\n" + "Not running at document-start; waiting for update...",
           true);
-      this.pendingExec.push("document-start update");
+      this.pendingExec.push(PENDING_EXEC_DOCUMENT_START);
     } else if (windowId) {
       this.pendingExec.push({
         "browser": browser,
         "url": url,
         "windowId": windowId,
       });
+    } else {
+      this.pendingExec.push(PENDING_EXEC_DOWNLOAD);
     }
+  }
 
+  // Update the AOM.
+  this._changed("modified", oldScriptId);
+
+  if (redownload) {
     // Re-download dependencies.
     let scope = {};
     Cu.import("chrome://greasemonkey-modules/content/remoteScript.js", scope);
     var rs = new scope.RemoteScript(this.downloadURL);
     newScript._basedir = this._basedir;
     rs.setScript(newScript);
+    // A later edit may start its own download before this one ends; only
+    // the latest one is applied.
+    this._dependencyDownload = rs;
     rs.download(function (aSuccess) {
+      if (this._dependencyDownload !== rs) {
+        rs.cleanup();
+        return undefined;
+      }
+      this._dependencyDownload = null;
       if (!aSuccess) {
+        // Nothing to wait for any more: the script runs again (with its
+        // old @require files), and as _dependhash is unchanged, the next
+        // edit tries the download again.  Left as it was, pendingExec
+        // kept the script off every page and grew with each page load.
+        this.pendingExec = [];
+        this._changed("modified", this.id);
         let notificationOptions = {
           "persistence": -1,
           "persistWhileVisible": true,
@@ -1795,12 +1915,16 @@ Script.prototype.updateFromNewScript = function (
       var pendingExecAry = this.pendingExec;
       this.pendingExec = [];
       while ((pendingExec = pendingExecAry.shift())) {
-        if (pendingExec == "document-start update") {
+        if (pendingExec == PENDING_EXEC_DOCUMENT_START) {
           GM_util.logError(
               '"' + this.localized.name + '" - ID: ' + this.id
               + "\n" + "...script update complete "
               + "(will run at next document-start time).",
               true);
+          continue;
+        }
+        if ((typeof pendingExec != "object") || !pendingExec.windowId) {
+          // A marker, or no page to run in.
           continue;
         }
 

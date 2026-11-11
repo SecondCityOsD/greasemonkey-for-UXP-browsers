@@ -305,10 +305,7 @@ function sortedByExecOrder() {
 function focus() {
   // When the window gains focus, it might be from switching to an editor
   // and back, so scan for updated scripts.
-  let config = GM_util.getService().config;
-  config.updateModifiedScripts("document-start", null);
-  config.updateModifiedScripts("document-end", null);
-  config.updateModifiedScripts("document-idle", null);
+  GM_util.getService().config.updateModifiedScripts();
 }
 
 function init() {

@@ -204,9 +204,7 @@ service.prototype.scriptRefresh = function (aUrl, aWindowId, aBrowser) {
   }
 
   if (GM_prefRoot.getValue("enableScriptRefreshing")) {
-    this.config.updateModifiedScripts("document-start", aUrl, aWindowId, aBrowser);
-    this.config.updateModifiedScripts("document-end", aUrl, aWindowId, aBrowser);
-    this.config.updateModifiedScripts("document-idle", aUrl, aWindowId, aBrowser);
+    this.config.updateModifiedScripts(aUrl, aWindowId, aBrowser);
   }
 };
 
