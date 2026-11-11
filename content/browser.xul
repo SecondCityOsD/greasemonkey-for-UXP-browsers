@@ -63,6 +63,10 @@
     <menu id="gm_general_menu" insertafter="devToolsSeparator" />
   </menupopup>
 
+  <menupopup id="taskPopup">
+    <menu id="gm_general_menu" insertafter="devToolsSeparator" />
+  </menupopup>
+
   <!--
   NOTE: Unlocalized accesskey & label in menu tags; possibly unaccessible.
   -->
