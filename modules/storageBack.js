@@ -35,12 +35,16 @@
  *   releaseStorageForScript(aScriptId)
  *     Closes and forgets a script's Back, cache and listeners (uninstall).
  *
+ *   copyStoredValues(aBaseDirName, aScript)
+ *     Copies an orphaned folder's stored values into a script (Recover
+ *     Orphans).
+ *
  *   closeAllStorageBacks()
  *     Closes every Back this module has opened.  Called on quit-application.
  *
  * UXP runs chrome and content in the same JS runtime, so the Front talks
  * to the Back via direct method calls.  The Back registry is module-private
- * and accessed through the three functions above.  Code outside this module
+ * and accessed through the functions above.  Code outside this module
  * should use getStorageBackForScript rather than a private Back: a second
  * connection to the same file is never needed.
  *
@@ -56,6 +60,7 @@ const EXPORTED_SYMBOLS = [
   "GM_ScriptStorageFront",
   "getStorageBackForScript",
   "closeAllStorageBacks",
+  "copyStoredValues",
   "releaseStorageForScript",
 ];
 
@@ -844,6 +849,40 @@ function closeAllStorageBacks() {
     }
   });
   gBackByScriptId.clear();
+}
+
+/**
+ * Copies every value in the .db of a folder no installed script owns (an
+ * orphaned script being recovered) into aScript's storage, through its
+ * shared Back, so running pages see them.  The old file is only read, and
+ * its connection closed.
+ *
+ * @param {string} aBaseDirName - The folder whose <name>.db to read.
+ * @param {Script} aScript      - The script that gets the values.
+ * @returns {number} How many values were copied (0 when there's no file).
+ */
+function copyStoredValues(aBaseDirName, aScript) {
+  // A stand-in owner: its id can't be a script's (ids hold no "\n").
+  let from = new GM_ScriptStorageBack(
+      { "baseDirName": aBaseDirName, "id": "\n" + aBaseDirName });
+  if (!from.dbFile.exists()) {
+    return 0;
+  }
+  let values = {};
+  try {
+    from.listValues().forEach(function (aName) {
+      let raw = from.getValue(aName);
+      try {
+        values[aName] = JSON.parse(raw);
+      } catch (e) {
+        // A row that isn't JSON can't be a stored value: left behind.
+      }
+    });
+  } finally {
+    from.close();
+  }
+  getStorageBackForScript(aScript).setValuesBatch(values);
+  return Object.keys(values).length;
 }
 
 // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ //

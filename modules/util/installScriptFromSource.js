@@ -30,10 +30,8 @@ Cu.import("chrome://greasemonkey-modules/content/util.js");
  *
  * @param {string}   aSource              - Raw Greasemonkey script source text.
  * @param {Function} [aCallback]          - Invoked after install completes.
- *   Signature: callback(err?) — passed null/undefined on success, an Error
- *   instance on failure.  Pre-Phase-7c the callback was only fired on
- *   success and never received an argument; the new signature is
- *   backward-compatible (existing 0-arg callbacks still work).
+ *   Signature: callback(err?, script?) — on success err is undefined and
+ *   script is the installed Script; on failure err is an Error.
  * @param {object}   [aOptions]
  * @param {boolean}  [aOptions.skipEditor=false] - When true, do NOT open
  *   the freshly-installed script in the configured editor.  Set by the
@@ -41,6 +39,9 @@ Cu.import("chrome://greasemonkey-modules/content/util.js");
  *   row when reinstalling a stack of recovered scripts.
  * @param {boolean}  [aOptions.silent=false] - When true, no "installed
  *   successfully" message (createUserScript's empty template).
+ * @param {object}   [aOptions.dependencies] - Local copies of dependencies
+ *   to use instead of downloading them, as RemoteScript's
+ *   setPrefetchedDependencies takes them (Recover Orphans).
  * @returns {void}
  */
 function installScriptFromSource(aSource, aCallback, aOptions) {
@@ -73,6 +74,7 @@ function installScriptFromSource(aSource, aCallback, aOptions) {
     }
     remoteScript.setScript(script, tempFile);
     remoteScript.setSilent(silent);
+    remoteScript.setPrefetchedDependencies(opts.dependencies || null);
     remoteScript.download(function (aSuccess) {
       if (!aSuccess) {
         let notificationOptions = {
@@ -97,7 +99,7 @@ function installScriptFromSource(aSource, aCallback, aOptions) {
         GM_util.openInEditor(script);
       }
       if (aCallback) {
-        aCallback();
+        aCallback(undefined, remoteScript.script);
       }
     });
   });

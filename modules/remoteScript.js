@@ -28,13 +28,16 @@
  *     nsIProgressEventSink and writes incoming bytes to a temp file.  For the
  *     main script file it also accumulates data and attempts live parsing.
  *   - assertIsFunction() and filenameFromUri() are private helpers.
+ *   - localDependencyCopies() finds an orphaned script folder's own copies
+ *     of its dependencies (Recover Orphans), for setPrefetchedDependencies.
  *   - On Windows the full path is limited to 240 chars (MSDN MAX_PATH minus
  *     safety margin); gWindowsNameMaxLen accounts for the scripts directory.
  *   - Scripts and dependencies are downloaded to a unique temp directory and
  *     moved atomically to the scripts directory on a successful install.
  */
 
-const EXPORTED_SYMBOLS = ["cleanFilename", "RemoteScript"];
+const EXPORTED_SYMBOLS = ["cleanFilename", "localDependencyCopies",
+    "RemoteScript"];
 
 if (typeof Cc === "undefined") {
   var Cc = Components.classes;
@@ -216,6 +219,59 @@ function filenameFromUri(aUri, aDefault) {
   }
 
   return cleanFilename(filename, aDefault);
+}
+
+/**
+ * Finds a parsed script's dependencies among the files of a folder it was
+ * once installed in (an orphaned script folder being recovered), in the
+ * form setPrefetchedDependencies takes, so they are copied from there
+ * instead of downloaded: a @require whose URL is long dead still works.
+ * Each is looked for under the name its download gets (filenameFromUri);
+ * one that isn't there, or whose name another dependency shares (the
+ * install made those unique, so which file is which is unknown), is left
+ * out and downloads as usual.
+ *
+ * @param {Script}  aScript - The parsed script.
+ * @param {nsIFile} aDir    - The folder to look in.
+ * @returns {object} { downloadURL: { file, mimetype } }
+ */
+function localDependencyCopies(aScript, aDir) {
+  let byName = {};
+  aScript.dependencies.forEach(function (aDependency) {
+    let uri = null;
+    try {
+      uri = GM_util.getUriFromUrl(aDependency.downloadURL);
+    } catch (e) {
+      // Not a URL: nothing to look for.
+    }
+    if (!uri) {
+      return undefined;
+    }
+    let name = filenameFromUri(uri, GM_CONSTANTS.fileScriptName);
+    byName[name] = byName[name] || [];
+    byName[name].push(aDependency.downloadURL);
+  });
+
+  let copies = {};
+  Object.keys(byName).forEach(function (aName) {
+    if (byName[aName].length != 1) {
+      return undefined;
+    }
+    let file = aDir.clone();
+    file.append(aName);
+    if (!file.exists() || !file.isFile()) {
+      return undefined;
+    }
+    let copy = { "file": file };
+    try {
+      copy.mimetype = Cc["@mozilla.org/mime;1"]
+          .getService(Ci.nsIMIMEService).getTypeFromFile(file);
+    } catch (e) {
+      // An unknown extension: the dependency keeps its own default.
+    }
+    copies[byName[aName][0]] = copy;
+  });
+  return copies;
 }
 
 ////////////////////////// Private Download Listener ///////////////////////////

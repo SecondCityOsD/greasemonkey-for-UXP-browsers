@@ -308,8 +308,32 @@ function focus() {
   GM_util.getService().config.updateModifiedScripts();
 }
 
+/**
+ * Keeps what is typed into one of our text boxes in about:addons in that
+ * box.  about:addons moves the focus to its own search box on any "/"
+ * typed in its page (gHeader.onKeyPress listens on the whole page), which
+ * cut an address typed into Install from URL off after "http:/" (#27).
+ * Characters stop here; shortcuts (Ctrl / Alt / Meta), Enter and Escape
+ * still pass.
+ *
+ * @param {KeyboardEvent} aEvent - A keypress on the box.
+ */
+function keepTypingInBox(aEvent) {
+  if (aEvent.charCode && !aEvent.ctrlKey && !aEvent.altKey
+      && !aEvent.metaKey) {
+    aEvent.stopPropagation();
+  }
+}
+
 function init() {
   GM_util.getService().config.addObserver(observer);
+
+  ["gm-install-url-input", "gm-live-search"].forEach(function (aId) {
+    let box = document.getElementById(aId);
+    if (box) {
+      box.addEventListener("keypress", keepTypingInBox, false);
+    }
+  });
 
   gViewController.commands.cmd_userscript_edit = {
       "isEnabled": addonIsInstalledScript,
@@ -444,63 +468,7 @@ function init() {
       "command", onSortersClicked, false);
   applySort();
 
-  // Orphan-recovery affordance.  The label is hidden in the XUL; reveal
-  // it (and dynamically set its text to include the count) iff a fresh
-  // scan of <profile>/gm_scripts/ finds any orphaned script directories.
-  //
-  // refreshOrphans() re-walks the filesystem instead of returning the
-  // cached snapshot from startup.  Without that, a successful
-  // Recover-Orphans run leaves the in-memory list stale: subsequent
-  // pane re-renders would re-show the link with the original count,
-  // and clicking it would try to read .user.js files from paths that
-  // were already renamed to ".recovered" — producing NS_ERROR_FILE_NOT_FOUND
-  // errors in the summary.  A directory walk on pane open is cheap
-  // (one stat per top-level entry under gm_scripts/) and keeps the
-  // displayed state honest.
-  try {
-    let recoverLink = document.getElementById("gm-recover-orphans");
-    if (recoverLink) {
-      let config = GM_util.getService().config;
-      let orphans;
-      if (config.refreshOrphans) {
-        orphans = config.refreshOrphans();
-      } else if (config.getOrphans) {
-        orphans = config.getOrphans();
-      } else {
-        orphans = [];
-      }
-      if (orphans.length > 0) {
-        // Localized via gmAddons.properties; "#1" → the orphan count.
-        // Falls back to English if a locale file predates these keys, so
-        // non-English users still get the link (the same text they saw
-        // before this string was localized) instead of losing it.
-        let n = orphans.length;
-        let bundle = GM_CONSTANTS.localeStringBundle.createBundle(
-            GM_CONSTANTS.localeGmAddonsProperties);
-        let label, tip;
-        try {
-          label = bundle.GetStringFromName("recoverOrphans.label")
-              .replace("#1", n);
-          tip = bundle.GetStringFromName("recoverOrphans.tooltip");
-        } catch (eL10n) {
-          label = "Recover " + n + " orphan(s)...";
-          tip = "Reinstall script directories that exist in gm_scripts/"
-              + " but have no entry in config.xml";
-        }
-        recoverLink.setAttribute("value", label);
-        recoverLink.setAttribute("tooltiptext", tip);
-        recoverLink.hidden = false;
-      } else {
-        // Defensive: a prior pane open may have unhidden the link;
-        // if the fresh scan finds nothing, hide it again.
-        recoverLink.hidden = true;
-      }
-    }
-  } catch (e) {
-    // Non-fatal — log but don't block the User Scripts pane from rendering.
-    Components.utils.reportError(
-        "Greasemonkey: orphan-link init failed: " + e);
-  }
+  updateRecoverOrphansLink();
 
   // Apply the about:config UI visibility toggles (Import/Export, search).
   gmApplyManagerPrefs();
@@ -1144,163 +1112,243 @@ function GM_backupImport() {
 }
 
 /**
- * "Recover Orphans..." link handler in the User Scripts pane.
+ * A Recover Orphans string from gmAddons.properties, or aFallback (its
+ * English) when this locale doesn't have it yet.  %1, %2... are replaced
+ * by aArgs, taken literally.
  *
- * Walks the orphan list that Config._scanOrphans() built during
- * service startup (each entry is a <profile>/gm_scripts/<basedir>/
- * directory that contains a *.user.js file but has no <Script>
- * entry in config.xml — the classic post-downgrade-and-back state).
- * For each orphan we:
+ * @param {string} aKey
+ * @param {string} aFallback
+ * @param {Array}  [aArgs]
+ * @returns {string}
+ */
+function recoverString(aKey, aFallback, aArgs) {
+  let text = aFallback;
+  try {
+    text = GM_backup_stringBundle().GetStringFromName(aKey);
+  } catch (e) {
+    // Not in this locale yet.
+  }
+  (aArgs || []).forEach(function (aArg, aIndex) {
+    text = text.split("%" + (aIndex + 1)).join(String(aArg));
+  });
+  return text;
+}
+
+/**
+ * Shows "Recover N orphan(s)..." when a fresh scan of <profile>/gm_scripts/
+ * finds orphaned script folders (see GM_recoverOrphans), with the count,
+ * and hides it otherwise.  A fresh scan, not the startup one: after a
+ * recovery the recovered folders end in ".recovered" and drop out.
+ */
+function updateRecoverOrphansLink() {
+  let recoverLink = document.getElementById("gm-recover-orphans");
+  if (!recoverLink) {
+    return;
+  }
+  try {
+    let n = GM_util.getService().config.refreshOrphans().length;
+    recoverLink.hidden = (n == 0);
+    if (n) {
+      recoverLink.setAttribute("value", recoverString("recoverOrphans.label",
+          "Recover #1 orphan(s)...").replace("#1", n));
+      recoverLink.setAttribute("tooltiptext", recoverString(
+          "recoverOrphans.tooltip", "Reinstall script directories that "
+          + "exist in gm_scripts/ but have no entry in config.xml"));
+    }
+  } catch (e) {
+    // Non-fatal: the User Scripts pane still renders.
+    Components.utils.reportError(
+        "Greasemonkey: orphan-link update failed: " + e);
+  }
+}
+
+/** How many orphans the confirmation names before "…and N more". */
+const RECOVER_ORPHANS_LISTED = 15;
+
+/**
+ * "Recover N orphan(s)..." in the User Scripts pane.
  *
- *   1. Read the .user.js source text off disk.
- *   2. Pipe it through installScriptFromSource({skipEditor: true})
- *      so the existing parseScript / RemoteScript install pipeline
- *      builds a NEW <Script> entry with a freshly-allocated basedir.
- *   3. Rename the original orphan directory to "<basedir>.recovered"
- *      so the next startup's orphan scan doesn't flag it again.  The
- *      rename preserves the user's data as a manual-recovery fallback
- *      should the install have introduced a regression — they can
- *      restore by renaming back and reverting GM to a working build.
- *
- * Installs are serialised (next starts after previous callback) so
- * RemoteScript writes to config.xml don't race.  GM_setValue storage
- * stored in the OLD <basedir>.db is left behind (the install creates
- * a fresh DB under the new basedir); a future enhancement could
- * migrate the rows over, but for now the user gets a fresh slate
- * which is the expected behaviour for "reinstall".
+ * An orphan is a <profile>/gm_scripts/<folder>/ with a *.user.js but no
+ * <Script> entry in config.xml (Config._scanOrphans), typically after a
+ * downgrade and back, or a config.xml restored without its folders.  The
+ * confirmation names every one (#28), then each, in turn:
+ *   - is skipped when a script with its @name/@namespace is installed:
+ *     installing it would replace that (newer) copy with the orphan's
+ *     old code;
+ *   - is installed again from its .user.js, with the folder's own
+ *     @require / @resource / @icon files (localDependencyCopies), so a
+ *     URL that has since died doesn't fail it;
+ *   - gets the stored values of its <folder>.db (copyStoredValues);
+ *   - is kept: the folder is renamed <folder>.recovered (which the scan
+ *     skips), with its .db moved inside.  Nothing is deleted.
+ * One that fails to install is left as it was, to try again.  Installs
+ * run one after another so their config.xml writes don't race.
  */
 function GM_recoverOrphans() {
   let config = GM_util.getService().config;
-  let orphans = config.getOrphans ? config.getOrphans() : [];
+  let orphans = config.getOrphans();
+  let title = recoverString("recoverOrphans.title", "Recover orphaned scripts");
   if (orphans.length == 0) {
-    alert("No orphaned scripts to recover.");
+    Services.prompt.alert(window, title, recoverString(
+        "recoverOrphans.none", "No orphaned scripts to recover."));
     return;
   }
 
-  let proceed = confirm(
-      "Found " + orphans.length + " orphaned script director"
-      + (orphans.length == 1 ? "y" : "ies")
-      + " under <profile>/gm_scripts/.\n\n"
-      + "Reinstalling will:\n"
-      + "  • Register each script anew in config.xml.\n"
-      + "  • Create a fresh GM_setValue storage for each.\n"
-      + "  • Permanently delete the original folder and its"
-      + "\n    associated <basedir>.db storage file.\n\n"
-      + "GM_setValue data is NOT migrated.  If a script's stored"
-      + "\nvalues matter to you, back them up before proceeding.\n\n"
-      + "Proceed?");
-  if (!proceed) {
-    return;
-  }
+  let scope = {};
+  Cu.import("chrome://greasemonkey-modules/content/parseScript.js", scope);
+  Cu.import("chrome://greasemonkey-modules/content/remoteScript.js", scope);
+  Cu.import("chrome://greasemonkey-modules/content/storageBack.js", scope);
 
-  // We need access to the chrome-side installer.  installScriptFromSource
-  // is exported from the modules/util/ lazy-getter set on GM_util, so a
-  // simple property reference grabs the bound implementation.
-  let installScriptFromSource = GM_util.installScriptFromSource;
-  if (typeof installScriptFromSource !== "function") {
-    alert("Internal error: installScriptFromSource is unavailable.");
-    return;
-  }
-
-  // Results accumulator for the summary alert at the end.
-  let recovered = 0;
-  let failed = 0;
-  let errors = [];
-
-  function next(i) {
-    if (i >= orphans.length) {
-      let msg = "Orphan recovery complete.\n"
-          + "  Recovered: " + recovered + "\n"
-          + "  Failed: " + failed;
-      if (errors.length > 0) {
-        msg += "\n\nErrors:\n" + errors.join("\n");
-      }
-      alert(msg);
-      // Re-scan now that every recovered directory has been renamed to
-      // ".recovered" (which the scanner skips).  Without this, the
-      // in-memory orphan list would still hold the original entries
-      // and a subsequent pane re-render would re-show the link with
-      // its original count — and clicking it would try to read from
-      // the now-renamed paths and fail with NS_ERROR_FILE_NOT_FOUND.
-      try {
-        if (config.refreshOrphans) {
-          config.refreshOrphans();
-        }
-      } catch (e) {
-        Components.utils.reportError(
-            "Greasemonkey: post-recovery orphan re-scan failed: " + e);
-      }
-      // Hide the link immediately — the next pane open will also call
-      // refreshOrphans() and confirm there's nothing left to recover.
-      let link = document.getElementById("gm-recover-orphans");
-      if (link) {
-        link.hidden = true;
-      }
-      return;
-    }
-    let orphan = orphans[i];
-    let source;
+  // Each one is read and parsed first: the confirmation names them.
+  let items = orphans.map(function (aOrphan) {
+    let item = {
+      "error": null,
+      "orphan": aOrphan,
+      "script": null,
+      "source": null,
+    };
     try {
-      source = GM_util.getContents(orphan.userJsFile);
+      item.source = GM_util.getContents(aOrphan.userJsFile);
+      if (item.source) {
+        item.script = scope.parse(item.source);
+      }
     } catch (e) {
-      failed++;
-      errors.push(orphan.basedir + ": couldn't read .user.js: " + e);
-      next(i + 1);
-      return;
+      item.error = e;
     }
-    if (!source) {
-      failed++;
-      errors.push(orphan.basedir + ": .user.js was empty");
-      next(i + 1);
-      return;
+    return item;
+  });
+  let label = function (aItem) {
+    let script = aItem.script;
+    if (!script || !script.name) {
+      return aItem.orphan.basedir;
     }
+    return script.localized.name + (script.version ? " " + script.version : "");
+  };
 
-    installScriptFromSource(source, function (aErr) {
+  let lines = items.slice(0, RECOVER_ORPHANS_LISTED).map(function (aItem) {
+    return recoverString("recoverOrphans.item", "• %1 (folder: %2)",
+        [label(aItem), aItem.orphan.basedir]);
+  });
+  if (items.length > RECOVER_ORPHANS_LISTED) {
+    lines.push(recoverString("recoverOrphans.more", "…and %1 more",
+        [items.length - RECOVER_ORPHANS_LISTED]));
+  }
+  if (!Services.prompt.confirm(window, title, recoverString(
+      "recoverOrphans.confirm",
+      "These scripts have a folder in gm_scripts but aren't installed:"
+      + "\n\n%1\n\nRecover them? Each one is installed again from its own "
+      + "folder, with its stored values. The original folders are kept, "
+      + "renamed <folder>.recovered.",
+      [lines.join("\n")]))) {
+    return;
+  }
+
+  let recovered = 0;
+  let skipped = 0;
+  let failed = 0;
+  let problems = [];
+
+  function finish() {
+    let msg = recoverString("recoverOrphans.done",
+        "Recovery finished.\n\nRecovered: %1\n"
+        + "Already installed, left as they are: %2\nFailed: %3",
+        [recovered, skipped, failed]);
+    if (problems.length) {
+      msg += "\n\n" + problems.join("\n");
+    }
+    if (recovered) {
+      msg += "\n\n" + recoverString("recoverOrphans.kept",
+          "The original folders are kept in gm_scripts, renamed "
+          + "<folder>.recovered.");
+    }
+    Services.prompt.alert(window, title, msg);
+    updateRecoverOrphansLink();
+  }
+
+  function next(aIndex) {
+    if (aIndex >= items.length) {
+      finish();
+      return;
+    }
+    let item = items[aIndex];
+    if (!item.source) {
+      failed++;
+      problems.push(recoverString("recoverOrphans.unreadable",
+          "%1: its .user.js can't be read (%2)",
+          [item.orphan.basedir, item.error || "empty"]));
+      next(aIndex + 1);
+      return;
+    }
+    if (item.script && config.installIsUpdate(item.script)) {
+      skipped++;
+      problems.push(recoverString("recoverOrphans.alreadyInstalled",
+          "%1: already installed", [label(item)]));
+      next(aIndex + 1);
+      return;
+    }
+    let copies = {};
+    if (item.script) {
+      try {
+        copies = scope.localDependencyCopies(
+            item.script, item.orphan.userJsFile.parent);
+      } catch (e) {
+        // They download instead.
+        Components.utils.reportError("Greasemonkey: looking for the local "
+            + "files of " + item.orphan.basedir + " failed: " + e);
+      }
+    }
+    GM_util.installScriptFromSource(item.source, function (aErr, aScript) {
       if (aErr) {
         failed++;
-        errors.push(orphan.basedir + ": "
-            + (aErr.message || aErr.toString()));
+        problems.push(label(item) + ": " + (aErr.message || aErr));
       } else {
         recovered++;
-        // Delete the orphan directory and its sibling .db storage
-        // file outright.  The install pipeline already copied the
-        // script source into a fresh gm_scripts/<id>-N/ subdir and
-        // initialised a new .db for it, so the originals are now
-        // dead weight.  GM_setValue data isn't migrated through
-        // recovery anyway, so the old .db has no live referent.
-        //
-        // Storage convention (see modules/storageBack.js:16):
-        //   <profile>/gm_scripts/<basedir>/   ← script directory
-        //   <profile>/gm_scripts/<basedir>.db ← sibling SQLite file
-        //
-        // Both go.  Failures here are logged but non-fatal — the
-        // install already succeeded; the worst case is a leftover
-        // folder the user can remove via file explorer.
-        try {
-          let oldDir = orphan.userJsFile.parent;
-          let gmScriptsDir = oldDir.parent;
-          oldDir.remove(true); // deep=true (recursive directory removal)
-
-          try {
-            let dbFile = gmScriptsDir.clone();
-            dbFile.append(orphan.basedir + ".db");
-            if (dbFile.exists()) {
-              dbFile.remove(false); // file, not directory
-            }
-          } catch (e2) {
-            Components.utils.reportError(
-                "Greasemonkey: post-recovery .db cleanup of "
-                + orphan.basedir + " failed: " + e2);
-          }
-        } catch (e) {
-          Components.utils.reportError(
-              "Greasemonkey: post-recovery dir cleanup of "
-              + orphan.basedir + " failed: " + e);
-        }
+        keepRecoveredOrphan(scope, item.orphan, aScript);
       }
-      next(i + 1);
-    }, { "skipEditor": true });
+      next(aIndex + 1);
+    }, { "dependencies": copies, "silent": true, "skipEditor": true });
   }
 
   next(0);
+}
+
+/**
+ * After an orphan is installed again: its stored values go to the new
+ * script, and its folder is kept, renamed <folder>.recovered (or
+ * <folder>-2.recovered...), with its <folder>.db moved inside.  A failure
+ * here is logged: the install itself has succeeded.
+ *
+ * @param {object}  aScope   - copyStoredValues (storageBack.js).
+ * @param {object}  aOrphan  - The Config._scanOrphans entry.
+ * @param {Script}  aScript  - The script installed from it.
+ */
+function keepRecoveredOrphan(aScope, aOrphan, aScript) {
+  try {
+    if (aScript) {
+      aScope.copyStoredValues(aOrphan.basedir, aScript);
+    }
+  } catch (e) {
+    Components.utils.reportError("Greasemonkey: recovering the stored "
+        + "values of " + aOrphan.basedir + " failed: " + e);
+  }
+  try {
+    let folder = aOrphan.userJsFile.parent;
+    let db = folder.parent.clone();
+    db.append(aOrphan.basedir + GM_CONSTANTS.fileScriptDBExtension);
+    if (db.exists()) {
+      db.moveTo(folder, null);
+    }
+    let name = aOrphan.basedir + ".recovered";
+    let taken = folder.parent.clone();
+    taken.append(name);
+    for (let n = 2; taken.exists(); n++) {
+      name = aOrphan.basedir + "-" + n + ".recovered";
+      taken = folder.parent.clone();
+      taken.append(name);
+    }
+    folder.moveTo(null, name);
+  } catch (e) {
+    Components.utils.reportError("Greasemonkey: keeping the folder of "
+        + aOrphan.basedir + " as .recovered failed: " + e);
+  }
 }
