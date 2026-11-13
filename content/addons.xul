@@ -11,14 +11,9 @@
     addons.GM_addonsStartup();
   }, true);
 
-  // Open the scripts manager
+  // Open the scripts manager in Firefox >= 4.0
   function GM_OpenScriptsMgr() {
-    var url = "addons://list/greasemonkey-user-script";
-    try { // Firefox >= 4.0
-      BrowserOpenAddonsMgr(url);
-    } catch(e) { // Seamonkey
-      window.toEM(url);
-    }
+    BrowserOpenAddonsMgr("addons://list/greasemonkey-user-script");
   }
 
   // Open the updates manager in Firefox >= 4.0
