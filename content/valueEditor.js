@@ -50,29 +50,25 @@ GM_ValueEditor.init = function () {
 
   let adding = GM_ValueEditor.isAdding();
   document.title = adding
-      ? GM_ValueEditor.str("scriptPrefs.values.addTitle", "Add value")
-      : GM_ValueEditor.str("scriptPrefs.values.editTitle", "Edit value")
+      ? GM_ValueEditor.str("scriptPrefs.values.addTitle")
+      : GM_ValueEditor.str("scriptPrefs.values.editTitle")
           + " — " + args.key;
   GM_ValueEditor.localize("ve-mode-label", "value",
-      "scriptPrefs.values.editor.mode", "Edit as");
+      "scriptPrefs.values.editor.mode");
   GM_ValueEditor.localize("ve-mode-text", "label",
-      "scriptPrefs.values.editor.text", "Text");
+      "scriptPrefs.values.editor.text");
   GM_ValueEditor.localize("ve-mode-text", "tooltiptext",
-      "scriptPrefs.values.editor.textTip", "Saved as text, exactly as typed.");
+      "scriptPrefs.values.editor.textTip");
   GM_ValueEditor.localize("ve-mode-json", "tooltiptext",
-      "scriptPrefs.values.editor.jsonTip",
-      "Saved as the value the JSON describes: a number, true or false, "
-      + "null, a list, an object, or text in quotes.");
+      "scriptPrefs.values.editor.jsonTip");
   GM_ValueEditor.localize("ve-format", "label",
-      "scriptPrefs.values.editor.format", "Format");
+      "scriptPrefs.values.editor.format");
   GM_ValueEditor.localize("ve-format", "tooltiptext",
-      "scriptPrefs.values.editor.formatTip",
-      "Lays the JSON out over indented lines.");
+      "scriptPrefs.values.editor.formatTip");
   GM_ValueEditor.localize("ve-compact", "label",
-      "scriptPrefs.values.editor.compact", "Compact");
+      "scriptPrefs.values.editor.compact");
   GM_ValueEditor.localize("ve-compact", "tooltiptext",
-      "scriptPrefs.values.editor.compactTip",
-      "Puts the JSON on one line, without spaces.");
+      "scriptPrefs.values.editor.compactTip");
 
   let keyBox = document.getElementById("ve-key");
   keyBox.value = adding ? "" : args.key;
@@ -93,18 +89,16 @@ GM_ValueEditor.isAdding = function () {
   return typeof GM_ValueEditor.args.key != "string";
 };
 
-/** Reads a localised string, or aFallback when the locale lacks it. */
-GM_ValueEditor.str = function (aKey, aFallback) {
-  try {
-    return GM_ValueEditor.bundle.GetStringFromName(aKey);
-  } catch (e) {
-    return aFallback;
-  }
+/** Reads a localised string. */
+GM_ValueEditor.str = function (aKey, Params) {
+  if (Params)
+    return GM_ValueEditor.bundle.formatStringFromName(aKey, Params, Params.length);
+  return GM_ValueEditor.bundle.GetStringFromName(aKey);
 };
 
-GM_ValueEditor.localize = function (aId, aAttribute, aKey, aFallback) {
+GM_ValueEditor.localize = function (aId, aAttribute, aKey) {
   document.getElementById(aId).setAttribute(
-      aAttribute, GM_ValueEditor.str(aKey, aFallback));
+      aAttribute, GM_ValueEditor.str(aKey));
 };
 
 /**
@@ -234,14 +228,10 @@ GM_ValueEditor.check = function () {
   let problem = null;
   if (GM_ValueEditor.isAdding()
       && (GM_ValueEditor.args.existingKeys || []).indexOf(key) != -1) {
-    problem = GM_ValueEditor.str("scriptPrefs.values.addKeyExists",
-        "A value already exists for that key. Use Edit to change it.");
+    problem = GM_ValueEditor.str("scriptPrefs.values.addKeyExists");
   } else if ((GM_ValueEditor.mode == "json") && !parsed.ok) {
     // A function, so a "$" in the message is taken literally.
-    problem = GM_ValueEditor.str("scriptPrefs.values.invalidJson",
-        "Invalid JSON: %1").replace("%1", function () {
-          return parsed.error;
-        });
+    problem = GM_ValueEditor.str("scriptPrefs.values.invalidJson", [parsed.error]);
   }
 
   let ready = !problem && !(GM_ValueEditor.isAdding() && !key);

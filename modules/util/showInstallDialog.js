@@ -150,18 +150,11 @@ function showInstallDialog(aUrlOrRemoteScript, aBrowser, aRequest) {
         let url = (typeof aUrlOrRemoteScript == "string")
             ? aUrlOrRemoteScript
             : (rs._url || "");
-        try {
-          msg = GM_CONSTANTS.localeStringBundle.createBundle(
-              GM_CONSTANTS.localeGreasemonkeyProperties)
-              .GetStringFromName("error.notUserScript");
-        } catch (e) {
-          msg = "This URL does not point to a user script.";
-        }
-        if (url) {
-          msg += "\n" + url;
-        }
+        msg = GM_CONSTANTS.localeStringBundle.createBundle(
+            GM_CONSTANTS.localeGreasemonkeyProperties)
+            .formatStringFromName("error.notUserScript", [url], 1);
       }
-      GM_util.alert(msg);
+      GM_util.prompt.alert(null, msg);
     }
   });
 }

@@ -175,8 +175,7 @@ function MatchPattern(aPattern) {
     throw new Error(
         GM_CONSTANTS.localeStringBundle.createBundle(
             GM_CONSTANTS.localeGreasemonkeyProperties)
-            .GetStringFromName("error.matchPattern.parse")
-            .replace("%1", aPattern));
+            .formatStringFromName("error.matchPattern.parse", [aPattern], 1));
   }
   let scheme = match[1];
   // Tolerate `http*://...` as an alias for `*://...` — Violentmonkey and
@@ -196,24 +195,21 @@ function MatchPattern(aPattern) {
     throw new Error(
         GM_CONSTANTS.localeStringBundle.createBundle(
             GM_CONSTANTS.localeGreasemonkeyProperties)
-            .GetStringFromName("error.matchPattern.scheme")
-            .replace("%1", scheme));
+            .formatStringFromName("error.matchPattern.scheme", [scheme], 1));
   }
 
   if (!HOST_REGEXP.test(host)) {
     throw new Error(
         GM_CONSTANTS.localeStringBundle.createBundle(
             GM_CONSTANTS.localeGreasemonkeyProperties)
-            .GetStringFromName("error.matchPattern.host")
-            .replace("%1", host));
+            .formatStringFromName("error.matchPattern.host", [host], 1));
   }
 
   if (path[0] !== "/") {
     throw new Error(
         GM_CONSTANTS.localeStringBundle.createBundle(
             GM_CONSTANTS.localeGreasemonkeyProperties)
-            .GetStringFromName("error.matchPattern.path")
-            .replace("%1", path));
+            .formatStringFromName("error.matchPattern.path", [path], 1));
   }
 
   // MatchPattern.jsm
@@ -248,7 +244,7 @@ function MatchPattern(aPattern) {
         //   - "." should not be treated as a wildcard, so we escape it to \.
         //   - if the hostname only consists of "*" (i.e. full wildcard),
         //     replace it with .*
-        host.replace(/\./g, "\\.").replace(/^\*$/, ".*")
+        host.replace(/\.|^\*$/g, ch => ch == "." ? "\\." : ".*")
         // Then, handle the special case of "*." (any or no subdomain)
         // for match patterns. "*." has been escaped to "*\."
         // by the replace above.

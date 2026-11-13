@@ -657,11 +657,8 @@ function runScriptInSandbox(aSandbox, aScript) {
         || ((_gEnvironment.sandboxContentLevel != null)
             && (_gEnvironment.sandboxContentLevel > 2))) {
     GM_util.logError(
-        GM_CONSTANTS.info.scriptHandler + " - "
-        + GM_CONSTANTS.localeStringBundle.createBundle(
-            GM_CONSTANTS.localeGreasemonkeyProperties)
-            .GetStringFromName("error.environment.unsupported")
-            .replace("%1", JSON.stringify(_gEnvironment)),
+        GM_CONSTANTS.info.scriptHandler + " - this configuration:\n"
+        + JSON.stringify(_gEnvironment) + "\nis not supported.",
         false, aScript.fileURL, null);
     return undefined;
   }
@@ -685,9 +682,7 @@ function runScriptInSandbox(aSandbox, aScript) {
         // We never anon wrap anymore,
         // unless forced to by a return not in a function.
         GM_util.logError(
-            GM_CONSTANTS.localeStringBundle.createBundle(
-                  GM_CONSTANTS.localeGreasemonkeyProperties)
-                  .GetStringFromName("warning.returnNotInFuncDeprecated"),
+            "Warning: use of return outside of functions is deprecated and may cause failures in future versions of Greasemonkey.",
             true, // Is a warning.
             e.fileName,
             e.lineNumber);
@@ -889,9 +884,7 @@ function runScriptInSandbox(aSandbox, aScript) {
       }
     } catch (e) {
       GM_util.logError(
-          GM_CONSTANTS.localeStringBundle.createBundle(
-              GM_CONSTANTS.localeGreasemonkeyProperties)
-              .GetStringFromName("error.api.object.polyfill"),
+          'The polyfill file (for Greasemonkey 4.0+ - Promise APIs) cannot be used: "async" functions are probably not available!',
           false, e.fileName || aScript.fileURL, e.lineNumber || 0);
       return false;
     }

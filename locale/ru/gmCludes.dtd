@@ -1,87 +1,87 @@
 <!ENTITY button.add "Добавить">
-<!ENTITY button.addUserExclude "Добавить в исключенные">
-<!ENTITY button.addUserInclude "Добавить во включенные">
-<!ENTITY button.addUserMatch "Добавить соответствующего пользователя">
-<!ENTITY button.edit "Правка">
+<!ENTITY button.addUserExclude "Добавить в пользовательские @exclude">
+<!ENTITY button.addUserInclude "Добавить в пользовательские @include">
+<!ENTITY button.addUserMatch "Добавить в пользовательские @match">
+<!ENTITY button.edit "Изменить...">
 <!ENTITY button.remove "Удалить">
-<!ENTITY checkbox.grpOverride "Отключить заданные в скрипте включения и использовать только эти">
-<!ENTITY label.grpExcluded "Исключенные страницы">
-<!ENTITY label.grpIncluded "Включенные страницы">
-<!ENTITY label.grpMatched "Похожие страницы">
-<!ENTITY promptForEdit.msg "Измените адрес страницы ниже. Можно указать несколько страниц с использованием символа (*).">
-<!ENTITY promptForEdit.title "Правка страницы">
+<!ENTITY checkbox.grpOverride "Отключить заданные в скрипте правила и использовать только эти">
+<!ENTITY label.grpExcluded "Адреса @exclude">
+<!ENTITY label.grpIncluded "Адреса @include">
+<!ENTITY label.grpMatched "Адреса @match">
+<!ENTITY promptForEdit.msg "Измените URL. Можно использовать подстановочный символ *.">
+<!ENTITY promptForEdit.title "Изменение адреса страницы">
 <!ENTITY promptForNewPage.defVal "http://example.com/*">
-<!ENTITY promptForNewPage.msg "Введите новый адрес страницы ниже. Можно указать несколько страниц с использованием символа (*).">
-<!ENTITY promptForNewPage.title "Добавить страницу">
-<!ENTITY scriptPrefs.tab.settings           "Settings">
-<!ENTITY scriptPrefs.tab.values             "Values">
+<!ENTITY promptForNewPage.msg "Введите новый URL. Можно использовать подстановочный символ *.">
+<!ENTITY promptForNewPage.title "Добавление страницы">
+<!ENTITY scriptPrefs.tab.settings "Параметры скрипта">
+<!ENTITY scriptPrefs.tab.values "Значения">
 
 <!-- Section captions in the Settings tab -->
-<!ENTITY scriptPrefs.section.metadata       "Metadata">
-<!ENTITY scriptPrefs.section.behaviour      "Behavior">
-<!ENTITY scriptPrefs.section.pages          "Pages">
-<!ENTITY scriptPrefs.section.permissions    "Permissions">
+<!ENTITY scriptPrefs.section.metadata       "Метаданные">
+<!ENTITY scriptPrefs.section.behaviour      "Поведение">
+<!ENTITY scriptPrefs.section.pages          "Страницы">
+<!ENTITY scriptPrefs.section.permissions    "Разрешения">
 
 <!-- Metadata field labels (read-only fields populated from the script) -->
-<!ENTITY scriptPrefs.label.metaName         "Name">
-<!ENTITY scriptPrefs.label.metaNamespace    "Namespace">
-<!ENTITY scriptPrefs.label.metaVersion      "Version">
-<!ENTITY scriptPrefs.label.metaDescription  "Description">
-<!ENTITY scriptPrefs.label.metaAuthor       "Author">
-<!ENTITY scriptPrefs.label.metaHomepage     "Homepage">
-<!ENTITY scriptPrefs.label.metaSupport      "Support URL">
-<!ENTITY scriptPrefs.label.metaUpdateURL    "Update URL">
-<!ENTITY scriptPrefs.label.metaDownloadURL  "Download URL">
-<!ENTITY scriptPrefs.label.metaInstalled    "Installed">
-<!ENTITY scriptPrefs.label.metaLastUpdate   "Last updated">
+<!ENTITY scriptPrefs.label.metaName         "Имя">
+<!ENTITY scriptPrefs.label.metaNamespace    "Пространство имён">
+<!ENTITY scriptPrefs.label.metaVersion      "Версия">
+<!ENTITY scriptPrefs.label.metaDescription  "Описание">
+<!ENTITY scriptPrefs.label.metaAuthor       "Автор">
+<!ENTITY scriptPrefs.label.metaHomepage     "Домашняя страница">
+<!ENTITY scriptPrefs.label.metaSupport      "Адрес поддержки">
+<!ENTITY scriptPrefs.label.metaUpdateURL    "Адрес обновления">
+<!ENTITY scriptPrefs.label.metaDownloadURL  "Адрес загрузки">
+<!ENTITY scriptPrefs.label.metaInstalled    "Установлен">
+<!ENTITY scriptPrefs.label.metaLastUpdate   "Обновлён">
 
 <!-- Behaviour field labels and dropdown values -->
-<!ENTITY scriptPrefs.label.runAt            "Run at">
-<!ENTITY scriptPrefs.label.noFrames         "No frames">
-<!ENTITY scriptPrefs.label.noFramesValue    "Skip child frames">
-<!ENTITY scriptPrefs.label.injectInto       "Inject into">
-<!ENTITY scriptPrefs.injectInto.auto        "Auto">
-<!ENTITY scriptPrefs.injectInto.page        "Page context">
-<!ENTITY scriptPrefs.injectInto.content     "Content (sandbox)">
-<!ENTITY scriptPrefs.label.autoUpdate       "Automatic updates">
-<!ENTITY scriptPrefs.autoUpdate.default     "Default">
-<!ENTITY scriptPrefs.autoUpdate.on          "On">
-<!ENTITY scriptPrefs.autoUpdate.off         "Off">
-<!ENTITY scriptPrefs.label.position         "Execution position">
+<!ENTITY scriptPrefs.label.runAt            "Момент запуска">
+<!ENTITY scriptPrefs.label.noFrames         "Обработка фреймов">
+<!ENTITY scriptPrefs.label.noFramesValue    "Не трогать фреймы">
+<!ENTITY scriptPrefs.label.injectInto       "Внедрять в">
+<!ENTITY scriptPrefs.injectInto.auto        "Автовыбор">
+<!ENTITY scriptPrefs.injectInto.page        "Контекст страницы">
+<!ENTITY scriptPrefs.injectInto.content     "Содержимое (песочница)">
+<!ENTITY scriptPrefs.label.autoUpdate       "Автоматическое обновление">
+<!ENTITY scriptPrefs.autoUpdate.default     "В соответствии с настройками Greasemonkey">
+<!ENTITY scriptPrefs.autoUpdate.on          "Да">
+<!ENTITY scriptPrefs.autoUpdate.off         "Нет">
+<!ENTITY scriptPrefs.label.position         "Очерёдность запуска">
 
 <!-- Pages section sub-headers -->
-<!ENTITY scriptPrefs.pages.userHint         "These rules are added on top of the script's own.">
+<!ENTITY scriptPrefs.pages.userHint         "Эти правила добавляются перед имеющимися в скрипте.">
 <!ENTITY scriptPrefs.pages.scriptDeclaredHeader "Script-declared (read-only)">
 <!ENTITY scriptPrefs.pages.scriptHint       "From the script's @include / @match / @exclude.">
 
 <!-- Permissions section field labels -->
-<!ENTITY scriptPrefs.label.grants           "Granted APIs">
-<!ENTITY scriptPrefs.label.connects         "Allowed connect hosts">
-<!ENTITY scriptPrefs.label.requires         "@require">
-<!ENTITY scriptPrefs.label.resources        "@resource">
-<!ENTITY scriptPrefs.label.antifeatures     "Antifeatures">
+<!ENTITY scriptPrefs.label.grants           "Использует API">
+<!ENTITY scriptPrefs.label.connects         "Связывается с">
+<!ENTITY scriptPrefs.label.requires         "Нуждается в">
+<!ENTITY scriptPrefs.label.resources        "Загружает">
+<!ENTITY scriptPrefs.label.antifeatures     "Нежелательные функции">
 
 <!-- Values tab -->
-<!ENTITY scriptPrefs.values.add             "Добавить…">
-<!ENTITY scriptPrefs.values.edit            "Изменить…">
+<!ENTITY scriptPrefs.values.add             "Добавить...">
+<!ENTITY scriptPrefs.values.edit            "Изменить...">
 <!ENTITY scriptPrefs.values.delete          "Удалить">
 <!ENTITY scriptPrefs.values.key             "Ключ">
 <!ENTITY scriptPrefs.values.type            "Тип">
 <!ENTITY scriptPrefs.values.value           "Значение">
-<!ENTITY scriptPrefs.values.empty           "У этого скрипта нет сохраненных значений.">
-<!ENTITY scriptPrefs.label.noFramesTooltip  "When checked, the script runs only in the top-level page and is skipped inside iframes / child frames.  Maps to the @noframes metadata directive.">
+<!ENTITY scriptPrefs.values.empty           "У этого скрипта нет сохранённых значений.">
+<!ENTITY scriptPrefs.label.noFramesTooltip  "Если выбрано, скрипт будет обрабатывать только верхний уровень страницы и пропускать содержащиеся в ней фреймы. Соответствует директиве метаданных @noframes.">
 <!ENTITY scriptPrefs.label.noFramesTooltip.short "@noframes — skip iframes / child frames">
-<!ENTITY scriptPrefs.label.metaSize          "Size">
+<!ENTITY scriptPrefs.label.metaSize          "Размер">
 <!ENTITY scriptPrefs.button.ok              "ОК">
 <!ENTITY scriptPrefs.button.cancel          "Отмена">
-<!ENTITY scriptPrefs.copy                   "Copy">
-<!ENTITY scriptPrefs.copy.accesskey         "C">
-<!ENTITY scriptPrefs.selectAll              "Select All">
-<!ENTITY scriptPrefs.selectAll.accesskey    "A">
+<!ENTITY scriptPrefs.copy                   "Копировать">
+<!ENTITY scriptPrefs.copy.accesskey         "К">
+<!ENTITY scriptPrefs.selectAll              "Выделить всё">
+<!ENTITY scriptPrefs.selectAll.accesskey    "ы">
 
 <!-- 3.8.1: entities present in en-US but absent here, added as English
      fallback to prevent a fatal XML "undefined entity" parse error (issue #23).
      Translate when convenient. -->
-<!ENTITY scriptPrefs.tab.userPrefs "User Preferences">
-<!ENTITY scriptPrefs.section.userPages "User pages">
-<!ENTITY scriptPrefs.section.scriptDeclared "Script-declared pages (read-only)">
+<!ENTITY scriptPrefs.tab.userPrefs "Пользовательские настройки">
+<!ENTITY scriptPrefs.section.userPages "Страницы">
+<!ENTITY scriptPrefs.section.scriptDeclared "Заданные в скрипте адреса (только просмотр)">

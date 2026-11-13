@@ -396,12 +396,16 @@ DownloadListener.prototype = {
       Object.getOwnPropertyNames(headers).forEach(function (aProp) {
         _headers += "\n" + '"' + aProp + '": "' + headers[aProp] + '"';
       });
-      errorMessage = GM_CONSTANTS.localeStringBundle.createBundle(
-          GM_CONSTANTS.localeGreasemonkeyProperties)
-          .GetStringFromName("error.serverReturned")
-          + " " + httpChannel.responseStatus + " "
-          + httpChannel.responseStatusText + "."
-          + ((_headers != "") ? "\n" + _headers : "");
+      errorMessage = GM_CONSTANTS.localeStringBundle
+                     .createBundle(GM_CONSTANTS.localeGreasemonkeyProperties)
+                     .formatStringFromName(
+                        "error.serverReturned"
+                      , [ httpChannel.responseStatus + " "
+                        + httpChannel.responseStatusText + "."
+                        + ((_headers != "") ? "\n" + _headers : "")
+                        ]
+                      , 1
+                      );
     } catch (e) {
       // Not an HTTP channel (a file: one, say): aStatusCode alone tells
       // whether it worked.
@@ -410,8 +414,7 @@ DownloadListener.prototype = {
     if (error && this._errorsAreFatal) {
       errorMessage = GM_CONSTANTS.localeStringBundle.createBundle(
           GM_CONSTANTS.localeGreasemonkeyProperties)
-          .GetStringFromName("error.downloadingUrl")
-          + "\n" + this._uri.spec + "\n\n" + errorMessage;
+          .formatStringFromName("error.downloadingUrl", [this._uri.spec, errorMessage], 2);
     }
 
     this._progressCallback(aRequest, 1);
@@ -580,8 +583,7 @@ RemoteScript.prototype.downloadScript = function (aCompletionCallback) {
       "RemoteScript.downloadScript: Completion " + CALLBACK_IS_NOT_FUNCTION);
   if (!this._url) {
     throw new Error(
-        "RemoteScript.downloadScript: "
-        + "Tried to download script, but have no URL.");
+        "RemoteScript.downloadScript: Tried to download script, but have no URL.");
   }
 
   this._scriptFile = GM_util.getTempFile(
@@ -820,11 +822,14 @@ RemoteScript.prototype.parseScript = function (aSource, aPartial) {
     if (!aPartial) {
       let bundle = GM_CONSTANTS.localeStringBundle.createBundle(
           GM_CONSTANTS.localeGreasemonkeyProperties);
-      this.cleanup(
-          bundle.GetStringFromName("error.parsingScript")
-          + "\n" + (script
-              ? script.parseErrors
-              : bundle.GetStringFromName("error.unknown")));
+      this.cleanup(bundle.formatStringFromName("error.parsingScript"
+                                              , [script
+                                                 ? script.parseErrors
+                                                 : bundle.GetStringFromName("error.unknown")
+                                                ]
+                                              , 1
+                                              )
+                  );
     }
     return false;
   }
@@ -1193,20 +1198,9 @@ RemoteScript.prototype._downloadDependency = function (
             + aDependency.downloadURL + " (expected "
             + aDependency._integrity.algo + "=" + aDependency._integrity.hex
             + ").", false);
-        let message;
-        try {
-          message = GM_CONSTANTS.localeStringBundle.createBundle(
-              GM_CONSTANTS.localeGreasemonkeyProperties)
-              .GetStringFromName("error.remoteScript.integrityMismatch");
-        } catch (e) {
-          message = "%1 doesn't match the %2 hash that the script pinned for"
-              + " it, so nothing was installed.  The file may have changed"
-              + " on its server; the script's author needs to update the"
-              + " pin.";
-        }
-        aDone(message
-            .replace("%2", aDependency._integrity.algo)
-            .replace("%1", aDependency.downloadURL));
+        aDone(GM_CONSTANTS.localeStringBundle.createBundle(
+            GM_CONSTANTS.localeGreasemonkeyProperties)
+            .formatStringFromName("error.remoteScript.integrityMismatch", [aDependency.downloadURL, aDependency._integrity.algo], 2));
         return undefined;
       }
     }
@@ -1270,8 +1264,7 @@ RemoteScript.prototype._downloadFile = function (
       this.cleanup(
           GM_CONSTANTS.localeStringBundle.createBundle(
               GM_CONSTANTS.localeGreasemonkeyProperties)
-              .GetStringFromName("error.remoteScript.unsafeUrl")
-              .replace("%1", aUri.spec));
+              .formatStringFromName("error.remoteScript.unsafeUrl", [aUri.spec], 1));
       return undefined;
     }
   }

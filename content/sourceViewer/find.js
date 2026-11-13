@@ -46,7 +46,7 @@ var SvFind = {
    * the shortcuts.
    * @param {object} aCM - The CodeMirror instance.
    * @param {function(string, string): string} aString - Localised string
-   *        lookup with an English fallback.
+   *        lookup.
    * @returns {void}
    */
   "init": function (aCM, aString) {
@@ -55,7 +55,7 @@ var SvFind = {
 
     let input = this._el("gm-sv-find-input");
     input.setAttribute("placeholder",
-        aString("sourceViewer.find.placeholder", "Find"));
+        aString("sourceViewer.find.placeholder"));
     input.addEventListener("input", this._search.bind(this), false);
     input.addEventListener("keydown", function (aEvent) {
       if (aEvent.keyCode == 13) {
@@ -67,10 +67,9 @@ var SvFind = {
       }
     }.bind(this), false);
 
-    this._button("gm-sv-find-case", "sourceViewer.find.case", "Match case");
-    this._button("gm-sv-find-word", "sourceViewer.find.word", "Whole word");
-    this._button("gm-sv-find-regex", "sourceViewer.find.regex",
-        "Regular expression");
+    this._button("gm-sv-find-case", "sourceViewer.find.case");
+    this._button("gm-sv-find-word", "sourceViewer.find.word");
+    this._button("gm-sv-find-regex", "sourceViewer.find.regex");
     ["gm-sv-find-case", "gm-sv-find-word", "gm-sv-find-regex"].forEach(
         function (aId) {
           let toggle = this._el(aId);
@@ -81,28 +80,26 @@ var SvFind = {
             input.focus();
           }.bind(this), false);
         }, this);
-    this._button("gm-sv-find-prev", "sourceViewer.find.prev",
-        "Previous match (Shift+Enter)").addEventListener("click",
+    this._button("gm-sv-find-prev", "sourceViewer.find.prev")
+        .addEventListener("click",
         this._step.bind(this, -1), false);
-    this._button("gm-sv-find-next", "sourceViewer.find.next",
-        "Next match (Enter)").addEventListener("click",
+    this._button("gm-sv-find-next", "sourceViewer.find.next")
+        .addEventListener("click",
         this._step.bind(this, 1), false);
-    this._button("gm-sv-find-close", "sourceViewer.find.close",
-        "Close (Esc)").addEventListener("click",
+    this._button("gm-sv-find-close", "sourceViewer.find.close")
+        .addEventListener("click",
         this._close.bind(this), false);
 
     let open = this._el("gm-sv-find-open");
-    open.textContent = aString("sourceViewer.find.open", "Find");
-    open.title = aString("sourceViewer.find.open.tooltip",
-        "Find (Ctrl+F).  Ctrl+G goes to a line.");
+    open.textContent = aString("sourceViewer.find.open");
+    open.title = aString("sourceViewer.find.open.tooltip");
     open.removeAttribute("hidden");
     open.addEventListener("click", this._open.bind(this), false);
 
     let gotoLabel = this._el("gm-sv-goto-label");
-    gotoLabel.textContent = aString("sourceViewer.goto.label", "Go to line:");
+    gotoLabel.textContent = aString("sourceViewer.goto.label");
     let gotoInput = this._el("gm-sv-goto-input");
-    gotoInput.title = aString("sourceViewer.goto.tooltip",
-        "A line number, or line:column");
+    gotoInput.title = aString("sourceViewer.goto.tooltip");
     gotoInput.addEventListener("input", function () {
       gotoInput.removeAttribute("aria-invalid");
     }, false);
@@ -314,16 +311,14 @@ var SvFind = {
     if (!input.value) {
       count.textContent = "";
     } else if (input.hasAttribute("aria-invalid")) {
-      count.textContent = this._string(
-          "sourceViewer.find.invalid", "Bad pattern");
+      count.textContent = this._string("sourceViewer.find.invalid");
     } else if (!this._matches.length) {
-      count.textContent = this._string(
-          "sourceViewer.find.noResults", "No results");
+      count.textContent = this._string("sourceViewer.find.noResults");
     } else {
-      count.textContent = this._string("sourceViewer.find.count", "%1 of %2")
-          .replace("%1", (this._index + 1).toLocaleString())
-          .replace("%2", this._matches.length.toLocaleString()
-              + (this._capped ? "+" : ""));
+      count.textContent = this._string("sourceViewer.find.count",
+          [ (this._index + 1).toLocaleString()
+          , this._matches.length.toLocaleString() + (this._capped ? "+" : "")
+          ]);
     }
     count.setAttribute("problem", String(input.value != ""
         && (input.hasAttribute("aria-invalid") || !this._matches.length)));
@@ -355,8 +350,8 @@ var SvFind = {
     input.value = "";
     input.removeAttribute("aria-invalid");
     input.setAttribute("placeholder", this._string(
-        "sourceViewer.goto.placeholder", "1–%1")
-        .replace("%1", this._cm.lineCount().toLocaleString()));
+        "sourceViewer.goto.placeholder",
+        [this._cm.lineCount().toLocaleString()]);
     this._el("gm-sv-goto").removeAttribute("hidden");
     input.focus();
   },
@@ -396,9 +391,9 @@ var SvFind = {
   },
 
   /** Sets a button's tooltip; returns the button. */
-  "_button": function (aId, aKey, aFallback) {
+  "_button": function (aId, aKey) {
     let button = this._el(aId);
-    button.title = this._string(aKey, aFallback);
+    button.title = this._string(aKey);
     return button;
   },
 

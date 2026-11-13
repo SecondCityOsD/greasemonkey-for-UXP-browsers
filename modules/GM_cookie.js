@@ -193,11 +193,8 @@ function createGMCookieAPI(
     // to attach the API at all (which would mask the failure).
     let unsupported = function () {
       throw new aWrappedContentWin.Error(
-          "GM_cookie: "
-          + GM_CONSTANTS.localeStringBundle.createBundle(
-                GM_CONSTANTS.localeGreasemonkeyProperties)
-                .GetStringFromName("error.environment.unsupported.e10s"),
-          aFileURL, null);
+                  "GM_cookie: Electrolysis (e10s) is not supported.",
+                  aFileURL, null);
     };
     let stub = Cu.createObjectIn(aSandbox);
     Cu.exportFunction(unsupported, stub, { "defineAs": "list" });
@@ -308,8 +305,9 @@ function createGMCookieAPI(
     let host = resolveHost(aFilter);
     if (host === null) {
       let err = new aWrappedContentWin.Error(
-          "GM_cookie.list: cross-domain access to that host is not "
-          + "permitted by the script's @connect.", aFileURL, null);
+                      GM_CONSTANTS.localeStringBundle.createBundle(GM_CONSTANTS.localeGreasemonkeyProperties)
+                                  .formatStringFromName("error.cookie.XDomainNotPermitted", ["GM_cookie.list"], 1),
+                      aFileURL, null);
       safeCall(aCallback, null, err);
       throw err;
     }
@@ -362,12 +360,9 @@ function createGMCookieAPI(
   function setImpl(aDetails, aCallback) {
     if (!aDetails || typeof aDetails !== "object") {
       let err = new aWrappedContentWin.Error(
-          GM_CONSTANTS.localeStringBundle.createBundle(
-                GM_CONSTANTS.localeGreasemonkeyProperties)
-                .GetStringFromName("error.cookie.argument")
-                .replace("%1", "set")
-                .replace("%2", typeof aDetails),
-          aFileURL, null);
+                      GM_CONSTANTS.localeStringBundle.createBundle(GM_CONSTANTS.localeGreasemonkeyProperties)
+                                  .formatStringFromName("error.cookie.argument", ["set", typeof aDetails], 2),
+                      aFileURL, null);
       safeCall(aCallback, null, err);
       throw err;
     }
@@ -375,8 +370,9 @@ function createGMCookieAPI(
     let host = resolveHost(aDetails);
     if (host === null) {
       let err = new aWrappedContentWin.Error(
-          "GM_cookie.set: cross-domain access to that host is not "
-          + "permitted by the script's @connect.", aFileURL, null);
+                      GM_CONSTANTS.localeStringBundle.createBundle(GM_CONSTANTS.localeGreasemonkeyProperties)
+                                  .formatStringFromName("error.cookie.XDomainNotPermitted", ["GM_cookie.set"], 1),
+                      aFileURL, null);
       safeCall(aCallback, null, err);
       throw err;
     }
@@ -394,23 +390,17 @@ function createGMCookieAPI(
 
     if (typeof name === "undefined") {
       let err = new aWrappedContentWin.Error(
-          GM_CONSTANTS.localeStringBundle.createBundle(
-                GM_CONSTANTS.localeGreasemonkeyProperties)
-                .GetStringFromName("error.cookie.argument.name")
-                .replace("%1", "set")
-                .replace("%2", typeof name),
-          aFileURL, null);
+                      GM_CONSTANTS.localeStringBundle.createBundle(GM_CONSTANTS.localeGreasemonkeyProperties)
+                                  .formatStringFromName("error.cookie.argument.name", ["set", typeof name], 2),
+                      aFileURL, null);
       safeCall(aCallback, null, err);
       throw err;
     }
     if (typeof value === "undefined") {
       let err = new aWrappedContentWin.Error(
-          GM_CONSTANTS.localeStringBundle.createBundle(
-                GM_CONSTANTS.localeGreasemonkeyProperties)
-                .GetStringFromName("error.cookie.argument.value")
-                .replace("%1", "set")
-                .replace("%2", typeof value),
-          aFileURL, null);
+                      GM_CONSTANTS.localeStringBundle.createBundle(GM_CONSTANTS.localeGreasemonkeyProperties)
+                                  .formatStringFromName("error.cookie.argument.value", ["set", typeof value], 2),
+                      aFileURL, null);
       safeCall(aCallback, null, err);
       throw err;
     }
@@ -463,12 +453,9 @@ function createGMCookieAPI(
 
     if (typeof name === "undefined") {
       let err = new aWrappedContentWin.Error(
-          GM_CONSTANTS.localeStringBundle.createBundle(
-                GM_CONSTANTS.localeGreasemonkeyProperties)
-                .GetStringFromName("error.cookie.argument.name")
-                .replace("%1", "delete")
-                .replace("%2", typeof name),
-          aFileURL, null);
+                      GM_CONSTANTS.localeStringBundle.createBundle(GM_CONSTANTS.localeGreasemonkeyProperties)
+                                  .formatStringFromName("error.cookie.argument.name", ["delete", typeof name], 2),
+                      aFileURL, null);
       safeCall(aCallback, null, err);
       throw err;
     }
@@ -476,8 +463,9 @@ function createGMCookieAPI(
     let host = resolveHost(aDetails);
     if (host === null) {
       let err = new aWrappedContentWin.Error(
-          "GM_cookie.delete: cross-domain access to that host is not "
-          + "permitted by the script's @connect.", aFileURL, null);
+                      GM_CONSTANTS.localeStringBundle.createBundle(GM_CONSTANTS.localeGreasemonkeyProperties)
+                                  .formatStringFromName("error.cookie.XDomainNotPermitted", ["GM_cookie.delete"], 1),
+                      aFileURL, null);
       safeCall(aCallback, null, err);
       throw err;
     }

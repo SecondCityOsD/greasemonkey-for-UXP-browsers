@@ -251,7 +251,7 @@ ScriptAddon.prototype.id = null;
 ScriptAddon.prototype.isCompatible = true;
 ScriptAddon.prototype.homepageURL = null;
 ScriptAddon.prototype.name = null;
-ScriptAddon.prototype.operationsRequiringRestart = 
+ScriptAddon.prototype.operationsRequiringRestart =
     AddonManager.OP_NEEDS_RESTART_NONE;
 ScriptAddon.prototype.pendingOperations = 0;
 ScriptAddon.prototype.scope = AddonManager.SCOPE_PROFILE;
@@ -281,9 +281,7 @@ Object.defineProperty(ScriptAddon.prototype, "applyBackgroundUpdates", {
     if (reenablingWhileEdited) {
       let bundle = GM_CONSTANTS.localeStringBundle.createBundle(
           GM_CONSTANTS.localeGmAddonsProperties);
-      let confirmed = Services.prompt.confirm(
-          null,
-          "Greasemonkey",
+      let confirmed = GM_util.prompt.confirm(null,
           bundle.GetStringFromName("confirmEnableAutoUpdate"));
       if (!confirmed) {
         // No mutation — but fire onPropertyChanged so the AOM re-reads the
@@ -606,9 +604,7 @@ ScriptInstall.prototype._script = null;
  */
 ScriptInstall.prototype.install = function () {
   if (this._script.hasUnacceptedLocalEdits()) {
-    let confirmed = Services.prompt.confirm(
-        null,
-        "Greasemonkey",
+    let confirmed = GM_util.prompt.confirm(null,
         GM_CONSTANTS.localeStringBundle.createBundle(
             GM_CONSTANTS.localeGmAddonsProperties)
             .GetStringFromName("confirmForceUpdate"));

@@ -767,7 +767,9 @@ GM_ScriptStorageFront.prototype.setValue = function (aName, aVal) {
     JSON.stringify(aVal);
   } catch (e) {
     this._throwSandboxError(
-        "GM_setValue: value is not JSON-serialisable: " + e.message);
+        GM_CONSTANTS.localeStringBundle.createBundle(
+            GM_CONSTANTS.localeGreasemonkeyProperties)
+            .formatStringFromName("error.setValue.wrongValue", [e.message], 1));
   }
 
   // No-op identical-write fast path: if the value held in the cache
@@ -850,7 +852,7 @@ GM_ScriptStorageFront.prototype.getValue = function (aName, aDefVal) {
       value = JSON.parse(raw);
     } catch (e) {
       GM_util.logError(
-          MESSAGE_ERROR_PREFIX_FRONT.trim() + "\n" + e, false,
+          MESSAGE_ERROR_PREFIX_FRONT + "\n" + e, false,
           e.fileName, e.lineNumber);
       return aDefVal;
     }
@@ -934,7 +936,7 @@ GM_ScriptStorageFront.prototype.listValues = function () {
     });
   } catch (e) {
     GM_util.logError(
-        MESSAGE_ERROR_PREFIX_FRONT.trim() + "\n" + e, false,
+        MESSAGE_ERROR_PREFIX_FRONT + "\n" + e, false,
         e.fileName, e.lineNumber);
     return Cu.cloneInto([], this._sandbox);
   }
@@ -988,7 +990,7 @@ GM_ScriptStorageFront.prototype.getValues = function (aWhat) {
           parsed = JSON.parse(rawVal);
         } catch (e) {
           GM_util.logError(
-              MESSAGE_ERROR_PREFIX_FRONT.trim() + " getValues parse:\n" + e,
+              MESSAGE_ERROR_PREFIX_FRONT + "getValues parse:\n" + e,
               false, e.fileName, e.lineNumber);
           parsed = null;
         }

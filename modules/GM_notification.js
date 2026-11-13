@@ -150,8 +150,8 @@ function GM_notification(aMessage, aTopic, aOptions) {
         break;
       default:
         GM_util.logError(
-            "(internal) GM_notification():"
-            + "\n" + aMessage + "\n" + "chromeWin = " + chromeWin);
+            "(internal) GM_notification():\n"
+            + aMessage + "\n" + "chromeWin = " + chromeWin);
         break;
     }
   }

@@ -66,29 +66,39 @@ var _GM_parseMetaLine = /*
     }
 
     function literalEscape(s) {
-      return s
-        .replace(/\\/g, '\\\\')
-        .replace(/"/g,  '\\"')
-        .replace(/\0/g, '\\0')
-        .replace(/\t/g, '\\t')
-        .replace(/\n/g, '\\n')
-        .replace(/\r/g, '\\r')
-        .replace(/[\x00-\x0F]/g,          function(ch) { return '\\x0' + hex(ch); })
-        .replace(/[\x10-\x1F\x7F-\x9F]/g, function(ch) { return '\\x'  + hex(ch); });
+      return s.replace( /[\\"\x00-\x1F\x7F-\x9F]/g
+                      , function (ch) {
+                          switch (ch) {
+                            case "\\": return "\\\\";
+                            case '"': return '\\"';
+                            case "\r": return "\\r";
+                            case "\n": return "\\n";
+                            case "\t": return "\\t";
+                            case "\0": return "\\0";
+                          }
+                          if (ch < "\x10") return "\\x0" + hex(ch);
+                          return '\\x'  + hex(ch);
+                        }
+                      );
     }
 
     function classEscape(s) {
-      return s
-        .replace(/\\/g, '\\\\')
-        .replace(/\]/g, '\\]')
-        .replace(/\^/g, '\\^')
-        .replace(/-/g,  '\\-')
-        .replace(/\0/g, '\\0')
-        .replace(/\t/g, '\\t')
-        .replace(/\n/g, '\\n')
-        .replace(/\r/g, '\\r')
-        .replace(/[\x00-\x0F]/g,          function(ch) { return '\\x0' + hex(ch); })
-        .replace(/[\x10-\x1F\x7F-\x9F]/g, function(ch) { return '\\x'  + hex(ch); });
+      return s.replace( /[\\\]^\-\x00-\x1F\x7F-\x9F]/g
+                      , function (ch) {
+                          switch (ch) {
+                            case "\\": return "\\\\";
+                            case "\]": return "\\]";
+                            case "\^": return "\\^";
+                            case "-": return "\\-";
+                            case "\r": return "\\r";
+                            case "\n": return "\\n";
+                            case "\t": return "\\t";
+                            case "\0": return "\\0";
+                          }
+                          if (ch < "\x10") return "\\x0" + hex(ch);
+                          return '\\x'  + hex(ch);
+                        }
+                      );
     }
 
     function describeExpectation(expectation) {

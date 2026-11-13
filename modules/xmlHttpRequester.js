@@ -248,9 +248,7 @@ GM_xmlHttpRequester.prototype._isConnectAllowed = function (aRequestUri) {
 GM_xmlHttpRequester.prototype.contentStartRequest = function (aDetails) {
   if (!aDetails || (typeof aDetails != "object")) {
     throw new this.wrappedContentWin.Error(
-        GM_CONSTANTS.localeStringBundle.createBundle(
-            GM_CONSTANTS.localeGreasemonkeyProperties)
-            .GetStringFromName("error.xmlhttpRequest.noDetails"),
+        "GM_xmlhttpRequest(): No valid details supplied.",
         this.fileURL, null);
   }
 
@@ -264,17 +262,14 @@ GM_xmlHttpRequester.prototype.contentStartRequest = function (aDetails) {
   } catch (e) {
     // A malformed URL won't be parsed properly.
     throw new this.wrappedContentWin.Error(
-        GM_CONSTANTS.localeStringBundle.createBundle(
-            GM_CONSTANTS.localeGreasemonkeyProperties)
-            .GetStringFromName("error.invalidUrl")
-            .replace("%1", aDetails.url),
+        "GM_xmlhttpRequest(): Invalid URL: " + aDetails.url,
         this.fileURL, null);
   }
 
   // Enforce @connect whitelist.
   if (!this._isConnectAllowed(uri)) {
     throw new this.wrappedContentWin.Error(
-        "GM_xmlhttpRequest: request to " + uri.host
+        "GM_xmlhttpRequest(): request to " + uri.host
         + " is not allowed by @connect.",
         this.fileURL, null);
   }
@@ -300,10 +295,7 @@ GM_xmlHttpRequester.prototype.contentStartRequest = function (aDetails) {
       break;
     default:
       throw new this.wrappedContentWin.Error(
-          GM_CONSTANTS.localeStringBundle.createBundle(
-              GM_CONSTANTS.localeGreasemonkeyProperties)
-              .GetStringFromName("error.disallowedScheme")
-              .replace("%1", aDetails.url),
+          "GM_xmlhttpRequest(): Disallowed scheme in URL: " + aDetails.url,
           this.fileURL, null);
   }
 
@@ -415,8 +407,7 @@ function (aSafeUrl, aDetails, aReq) {
         !aDetails.synchronous, aDetails.user || "", aDetails.password || "");
   } catch (e) {
     throw new this.wrappedContentWin.Error(
-        "GM_xmlhttpRequest():"
-        + "\n" + aDetails.url + "\n" + e,
+        "GM_xmlhttpRequest(): " + aDetails.url + "\n" + e,
         this.fileURL, null);
   }
 
@@ -571,8 +562,7 @@ function (aSafeUrl, aDetails, aReq) {
     }
   } catch (e) {
     throw new this.wrappedContentWin.Error(
-        "GM_xmlhttpRequest():"
-        + "\n" + aDetails.url + "\n" + e,
+        "GM_xmlhttpRequest(): " + aDetails.url + "\n" + e,
         this.fileURL, null);
   }
 };
@@ -622,11 +612,7 @@ GM_xmlHttpRequester.prototype.setupRequestEvent = function (
   }
   if (typeof eventCallback != "function") {
     throw new aWrappedContentWin.Error(
-        GM_CONSTANTS.localeStringBundle.createBundle(
-            GM_CONSTANTS.localeGreasemonkeyProperties)
-            .GetStringFromName("error.xmlhttpRequest.callbackIsNotFunction")
-            .replace("%1", aDetails.url)
-            .replace("%2", callbackName),
+        "GM_xmlhttpRequest():\n" + aDetails.url + "\nCallback " + callbackName + " is not a function!",
         aFileURL, null);
   }
 
@@ -689,8 +675,8 @@ GM_xmlHttpRequester.prototype.setupRequestEvent = function (
         xmlDoc = new aWrappedContentWin.Document();
       } catch (e) {
         GM_util.logError(
-            "GM_xmlHttpRequester.setupRequestEvent - url:"
-            + "\n" + '"' + aDetails.url + '":' + "\n" + e, true,
+            "GM_xmlHttpRequester.setupRequestEvent - url:\n"
+            + '"' + aDetails.url + '":\n' + e, true,
             aFileURL, null);
         xmlDoc = null;
       }
@@ -704,8 +690,8 @@ GM_xmlHttpRequester.prototype.setupRequestEvent = function (
           // null documentElement or a foreign-document node type.
           // Same policy: log and pass through with responseXML null.
           GM_util.logError(
-              "GM_xmlHttpRequester.setupRequestEvent - responseXML clone:"
-              + "\n" + '"' + aDetails.url + '":' + "\n" + e, true,
+              "GM_xmlHttpRequester.setupRequestEvent - responseXML clone:\n"
+              + '"' + aDetails.url + '":\n' + e, true,
               aFileURL, null);
         }
       }
@@ -736,8 +722,8 @@ GM_xmlHttpRequester.prototype.setupRequestEvent = function (
         aReq.abort();
       } catch (e) {
         GM_util.logError(
-            "GM_xmlHttpRequester.setupRequestEvent - url:"
-            + "\n" + '"' + aDetails.url + '":' + "\n" + e, true,
+            "GM_xmlHttpRequester.setupRequestEvent - url:\n"
+            + '"' + aDetails.url + '":\n' + e, true,
             aFileURL, null);
       }
       return undefined;

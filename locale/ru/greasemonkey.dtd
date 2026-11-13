@@ -1,75 +1,75 @@
-<!ENTITY enableSync "Включить Pale Moon Sync для пользовательских скриптов">
+<!ENTITY enableSync "Использовать Pale Moon Sync для пользовательских скриптов">
 <!ENTITY greasemonkey.getUserScripts "Скачать скрипты">
 <!ENTITY greasemonkey.noScriptShere "Для этой страницы нет скриптов">
 <!ENTITY greasemonkey.youHaveNoScripts "У вас не установлено ни одного скрипта">
-<!ENTITY install.alreadyInstalled "This script is already installed">
-<!ENTITY install.butNotOn "Исключаемые адреса:">
+<!ENTITY install.alreadyInstalled "Этот скрипт уже установлен">
+<!ENTITY install.butNotOn "Исключаемые адреса (@exclude):">
 <!ENTITY install.downloadError "Ошибка загрузки">
-<!ENTITY install.installButton "Начать установку">
-<!ENTITY install.matches "совпадений:">
-<!ENTITY install.runsOn "Охватываемые адреса:">
-<!ENTITY install.showOriginalScriptSource "Show Original Script Source">
+<!ENTITY install.installButton "Установить">
+<!ENTITY install.matches "Адреса, соответствующие (@matches):">
+<!ENTITY install.runsOn "Адреса (@include):">
+<!ENTITY install.showOriginalScriptSource "Показать код имеющегося скрипта"> <!-- Show Original Script Source -->
 <!ENTITY install.showScriptSource "Показать код скрипта">
-<!ENTITY install.title "Установка скриптов Greasemonkey">
-<!ENTITY install.warning1 "Вредоносные скрипты могут собирать конфиденциальную информацию и действовать от вашего имени.">
+<!ENTITY install.title "Установка скрипта Greasemonkey">
+<!ENTITY install.warning1 "Вредоносные скрипты могут собирать конфиденциальную информацию и действовать от вашего имени без вашего ведома и согласия.">
 <!ENTITY install.warning2 "Устанавливайте скрипты только из доверенных источников.">
 <!ENTITY loading "Загрузка...">
 <!ENTITY menu.commands "Команды скриптов">
-<!ENTITY menu.commands.accesskey "м">
-<!ENTITY menu.install "Установить скрипт…">
+<!ENTITY menu.commands.accesskey "К">
+<!ENTITY menu.install "Установить скрипт...">
 <!ENTITY menu.install.accesskey "и">
 <!ENTITY menu.manage "Управление скриптами...">
-<!ENTITY menu.manage.accesskey "п">
-<!ENTITY menu.new "Создать скрипт…">
-<!ENTITY menu.new.accesskey "с">
+<!ENTITY menu.manage.accesskey "У">
+<!ENTITY menu.new "Создать скрипт...">
+<!ENTITY menu.new.accesskey "С">
 <!ENTITY menu.options "Настройки Greasemonkey...">
-<!ENTITY menu.options.accesskey "O">
+<!ENTITY menu.options.accesskey "Н">
 <!ENTITY menu.show "Показать код скрипта">
 <!ENTITY menu.show.accesskey "о">
-<!ENTITY menu.webSites "Сайт">
+<!ENTITY menu.webSites "Web-сайты">
 <!ENTITY menu.webSites.accesskey "W">
-<!ENTITY menu.webSites.getUserScripts "Получить пользовательские скрипты">
+<!ENTITY menu.webSites.getUserScripts "Скачать скрипты">
 <!--
 <!ENTITY menu.webSites.greasespot "Блог Greasespot">
 <!ENTITY menu.webSites.greasespotWiki "Вики Greasespot">
 -->
-<!ENTITY menu.webSites.manual "Мануал по Greasemonkey">
+<!ENTITY menu.webSites.manual "Руководство по Greasemonkey">
 <!ENTITY newScript.description "Описание">
-<!ENTITY newScript.excludes "Исключения (одно на строку)">
-<!ENTITY newScript.fromClipboard "Использовать скрипт из буфера обмена">
-<!ENTITY newScript.includes "Включения (одно на строку)">
-<!ENTITY newScript.name "Название">
-<!ENTITY newScript.namespace "Пространство имен">
+<!ENTITY newScript.excludes "@exclude (один адрес на строку)">
+<!ENTITY newScript.fromClipboard "Взять скрипт из буфера обмена">
+<!ENTITY newScript.includes "@include (один адрес на строку)">
+<!ENTITY newScript.name "Имя">
+<!ENTITY newScript.namespace "Пространство имён">
 <!ENTITY options.browseForEditor "Выбрать свой редактор">
 <!ENTITY options.defaultEditor "Редактор по умолчанию">
 <!ENTITY options.editor "Редактор">
 <!ENTITY options.experimental "Экспериментально">
 <!ENTITY options.globalExcludes "Глобальные исключения">
-<!ENTITY options.newScript.removeUnused "Удаление неиспользуемых линий">
-<!ENTITY options.newScript.template "Новый шаблон скрипта">
-<!ENTITY requireDisabledScriptsUpdates "Disabled scripts are checked for automatic updates">
+<!ENTITY options.newScript.removeUnused "Удалять неиспользуемые строки">
+<!ENTITY options.newScript.template "Шаблон новых скриптов">
+<!ENTITY requireDisabledScriptsUpdates "Проверять наличие обновлений отключённых скриптов">
 <!ENTITY requireSecureUpdates "Использовать безопасное обновление">
-<!ENTITY requireTimeoutUpdates "Require timeout updates">
+<!ENTITY requireTimeoutUpdates "Ограничить ожидание ответа от сервера с обновлениями"> <!-- "Require timeout updates" -->
 <!ENTITY scriptPrefs.scriptSettings "Настройки скрипта">
-<!ENTITY scriptPrefs.title "Настройки пользовательских скриптов Greasemonkey - !!">
+<!ENTITY scriptPrefs.title "Настройки пользовательского скрипта Greasemonkey - !!">
 <!ENTITY scriptPrefs.userSettings "Пользовательские настройки">
 <!ENTITY statusBar.enabled "Включить Greasemonkey">
-<!ENTITY statusBar.enabled.accesskey "к">
-<!ENTITY timeoutUpdatesUnits "Seconds">
-<!ENTITY uninstall "Удаление">
+<!ENTITY statusBar.enabled.accesskey "В">
+<!ENTITY timeoutUpdatesUnits "Секунд:">
+<!ENTITY uninstall "Удалить">
 <!ENTITY updateChecking "Проверка обновлений">
 
 <!-- 3.7.x: New... menu (about:addons) + Web-sites browse list.
      en-US source values below; translate per locale. -->
-<!ENTITY menu.newButton            "New...">
-<!ENTITY menu.new.create           "Create new userscript">
-<!ENTITY menu.new.greasyfork       "Install from GreasyFork">
-<!ENTITY menu.new.openuserjs       "Install from OpenUserJS">
-<!ENTITY menu.new.gist             "Install from Gist">
-<!ENTITY menu.new.fromUrl          "Install from URL...">
-<!ENTITY installUrl.heading        "Install user script from URL">
-<!ENTITY installUrl.install        "Install">
-<!ENTITY installUrl.cancel         "Cancel">
+<!ENTITY menu.newButton            "Новый...">
+<!ENTITY menu.new.create           "Создать новый скрипт">
+<!ENTITY menu.new.greasyfork       "Установить с GreasyFork">
+<!ENTITY menu.new.openuserjs       "Установить с OpenUserJS">
+<!ENTITY menu.new.gist             "Установить с Gist">
+<!ENTITY menu.new.fromUrl          "Установить по URL...">
+<!ENTITY installUrl.heading        "Введите URL скрипта">
+<!ENTITY installUrl.install        "Установить">
+<!ENTITY installUrl.cancel         "Отмена">
 <!ENTITY installUrl.placeholder    "https://example.com/script.user.js">
 <!ENTITY menu.webSites.greasyfork  "GreasyFork">
 <!ENTITY menu.webSites.openuserjs  "OpenUserJS">
@@ -78,19 +78,19 @@
 <!-- 3.8.1: entities present in en-US but absent here, added as English
      fallback to prevent a fatal XML "undefined entity" parse error (issue #23).
      Translate when convenient. -->
-<!ENTITY menu.webSites.reportBug "Report a bug">
+<!ENTITY menu.webSites.reportBug "Сообщить об ошибке">
 
 <!-- 3.9: script update scheduling (en-US fallback; translate). -->
-<!ENTITY intervalUpdates           "Check for script updates every">
-<!ENTITY intervalUpdatesUnits      "day(s); 0 disables scheduled checks">
-<!ENTITY updatesCheckNow           "Check now">
+<!ENTITY intervalUpdates           "Проверять наличие обновлений скриптов каждые">
+<!ENTITY intervalUpdatesUnits      "дней; 0 - не проверять">
+<!ENTITY updatesCheckNow           "Проверить сейчас">
 
 <!-- 3.9: scheduled on-disk backups (en-US fallback; translate). -->
-<!ENTITY options.backups           "Backups">
-<!ENTITY intervalBackups           "Back up all scripts every">
-<!ENTITY intervalBackupsUnits      "day(s); 0 disables automatic backups">
-<!ENTITY backupsFolder             "Folder:">
-<!ENTITY backupsBrowse             "Browse...">
-<!ENTITY backupsKeep               "Keep the newest">
-<!ENTITY backupsKeepUnits          "backups">
-<!ENTITY backupsNow                "Back up now">
+<!ENTITY options.backups           "Резервные копии">
+<!ENTITY intervalBackups           "Делать копии всех скриптов каждые">
+<!ENTITY intervalBackupsUnits      "дней; 0 - не делать">
+<!ENTITY backupsFolder             "Папка:">
+<!ENTITY backupsBrowse             "Выбор...">
+<!ENTITY backupsKeep               "Оставлять"> <!-- "Keep the newest" -->
+<!ENTITY backupsKeepUnits          "новейших копий"> <!-- "backups" -->
+<!ENTITY backupsNow                "Сделать копию сейчас">

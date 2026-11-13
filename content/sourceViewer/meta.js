@@ -38,24 +38,15 @@ const SV_META_MAX_ITEMS = 6;
  * long), the others flow.
  */
 const SV_META_ROWS = [
-  {"keywords": ["match", "include"], "label": "sourceViewer.meta.runsOn",
-    "fallback": "Runs on (@match, @include):"},
-  {"keywords": ["exclude", "exclude-match"], "label": "sourceViewer.meta.notOn",
-    "fallback": "Doesn't run on (@exclude, @exclude-match):"},
-  {"keywords": ["run-at", "noframes"], "label": "install.runAt",
-    "fallback": "Runs at (@run-at):"},
-  {"keywords": ["grant"], "label": "install.grants",
-    "fallback": "Permissions (@grant):"},
-  {"keywords": ["connect"], "label": "install.connects",
-    "fallback": "Can connect to (@connect):"},
-  {"keywords": ["require"], "label": "install.requires",
-    "fallback": "Code it loads (@require):", "list": true},
-  {"keywords": ["resource"], "label": "install.resources",
-    "fallback": "Files it loads (@resource):", "list": true},
-  {"keywords": ["antifeature"], "label": "install.antifeatures",
-    "fallback": "Antifeatures (@antifeature):", "list": true},
-  {"keywords": ["updateurl", "downloadurl"], "label": "sourceViewer.meta.updates",
-    "fallback": "Updates (@updateURL, @downloadURL):", "list": true},
+  {"keywords": ["match", "include"], "label": "sourceViewer.meta.runsOn" },
+  {"keywords": ["exclude", "exclude-match"], "label": "sourceViewer.meta.notOn" },
+  {"keywords": ["run-at", "noframes"], "label": "install.runAt" },
+  {"keywords": ["grant"], "label": "install.grants" },
+  {"keywords": ["connect"], "label": "install.connects" },
+  {"keywords": ["require"], "label": "install.requires", "list": true },
+  {"keywords": ["resource"], "label": "install.resources", "list": true },
+  {"keywords": ["antifeature"], "label": "install.antifeatures", "list": true },
+  {"keywords": ["updateurl", "downloadurl"], "label": "sourceViewer.meta.updates", "list": true },
 ];
 
 /** Grants that reach past the page, and the tag each one gets. */
@@ -91,7 +82,7 @@ var SvMeta = {
    * @param {function()} aOptions.relayout - Called after the header opens
    *        or closes, so the code can fit the new height.
    * @param {function(string, string): string} aOptions.string - Localised
-   *        string lookup with an English fallback.
+   *        string lookup.
    * @returns {void}
    */
   "init": function (aOptions) {
@@ -109,9 +100,8 @@ var SvMeta = {
     this._fill(header, lines,
         (aOptions.script && aOptions.script.parseWarnings) || []);
 
-    toggle.textContent = this._string("sourceViewer.meta.toggle", "Metadata");
-    toggle.title = this._string("sourceViewer.meta.toggle.tooltip",
-        "Show or hide what the script declares");
+    toggle.textContent = this._string("sourceViewer.meta.toggle");
+    toggle.title = this._string("sourceViewer.meta.toggle.tooltip");
     toggle.removeAttribute("hidden");
     toggle.addEventListener("click", function () {
       this._setOpen(header.hasAttribute("hidden"));
@@ -160,7 +150,7 @@ var SvMeta = {
     }).length;
 
     if (aWarnings.length) {
-      this._addRow(aHeader, this._string("install.warnings", "Warnings:"),
+      this._addRow(aHeader, this._string("install.warnings"),
           aWarnings.map(function (aWarning) {
             let item = document.createElement("span");
             item.className = "gm-sv-meta-item gm-sv-meta-warning";
@@ -177,12 +167,11 @@ var SvMeta = {
       if (!items.length && (row.keywords[0] == "grant")) {
         let none = document.createElement("span");
         none.className = "gm-sv-meta-item gm-sv-meta-none";
-        none.textContent = this._string(
-            "sourceViewer.meta.noGrant", "none declared");
+        none.textContent = this._string("sourceViewer.meta.noGrant");
         items.push(none);
       }
       if (items.length) {
-        this._addRow(aHeader, this._string(row.label, row.fallback),
+        this._addRow(aHeader, this._string(row.label),
             items, !!row.list);
       }
     }
@@ -207,8 +196,7 @@ var SvMeta = {
       let more = document.createElement("button");
       more.type = "button";
       more.className = "gm-sv-meta-more";
-      more.textContent = this._string("sourceViewer.meta.more", "+%1 more")
-          .replace("%1", aItems.length - shown);
+      more.textContent = this._string("sourceViewer.meta.more", [aItems.length - shown]);
       more.addEventListener("click", function () {
         values.removeChild(more);
         for (let i = shown, iLen = aItems.length; i < iLen; i++) {
@@ -226,8 +214,7 @@ var SvMeta = {
     let item = document.createElement("span");
     item.className = "gm-sv-meta-item";
     item.setAttribute("tabindex", "0");
-    item.title = this._string("sourceViewer.meta.jump", "Go to line %1")
-        .replace("%1", aLine.line + 1);
+    item.title = this._string("sourceViewer.meta.jump", [aLine.line + 1]);
     let jump = function (aEvent) {
       if ((aEvent.type == "click") || (aEvent.key == "Enter")) {
         this._jumpTo(aLine.line);
@@ -241,7 +228,7 @@ var SvMeta = {
     switch (aLine.keyword) {
       case "noframes":
         item.appendChild(this._text(this._string(
-            "sourceViewer.meta.topFrameOnly", "top frame only (@noframes)")));
+            "sourceViewer.meta.topFrameOnly")));
         break;
       case "grant":
         item.appendChild(this._code(value));
@@ -253,9 +240,8 @@ var SvMeta = {
         item.appendChild(this._code(value));
         if (value == "*") {
           item.appendChild(this._chip("gm-sv-tag",
-              this._string("sourceViewer.meta.anySite", "any site"),
-              this._string("sourceViewer.meta.anySite.tooltip",
-                  "It may send requests to any site.")));
+              this._string("sourceViewer.meta.anySite"),
+              this._string("sourceViewer.meta.anySite.tooltip")));
         }
         break;
       case "require":
@@ -293,23 +279,10 @@ var SvMeta = {
   },
 
   "_appendGrantTag": function (aItem, aTag) {
-    let text = {
-      "clipboard": ["clipboard", "It can write to your clipboard."],
-      "cookie": ["cookies", "It can read and change cookies."],
-      "download": ["saves files", "It can download files to your computer."],
-      "page": ["page access",
-          "It can reach the page's own scripts and variables."],
-      "requests": ["other sites", this._connects
-          ? "It can send requests, with your cookies, to the sites in "
-              + "@connect."
-          : "It can send requests, with your cookies, to any site: it has "
-              + "no @connect."],
-    }[aTag];
     let key = "sourceViewer.meta.tag." + aTag;
     let tooltipKey = key + ((aTag == "requests")
         ? (this._connects ? ".connect" : ".any") : "") + ".tooltip";
-    aItem.appendChild(this._chip("gm-sv-tag", this._string(key, text[0]),
-        this._string(tooltipKey, text[1])));
+    aItem.appendChild(this._chip("gm-sv-tag", this._string(key), this._string(tooltipKey)));
   },
 
   /**
@@ -335,16 +308,15 @@ var SvMeta = {
     }
     if ((uri.scheme == "http") || (uri.scheme == "ftp")) {
       aItem.appendChild(this._chip("gm-sv-chip-warn",
-          this._string("install.insecure", "not encrypted"),
-          this._string("install.insecure.tooltip",
-              "Sent unencrypted, so anyone on the network could change it.")));
+          this._string("install.insecure"),
+          this._string("install.insecure.tooltip")));
     }
     if (aOpenable && ((uri.scheme == "http") || (uri.scheme == "https"))) {
       let open = document.createElement("button");
       open.type = "button";
       open.className = "gm-sv-meta-open";
       open.textContent = "↗";
-      open.title = this._string("sourceViewer.meta.open", "Open in a new tab");
+      open.title = this._string("sourceViewer.meta.open");
       let spec = uri.spec;
       open.addEventListener("click", function (aEvent) {
         // Not a jump to the line as well.

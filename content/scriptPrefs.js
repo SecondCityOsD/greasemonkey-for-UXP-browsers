@@ -188,6 +188,9 @@ function populatePagesSection() {
   // The "moved to user-side via context-menu" callbacks no longer need a
   // tab switch (single-form layout), so the helpers just delegate.
   gElm.scriptIncludes.pages = gScript.includes;
+  gElm.scriptIncludes.onAddUserInclude = function (aPage) {
+    gElm.userIncludes.addPage(aPage);
+  };
   gElm.scriptIncludes.onAddUserExclude = function (aPage) {
     gElm.userExcludes.addPage(aPage);
   };
@@ -197,6 +200,9 @@ function populatePagesSection() {
     matchesPattern.push(gScript.matches[i].pattern);
   }
   gElm.scriptMatches.pages = matchesPattern;
+  gElm.scriptMatches.onAddUserMatch = function (aPage) {
+    gElm.userMatches.addPage(aPage);
+  };
 
   let userMatchesPattern = [];
   for (let i = 0, iLen = gScript.userMatches.length; i < iLen; i++) {
@@ -207,6 +213,9 @@ function populatePagesSection() {
   gElm.scriptExcludes.pages = gScript.excludes;
   gElm.scriptExcludes.onAddUserInclude = function (aPage) {
     gElm.userIncludes.addPage(aPage);
+  };
+  gElm.scriptExcludes.onAddUserExclude = function (aPage) {
+    gElm.userExcludes.addPage(aPage);
   };
   gElm.userExcludes.pages = gScript.userExcludes;
 
@@ -258,18 +267,15 @@ function populateMetadataSection() {
   // script's page on its host (GreasyFork etc.) has a row of its own.
   let declaredHomepage = gScript.declaredHomepageURL;
   setLink("meta-homepage", declaredHomepage || gScript.namespaceURL || "",
-      declaredHomepage ? null : localizedString(
-          "scriptPrefs.homepage.fromNamespace", "(from @namespace)"));
+      declaredHomepage ? null : localizedString("scriptPrefs.homepage.fromNamespace"));
   setLink("meta-scriptpage",   gScript.scriptPageURL   || "");
   setLink("meta-support",      gScript.supportURL      || "");
   setLink("meta-contribution", gScript.contributionURL || "");
   // Few scripts ask for donations, so that row shows only when one does.
   document.getElementById("meta-contribution-row").hidden =
       !gScript.contributionURL;
-  document.getElementById("meta-scriptpage-key").value = localizedString(
-      "scriptPrefs.label.scriptPage", "Script page");
-  document.getElementById("meta-contribution-key").value = localizedString(
-      "scriptPrefs.label.contribution", "Contribute");
+  document.getElementById("meta-scriptpage-key").value = localizedString("scriptPrefs.label.scriptPage");
+  document.getElementById("meta-contribution-key").value = localizedString("scriptPrefs.label.contribution");
 
   // Installed is the first install, which updates keep; Last updated is
   // the script file's latest change, an update or the user's own edit.
@@ -302,8 +308,7 @@ function computeScriptSizeLabel() {
   let bundle = GM_CONSTANTS.localeStringBundle.createBundle(
       GM_CONSTANTS.localeGreasemonkeyProperties);
   let unknown;
-  try { unknown = bundle.GetStringFromName("scriptPrefs.size.unknown"); }
-  catch (e) { unknown = "Unknown"; }
+  unknown = bundle.GetStringFromName("scriptPrefs.size.unknown");
 
   let bytes;
   try {
@@ -315,25 +320,16 @@ function computeScriptSizeLabel() {
   }
 
   if (bytes < 1024) {
-    try {
-      return bundle.GetStringFromName("scriptPrefs.size.bytes")
-          .replace("%1", bytes.toString());
-    } catch (e) { return bytes + " bytes"; }
+    return bundle.formatStringFromName("scriptPrefs.size.bytes", [bytes], 1);
   }
   if (bytes < 1024 * 1024) {
     let kb = bytes / 1024;
     let s = (kb < 10) ? kb.toFixed(1) : Math.round(kb).toString();
-    try {
-      return bundle.GetStringFromName("scriptPrefs.size.kb")
-          .replace("%1", s);
-    } catch (e) { return s + " KB"; }
+    return bundle.formatStringFromName("scriptPrefs.size.kb", [s], 1);
   }
   let mb = bytes / (1024 * 1024);
   let s = mb.toFixed(2);
-  try {
-    return bundle.GetStringFromName("scriptPrefs.size.mb")
-        .replace("%1", s);
-  } catch (e) { return s + " MB"; }
+  return bundle.GetStringFromName("scriptPrefs.size.mb", [s], 1);
 }
 
 /**
@@ -390,12 +386,11 @@ function setLink(aId, aUrl, aNote) {
 }
 
 /**
- * A string from greasemonkey.properties, or aFallback while this locale
- * doesn't have the key yet (strings added since the last locale pass).
+ * A string from greasemonkey.properties.
  */
-function localizedString(aKey, aFallback) {
-  return bundleStr(GM_CONSTANTS.localeStringBundle.createBundle(
-      GM_CONSTANTS.localeGreasemonkeyProperties), aKey, aFallback);
+function localizedString(aKey) {
+  return GM_CONSTANTS.localeStringBundle.createBundle(
+      GM_CONSTANTS.localeGreasemonkeyProperties).GetStringFromName(aKey);
 }
 
 /**
@@ -454,13 +449,8 @@ function populateBehaviourSection() {
   never.hidden = !cannotUpdate;
   if (cannotUpdate) {
     setLabel("behave-autoupdate-never", gScript.updatesDisabled
-        ? localizedString("scriptPrefs.autoUpdate.oldVersion",
-            "Never: this is an old version of the script (its"
-            + " @downloadURL is \"none\").  To get updates, install the"
-            + " current version from the script's page.")
-        : localizedString("scriptPrefs.autoUpdate.notUpdatable",
-            "Never: the script has no web address it can be updated"
-            + " from."));
+        ? localizedString("scriptPrefs.autoUpdate.oldVersion")
+        : localizedString("scriptPrefs.autoUpdate.notUpdatable"));
   }
 
   // Position dropdown — populate "1 of N" through "N of N", select the
@@ -496,10 +486,7 @@ function onAutoUpdateChange() {
   }
   let bundle = GM_CONSTANTS.localeStringBundle.createBundle(
       GM_CONSTANTS.localeGmAddonsProperties);
-  let confirmed = Services.prompt.confirm(
-      null,
-      "Greasemonkey",
-      bundle.GetStringFromName("confirmEnableAutoUpdate"));
+  let confirmed = GM_util.prompt.confirm(window, bundle.GetStringFromName("confirmEnableAutoUpdate"));
   if (!confirmed) {
     // Snap back to Off.  A programmatic .value assignment doesn't re-fire
     // oncommand, and even if it did, "disable" can't satisfy the
@@ -544,26 +531,11 @@ function populatePositionDropdown() {
 
   while (popup.firstChild) popup.removeChild(popup.firstChild);
 
-  // Format "%1 of %2" via the localized properties bundle.  Fall back
-  // to a plain "%1 / %2" if the bundle key is missing on this locale.
-  let bundle = null;
-  try {
-    bundle = Services.strings.createBundle(
+  let bundle = Services.strings.createBundle(
         "chrome://greasemonkey/locale/greasemonkey.properties");
-  } catch (e) { /* very old builds may not have the bundle */ }
 
   for (let i = 0; i < total; i++) {
-    let label;
-    if (bundle) {
-      try {
-        label = bundle.GetStringFromName("scriptPrefs.position.format")
-            .replace("%1", i + 1).replace("%2", total);
-      } catch (e) {
-        label = (i + 1) + " / " + total;
-      }
-    } else {
-      label = (i + 1) + " / " + total;
-    }
+    let label = bundle.formatStringFromName("scriptPrefs.position.format", [i + 1, total], 2);
     let item = document.createElement("menuitem");
     item.setAttribute("value", "" + i);
     item.setAttribute("label", label);
@@ -573,13 +545,8 @@ function populatePositionDropdown() {
 
   // Populate the gray-text suffix showing total scripts.
   let suffix = document.getElementById("behave-position-suffix");
-  if (suffix && bundle) {
-    try {
-      suffix.value = bundle.GetStringFromName("scriptPrefs.position.suffix")
-          .replace("%1", total);
-    } catch (e) {
-      suffix.value = "";
-    }
+  if (suffix) {
+    suffix.value = bundle.formatStringFromName("scriptPrefs.position.suffix", [total], 1);
   }
 }
 
@@ -947,11 +914,7 @@ function syncToggleEnabledButton() {
   let key = gScript.enabled
       ? "scriptPrefs.toggle.disable"
       : "scriptPrefs.toggle.enable";
-  try {
-    btn.setAttribute("label", bundle.GetStringFromName(key));
-  } catch (e) {
-    // Locale missing the new key — leave the existing label as fallback.
-  }
+  btn.setAttribute("label", bundle.GetStringFromName(key));
 }
 
 ////////////////////////////// onDialogAccept /////////////////////////////////
@@ -1156,22 +1119,8 @@ function rebuildValuesTree() {
   // Update the toolbar count label.
   let countLabel = document.getElementById("values-count");
   if (countLabel) {
-    let bundle = null;
-    try {
-      bundle = Services.strings.createBundle(
-          "chrome://greasemonkey/locale/greasemonkey.properties");
-    } catch (e) {}
-    if (bundle) {
-      try {
-        countLabel.value = bundle
-            .GetStringFromName("scriptPrefs.values.countFormat")
-            .replace("%1", gValuesData.length);
-      } catch (e) {
-        countLabel.value = gValuesData.length + " entries";
-      }
-    } else {
-      countLabel.value = gValuesData.length + " entries";
-    }
+    countLabel.value = bundleForValuesDialogs()
+        .formatStringFromName("scriptPrefs.values.countFormat", [gValuesData.length], 1);
   }
 }
 
@@ -1305,10 +1254,10 @@ function openValueEditor(aArgs) {
     gValuesStorage.setValue(aArgs.resultKey, JSON.parse(aArgs.resultJson));
   } catch (e) {
     let bundle = bundleForValuesDialogs();
-    Services.prompt.alert(window, (typeof aArgs.key == "string")
-        ? bundleStr(bundle, "scriptPrefs.values.editTitle", "Edit value")
-        : bundleStr(bundle, "scriptPrefs.values.addTitle", "Add value"),
-        "" + e);
+    GM_util.prompt.alert(window, "" + e, (typeof aArgs.key == "string")
+        ? bundle.GetStringFromName("scriptPrefs.values.editTitle")
+        : bundle.GetStringFromName("scriptPrefs.values.addTitle")
+        );
     return;
   }
 
@@ -1338,19 +1287,16 @@ function selectValueRow(aKey) {
 function onValueDelete() {
   let row = selectedValueRow();
   if (!row || !gValuesStorage) return;
-  let prompts = Services.prompt;
   let bundle = bundleForValuesDialogs();
 
-  let title = bundleStr(bundle, "scriptPrefs.values.deleteTitle",
-      "Delete value");
-  let body = bundleStr(bundle, "scriptPrefs.values.deleteConfirm",
-      "Delete the value for key '%1'?").replace("%1", row.name);
-  if (!prompts.confirm(window, title, body)) return;
+  let title = bundle.GetStringFromName("scriptPrefs.values.deleteTitle");
+  let body = bundle.formatStringFromName("scriptPrefs.values.deleteConfirm", [row.name], 1);
+  if (!GM_util.prompt.confirm(window, body, title)) return;
 
   try {
     gValuesStorage.deleteValue(row.name);
   } catch (e) {
-    prompts.alert(window, title, "" + e);
+    GM_util.prompt.alert(window, "" + e, title);
     return;
   }
 
@@ -1366,15 +1312,4 @@ function bundleForValuesDialogs() {
   } catch (e) {
     return null;
   }
-}
-
-/**
- * Reads a localised string with a hard-coded English fallback so that a
- * locale missing the new key still shows usable (if untranslated) text
- * rather than an empty / undefined dialog body.
- */
-function bundleStr(aBundle, aKey, aFallback) {
-  if (!aBundle) return aFallback;
-  try { return aBundle.GetStringFromName(aKey); }
-  catch (e) { return aFallback; }
 }

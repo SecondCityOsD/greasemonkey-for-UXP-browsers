@@ -573,11 +573,9 @@ function injectScripts(aScripts, aRunAt, aContentWin) {
         noteScriptRan(aContentWin, script);
       }
     } catch (e) {
-      let scriptName = script.localized && script.localized.name
-          ? script.localized.name : script.id;
       GM_util.logError(
-          "Error injecting script " + JSON.stringify(scriptName)
-          + " at " + aRunAt + ":\n" + e,
+          'Error injecting script "' + (script.name ? script.name : script.id)
+          + '" at ' + aRunAt + ':\n' + e,
           false, e.fileName, e.lineNumber);
     }
   }

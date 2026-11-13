@@ -59,7 +59,7 @@ Cu.import("chrome://greasemonkey-modules/content/util.js");
  */
 function GM_notificationer(
     aChromeWin, aWrappedContentWin, aSandbox, aFileURL, aScriptName) {
-  this.chromeWin = aChromeWin;  
+  this.chromeWin = aChromeWin;
   this.fileURL = aFileURL;
   this.sandbox = aSandbox;
   this.sandboxPrincipal = Cu.getObjectPrincipal(aSandbox);
@@ -185,8 +185,7 @@ GM_notificationer.prototype.contentStart = function (
     throw new this.wrappedContentWin.Error(
         GM_CONSTANTS.localeStringBundle.createBundle(
             GM_CONSTANTS.localeGreasemonkeyProperties)
-            .GetStringFromName("error.notification.messageOrHighlight")
-            .replace("%1", details.title),
+            .formatStringFromName("error.notification.messageOrHighlight", [details.title], 1),
         this.fileURL, null);
   }
 
@@ -200,18 +199,14 @@ GM_notificationer.prototype.contentStart = function (
     throw new this.wrappedContentWin.Error(
         GM_CONSTANTS.localeStringBundle.createBundle(
             GM_CONSTANTS.localeGreasemonkeyProperties)
-            .GetStringFromName("error.notification.callbackIsNotFunction")
-            .replace("%1", _notification.details.title)
-            .replace("%2", "onclick"),
+            .formatStringFromName("error.notification.callbackIsNotFunction", [_notification.details.title, "onclick"], 2),
         this.fileURL, null);
   }
   if (typeof _notification.onDone != "function") {
     throw new this.wrappedContentWin.Error(
         GM_CONSTANTS.localeStringBundle.createBundle(
             GM_CONSTANTS.localeGreasemonkeyProperties)
-            .GetStringFromName("error.notification.callbackIsNotFunction")
-            .replace("%1", _notification.details.title)
-            .replace("%2", "ondone"),
+            .formatStringFromName("error.notification.callbackIsNotFunction", [_notification.details.title, "ondone"], 2),
         this.fileURL, null);
   }
 
@@ -265,10 +260,7 @@ GM_notificationer.prototype.contentStart = function (
     }
   } else {
     throw new this.wrappedContentWin.Error(
-        'GM_notification() - "' + details.title + '": '
-        + GM_CONSTANTS.localeStringBundle.createBundle(
-            GM_CONSTANTS.localeGreasemonkeyProperties)
-            .GetStringFromName("error.environment.unsupported.e10s"),
+        'GM_notification() - "' + details.title + '": Electrolysis (e10s) is not supported.',
         this.fileURL, null);
   }
 
@@ -288,11 +280,8 @@ GM_notificationer.prototype.contentStart = function (
     // }
   } else {
     throw new this.wrappedContentWin.Error(
-        GM_CONSTANTS.localeStringBundle.createBundle(
-            GM_CONSTANTS.localeGreasemonkeyProperties)
-            .GetStringFromName("error.notification.functionIsNotEnabled")
-            .replace("%1", details.title)
-            .replace("%2", '"about:config" - "dom.webnotifications.enabled"'),
+        'GM_notification() - "' + details.title
+        + '":\nThis function is not enabled: "about:config" - "dom.webnotifications.enabled"',
         this.fileURL, null);
   }
 };
@@ -370,8 +359,7 @@ GM_notificationer.prototype.setupEvent = function (
         throw new aWrappedContentWin.Error(
             GM_CONSTANTS.localeStringBundle.createBundle(
                 GM_CONSTANTS.localeGreasemonkeyProperties)
-                .GetStringFromName("error.notification.error")
-                .replace("%1", aDetails.title),
+                .formatStringFromName("error.notification.error", [aDetails.title], 1),
             aFileURL, null);
         break;
     }

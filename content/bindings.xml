@@ -103,10 +103,10 @@
               match = new MatchPattern(aPage);
               _result = this._consolidatePageCommand(aPage, aWhat);
             } catch (e) {
-              alert(GM_CONSTANTS.localeStringBundle.createBundle(
-                  GM_CONSTANTS.localeGreasemonkeyProperties)
-                  .GetStringFromName("error.parse.ignoringMatch")
-                  .replace("%1", aPage).replace("%2", e));
+              GM_util.prompt.alert(window,
+	          GM_CONSTANTS.localeStringBundle.createBundle(
+                    GM_CONSTANTS.localeGreasemonkeyProperties)
+                  .formatStringFromName("error.parse.ignoringMatch", [aPage, e], 2));
               _result = false;
             }
           } else {
@@ -123,10 +123,10 @@
           let _result = true;
           switch (aWhat) {
             case "add":
-              this._pages.push(aPage);                    
+              this._pages.push(aPage);
               break;
             case "edit":
-              this._pages[this._box.currentIndex] = aPage;                    
+              this._pages[this._box.currentIndex] = aPage;
               break;
             default:
               Components.utils.reportError(
@@ -140,7 +140,7 @@
 
       <method name="_onAddPage">
         <body>
-          let page = prompt(
+          let page = GM_util.prompt.prompt(window,
               "&promptForNewPage.msg;",
               "&promptForNewPage.defVal;",
               "&promptForNewPage.title;");
@@ -175,7 +175,7 @@
       <method name="_onEditPage">
         <body>
           let _currentIndex = this._box.currentIndex;
-          let page = prompt(
+          let page = GM_util.prompt.prompt(window,
               "&promptForEdit.msg;",
               this._pages[_currentIndex],
               "&promptForEdit.title;");
@@ -271,14 +271,17 @@
     extends="chrome://greasemonkey/content/bindings.xml#clude-editor-base">
     <implementation>
       <constructor>
-        this._btnUserClude = document.getAnonymousElementByAttribute(
-            this, "id", "btn-user-clude");
+        this._btn1UserClude = document.getAnonymousElementByAttribute(
+            this, "id", "btn1-user-clude");
+        this._btn2UserClude = document.getAnonymousElementByAttribute(
+            this, "id", "btn2-user-clude");
       </constructor>
 
       <method name="_onSelect">
         <body>
           let noSelection = this._box.currentIndex == -1;
-          this._btnUserClude.disabled = noSelection;
+          if (this._btn1UserClude) this._btn1UserClude.disabled = noSelection;
+          if (this._btn2UserClude) this._btn2UserClude.disabled = noSelection;
         </body>
       </method>
 
@@ -298,7 +301,9 @@
       <xul:hbox flex="1">
         <xul:listbox flex="1" id="listbox" />
         <xul:vbox id="userCludeInclude">
-          <xul:button id="btn-user-clude" label="&button.addUserExclude;"
+          <xul:button id="btn1-user-clude" label="&button.addUserInclude;"
+            oncommand="_addUserClude('Include');" disabled="true" />
+          <xul:button id="btn2-user-clude" label="&button.addUserExclude;"
             oncommand="_addUserClude('Exclude');" disabled="true" />
           <xul:button class="btn-user-clude-virtual" label="" disabled="true" />
           <xul:button class="btn-user-clude-virtual" label="" disabled="true" />
@@ -313,8 +318,8 @@
       <xul:hbox flex="1">
         <xul:listbox flex="1" id="listbox" />
         <xul:vbox id="user-clude-match">
-          <xul:button id="btn-user-clude" label="&button.addUserExclude;"
-            oncommand="_addUserClude('Exclude');" disabled="true" />
+          <xul:button id="btn1-user-clude" label="&button.addUserMatch;"
+            oncommand="_addUserClude('Match');" disabled="true" />
           <xul:button class="btn-user-clude-virtual" label="" disabled="true" />
           <xul:button class="btn-user-clude-virtual" label="" disabled="true" />
           <xul:spacer flex="1" />
@@ -328,8 +333,10 @@
       <xul:hbox flex="1">
         <xul:listbox flex="1" id="listbox" />
         <xul:vbox id="userCludeExclude">
-          <xul:button id="btn-user-clude" label="&button.addUserInclude;"
+          <xul:button id="btn1-user-clude" label="&button.addUserInclude;"
             oncommand="_addUserClude('Include');" disabled="true" />
+          <xul:button id="btn2-user-clude" label="&button.addUserExclude;"
+            oncommand="_addUserClude('Exclude');" disabled="true" />
           <xul:button class="btn-user-clude-virtual" label="" disabled="true" />
           <xul:button class="btn-user-clude-virtual" label="" disabled="true" />
           <xul:spacer flex="1" />

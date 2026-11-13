@@ -169,10 +169,8 @@ function _corsCspTestUrl(aUrl) {
         aMatchPattern = new MatchPattern(aMatchPattern);
       } catch (e) {
         dump(gCorsCspOverrideDumpPrefix + " - testUrl (" + aUrl + "): "
-            + GM_CONSTANTS.localeStringBundle.createBundle(
-            GM_CONSTANTS.localeGreasemonkeyProperties)
-            .GetStringFromName("error.parse.ignoringMatch")
-            .replace("%1", aMatchPattern).replace("%2", e) + "\n");
+            + "Ignoring @match pattern " + aMatchPattern + " because: " + e + "\n"
+            );
         return false;
       }
     }
@@ -182,11 +180,7 @@ function _corsCspTestUrl(aUrl) {
       if (uri) {
         _url = uri.specIgnoringRef;
       } else {
-        dump(gCorsCspOverrideDumpPrefix + ": "
-            + GM_CONSTANTS.localeStringBundle.createBundle(
-            GM_CONSTANTS.localeGreasemonkeyProperties)
-            .GetStringFromName("error.invalidUrl")
-            .replace("%1", aUrl) + "\n");
+        dump(gCorsCspOverrideDumpPrefix + ": Invalid URL: " + aUrl + "\n");
       }
     }
 
@@ -240,7 +234,7 @@ function _corsCspRulesOverride(aRules, aHeader) {
     case gCorsType:
       aRules = _corsOverride(aRules, aHeader);
       break;
-    case gCspType:  
+    case gCspType:
       aRules = _cspOverride(aRules);
       break;
   }

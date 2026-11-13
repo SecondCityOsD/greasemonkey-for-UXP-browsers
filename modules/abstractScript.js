@@ -165,12 +165,9 @@ AbstractScript.prototype.matchesURL = function (aUrl) {
         _url = uri.specIgnoringRef;
       } else {
         GM_util.logError(
-            '"' + _AbstractScript.localized.name + '"' + "\n" +
-            "abstractScript - AbstractScript.matchesURL - testMatch:" + "\n" +
-            GM_CONSTANTS.localeStringBundle.createBundle(
-            GM_CONSTANTS.localeGreasemonkeyProperties)
-            .GetStringFromName("error.invalidUrl")
-            .replace("%1", aUrl));
+            '"' + _AbstractScript.name + '"'
+            +'\nabstractScript - AbstractScript.matchesURL - testMatch:\nInvalid URL:\n'
+            + aUrl);
       }
     }
 

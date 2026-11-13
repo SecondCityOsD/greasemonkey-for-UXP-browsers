@@ -171,23 +171,18 @@ function GM_backupNow() {
   GM_backupScheduler.backupNow(folder, function (aOk, aPath, aErr) {
     button.disabled = false;
     if (aOk) {
-      alert(GM_backupString("backup.now.done", "Backup written to:\n%1")
-          .replace("%1", aPath));
+      GM_util.prompt.alert(window, GM_backupString("backup.now.done", [aPath]));
     } else {
-      alert(GM_backupString("backup.failed", "Backup operation failed.\n\n%1")
-          .replace("%1", aErr || ""));
+      GM_util.prompt.alert(window, GM_backupString("backup.failed", [aErr || ""]));
     }
   });
 }
 
-function GM_backupString(aKey, aFallback) {
-  try {
-    return Cc["@mozilla.org/intl/stringbundle;1"]
-        .getService(Ci.nsIStringBundleService)
-        .createBundle("chrome://greasemonkey/locale/gmAddons.properties")
-        .GetStringFromName(aKey);
-  } catch (e) {
-    return aFallback;
+function GM_backupString(aKey, Param) {
+  return Cc["@mozilla.org/intl/stringbundle;1"]
+      .getService(Ci.nsIStringBundleService)
+      .createBundle("chrome://greasemonkey/locale/gmAddons.properties")
+      .formatStringFromName(aKey, Param, Param.length);
   }
 }
 */
