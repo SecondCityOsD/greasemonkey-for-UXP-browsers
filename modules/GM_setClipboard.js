@@ -58,19 +58,38 @@ const FLAVOR = {
 };
 
 /**
- * Public type/mimetype descriptors as seen from the script API surface.
- * "text/plain" at the API level maps to "text/unicode" internally (see FLAVOR).
+ * What a script's second argument asks for: "html", "text", or null for a
+ * type the clipboard can't take.  Greasemonkey's "text" / "html", the MIME
+ * types Violentmonkey passes ("text/plain", "text/html"; other text/*
+ * types copy as text), and the {type, mimetype} object, where mimetype
+ * wins.  "text/plain", "text/html" and {mimetype} used to throw.
+ *
+ * @param {string|object|undefined} aOptions
+ * @returns {?string}
  */
-const TYPE = {
-  "html": {
-    "type": "html",
-    "mimetype": "text/html",
-  },
-  "text": {
-    "type": "text",
-    "mimetype": "text/plain",
-  },
-};
+function clipboardKind(aOptions) {
+  let wanted = "text";
+  if ((aOptions !== undefined) && (aOptions !== null)) {
+    if (typeof aOptions == "object") {
+      if (aOptions.mimetype != null) {
+        wanted = aOptions.mimetype;
+      } else if (aOptions.type != null) {
+        wanted = aOptions.type;
+      }
+    } else {
+      wanted = aOptions;
+    }
+  }
+  wanted = String(wanted).split(";")[0].trim().toLowerCase();
+  if ((wanted == "html") || (wanted == "text/html")
+      || (wanted == "application/xhtml+xml")) {
+    return "html";
+  }
+  if ((wanted == "text") || (wanted == "") || (wanted.indexOf("text/") == 0)) {
+    return "text";
+  }
+  return null;
+}
 
 /**
  * Writes data to the system clipboard.
@@ -80,13 +99,9 @@ const TYPE = {
  * @param {string}      aFileURL           - The script's file URL; included in
  *   thrown Error objects for debuggability.
  * @param {string}      aData              - The text or HTML content to copy.
- * @param {string|object|undefined} aOptions
- *   - String: treated as the type name ("text" or "html").
- *   - Object: may have:
- *       type    {string} — "text" or "html" (default: "text").
- *       mimetype {string} — override the MIME type directly.
- *   - Omitted/null: defaults to plain text.
- * @throws {Error} If the resolved type/MIME combination is not supported.
+ * @param {string|object|undefined} aOptions - "text" (the default), "html",
+ *   a MIME type, or {type, mimetype}; see clipboardKind().
+ * @throws {Error} If the type is not one the clipboard can take.
  */
 function GM_setClipboard(aWrappedContentWin, aFileURL, aData, aOptions) {
   let clipboardHelperService = Cc["@mozilla.org/widget/clipboardhelper;1"]
@@ -97,67 +112,49 @@ function GM_setClipboard(aWrappedContentWin, aFileURL, aData, aOptions) {
       .createInstance(Ci.nsISupportsString);
   let trans = Cc["@mozilla.org/widget/transferable;1"]
       .createInstance(Ci.nsITransferable);
-
-  // let _type = undefined;
-  let _type = TYPE.text.type;
-  if ((typeof aOptions != "undefined") && (aOptions != null)) {
-    if (typeof aOptions.type == "undefined") {
-      if (typeof aOptions != "object") {
-        _type = aOptions;
-      }
-    } else {
-      _type = aOptions.type;
-    }
+  // The page's load context: what's copied from a private window is
+  // treated as private (cleared when the private session ends).
+  let loadContext = null;
+  try {
+    loadContext = aWrappedContentWin
+        .QueryInterface(Ci.nsIInterfaceRequestor)
+        .getInterface(Ci.nsIWebNavigation)
+        .QueryInterface(Ci.nsILoadContext);
+  } catch (e) {
+    loadContext = null;
   }
-  _type = _type ? String(_type).toLowerCase() : _type;
+  trans.init(loadContext);
 
-  // let _mimetype = undefined;
-  let _mimetype = (_type == TYPE.html.type)
-      ? TYPE.html.mimetype
-      : TYPE.text.mimetype;
-  if ((typeof aOptions != "undefined") && (aOptions != null)) {
-    if (typeof aOptions.mimetype != "undefined") {
-      _mimetype = aOptions.mimetype;
-    }
-  }
-  _mimetype = _mimetype ? String(_mimetype).toLowerCase() : _mimetype;
+  let kind = clipboardKind(aOptions);
+  let data = ((typeof aData == "undefined") || (aData === null))
+      ? "" : String(aData);
 
-  if (_mimetype == TYPE.text.mimetype) {
-    _mimetype = FLAVOR.text.mimetype;
-  }
-
-  let _obj = {
-    "type": _type,
-    "mimetype": _mimetype,
-  };
-
-  switch (JSON.stringify(_obj)) {
-    case JSON.stringify(FLAVOR.html):
-      if ((typeof aData == "undefined") || (aData === null)) {
-        aData = "";
-      }
-
-      // Add text/html flavor.
-      let strVal = supportString;
-      strVal.data = aData;
+  switch (kind) {
+    case "html":
+      // Each flavour gets its own string: the transferable keeps the
+      // object, so one shared between the two made the HTML flavour plain
+      // text as well (pasting into a rich-text editor gave plain text).
+      let html = Cc["@mozilla.org/supports-string;1"]
+          .createInstance(Ci.nsISupportsString);
+      html.data = data;
       trans.addDataFlavor(FLAVOR.html.mimetype);
-      trans.setTransferData(FLAVOR.html.mimetype, strVal, (aData.length * 2));
+      trans.setTransferData(FLAVOR.html.mimetype, html, (data.length * 2));
 
       // Add a text/unicode flavor (html converted to plain text).
-      strVal = supportString;
+      let plain = supportString;
       let converter = Cc["@mozilla.org/feed-textconstruct;1"]
           .createInstance(Ci.nsIFeedTextConstruct);
       converter.type = FLAVOR.html.type;
-      converter.text = aData;
-      strVal.data = converter.plainText();
+      converter.text = data;
+      plain.data = converter.plainText();
       trans.addDataFlavor(FLAVOR.text.mimetype);
       trans.setTransferData(
-          FLAVOR.text.mimetype, strVal, (strVal.data.length * 2));
+          FLAVOR.text.mimetype, plain, (plain.data.length * 2));
 
       clipboardService.setData(trans, null, clipboardService.kGlobalClipboard);
       break;
-    case JSON.stringify(FLAVOR.text):
-      clipboardHelperService.copyString(aData);
+    case "text":
+      clipboardHelperService.copyString(data);
       break;
     default:
       let unsupportedType = aOptions;

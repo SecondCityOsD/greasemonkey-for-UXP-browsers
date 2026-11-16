@@ -19,6 +19,9 @@ Cu.import("chrome://greasemonkey-modules/content/util.js");
 
 var GM_MenuCommander = {
   "cookieShowing": null,
+  // The tab's windows (the page's and its frames') the open popup asked,
+  // by the index each request carried.
+  "frames": null,
   "groups": null,
   "messageCookie": 1,
   "popup": null,
@@ -34,7 +37,8 @@ GM_MenuCommander.ARROW_EXPANDED = "▲";
 GM_MenuCommander.ARROW_COLLAPSED = "▼";
 
 // Chrome ↔ sandbox menu-command transport on UXP single-process:
-//   chrome → CustomEvent dispatched onto the active tab's content window
+//   chrome → CustomEvent dispatched onto the active tab's page window and
+//            each of its frames' (a command runs in the one it came from)
 //   sandbox → Services.obs.notifyObservers("greasemonkey:menu-command-
 //             response", …) → _observer below → messageMenuCommandResponse
 // Both legs stay in-process and avoid any messageManager indirection.
@@ -82,11 +86,11 @@ GM_MenuCommander.uninitialize = function () {
 };
 
 GM_MenuCommander.commandClicked = function (aCommand) {
-  // Dispatch the run-command CustomEvent directly onto the active tab's
-  // content window.  The sandbox listens for
+  // Dispatch the run-command CustomEvent onto the window the command came
+  // from: the page's, or a frame's.  The sandbox listens for
   // "greasemonkey-menu-command-run-<suffix>" and invokes the registered
   // callback for the matching {cookie, scriptUuid}.
-  let win = gBrowser.selectedBrowser.contentWindow;
+  let win = aCommand.frameWin || gBrowser.selectedBrowser.contentWindow;
   if (!win) {
     return undefined;
   }
@@ -104,7 +108,12 @@ GM_MenuCommander.createMenuItem = function (aCommand) {
   let menuItem = document.createElement("menuitem");
   menuItem.setAttribute("class", "greasemonkey-command-item");
   menuItem.setAttribute("label", aCommand.name);
-  menuItem.setAttribute("tooltiptext", aCommand.scriptName);
+  // options.title (Violentmonkey / Tampermonkey), else the script's name.
+  menuItem.setAttribute("tooltiptext", aCommand.title || aCommand.scriptName);
+  if (aCommand.autoClose === false) {
+    // options.autoClose: false keeps the menu open after a click.
+    menuItem.setAttribute("closemenu", "none");
+  }
   menuItem.addEventListener("command", function () {
     GM_MenuCommander.commandClicked(aCommand);
   }, false);
@@ -117,38 +126,66 @@ GM_MenuCommander.createMenuItem = function (aCommand) {
 };
 
 GM_MenuCommander.messageMenuCommandResponse = function (aMessage) {
-  if (aMessage.data.cookie != GM_MenuCommander.cookieShowing) {
+  // The request this answers: {"popup": the popup's cookie, "frame": the
+  // index of the window it went to}, as JSON.
+  let request = null;
+  try {
+    request = JSON.parse(aMessage.data.cookie);
+  } catch (e) {
+    request = null;
+  }
+  if (!request || (request.popup != GM_MenuCommander.cookieShowing)) {
     return undefined;
   }
-  if (!GM_MenuCommander.groups) {
+  if (!GM_MenuCommander.groups || !GM_MenuCommander.frames) {
     // Late response after the popup already hid.
     return undefined;
   }
+  let frameWin = GM_MenuCommander.frames[request.frame] || null;
 
-  // Fold the batch into the per-script groups.  A (scriptUuid, name) pair
-  // that arrives again replaces the earlier registration, so scripts that
-  // re-register and the same script running in several frames don't
-  // produce duplicate rows.  Null-prototype maps: command names are
-  // script-controlled strings ("__proto__" must stay an ordinary key).
+  // Fold the batch into the per-script groups.  A command's key (its
+  // options.id, else its caption) that arrives again replaces the earlier
+  // one, so the same script running in several frames doesn't produce
+  // duplicate rows.  Null-prototype maps: keys are script-controlled
+  // strings ("__proto__" must stay an ordinary key).
   let groups = GM_MenuCommander.groups;
   for (let i in aMessage.data.commands) {
     let command = aMessage.data.commands[i];
+    command.frameWin = frameWin;
     let group = groups[command.scriptUuid];
     if (!group) {
       group = groups[command.scriptUuid] = {
-        "byName": Object.create(null),
+        "byKey": Object.create(null),
         "order": [],
         "scriptId": GM_MenuCommander.scriptIdForUuid(command.scriptUuid),
         "scriptName": String(command.scriptName),
       };
     }
-    if (!(command.name in group.byName)) {
-      group.order.push(command.name);
+    let key = String(command.cookie);
+    if (!(key in group.byKey)) {
+      group.order.push(key);
     }
-    group.byName[command.name] = command;
+    group.byKey[key] = command;
   }
 
   GM_MenuCommander.rebuildPopup();
+};
+
+/**
+ * @param {Window} aWin - A tab's page.
+ * @returns {Window[]} It and every frame in it, at any depth: each runs its
+ *   own scripts, with their own menu commands.
+ */
+GM_MenuCommander.framesOf = function (aWin) {
+  let wins = [aWin];
+  try {
+    for (let i = 0; i < aWin.frames.length; i++) {
+      wins.push.apply(wins, GM_MenuCommander.framesOf(aWin.frames[i]));
+    }
+  } catch (e) {
+    // A frame going away: skip it.
+  }
+  return wins;
 };
 
 GM_MenuCommander.rebuildPopup = function () {
@@ -182,7 +219,7 @@ GM_MenuCommander.rebuildPopup = function () {
     let items = [];
     for (let c = 0, cLen = group.order.length; c < cLen; c++) {
       let item = GM_MenuCommander.createMenuItem(
-          group.byName[group.order[c]]);
+          group.byKey[group.order[c]]);
       items.push(item);
       popup.appendChild(item);
       total++;
@@ -262,6 +299,7 @@ GM_MenuCommander.scriptIdForUuid = function (aUuid) {
 
 GM_MenuCommander.onPopupHiding = function () {
   GM_MenuCommander.groups = null;
+  GM_MenuCommander.frames = null;
   // See #1632.
   // Asynchronously.
   GM_util.timeout(function () {
@@ -281,18 +319,29 @@ GM_MenuCommander.onPopupShowing = function (aEventTarget) {
   GM_MenuCommander.popup.parentNode.disabled = true;
   GM_util.emptyElm(GM_MenuCommander.popup);
 
-  // ...ask each sandbox running on the active tab for its registered
-  // commands by dispatching a CustomEvent directly onto the content
-  // window.  Each sandbox replies via the
+  // ...ask each sandbox running on the active tab, in its page and in every
+  // frame, for its registered commands by dispatching a CustomEvent onto
+  // each window (a sandbox listens on its own: commands from scripts in
+  // frames never showed).  Each sandbox replies via the
   // "greasemonkey:menu-command-response" observer notification, which
   // _observer above feeds into messageMenuCommandResponse.
   let win = gBrowser.selectedBrowser.contentWindow;
   if (!win) {
     return undefined;
   }
-  let evt = new win.CustomEvent(
-      "greasemonkey-menu-command-list-" + MenuCommandEventNameSuffix, {
-        "detail": GM_MenuCommander.cookieShowing,
-      });
-  win.dispatchEvent(evt);
+  GM_MenuCommander.frames = GM_MenuCommander.framesOf(win);
+  GM_MenuCommander.frames.forEach(function (aWin, aIndex) {
+    try {
+      let evt = new aWin.CustomEvent(
+          "greasemonkey-menu-command-list-" + MenuCommandEventNameSuffix, {
+            "detail": JSON.stringify({
+              "frame": aIndex,
+              "popup": GM_MenuCommander.cookieShowing,
+            }),
+          });
+      aWin.dispatchEvent(evt);
+    } catch (e) {
+      // A frame going away: no commands from it.
+    }
+  });
 };

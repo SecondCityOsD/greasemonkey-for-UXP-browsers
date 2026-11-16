@@ -106,7 +106,6 @@ GM_notificationer.prototype.contentStart = function (
     "silent": false,
     "tag": undefined,
     "timeout": 0,
-    "timeoutWasReached": false,
     "title": this.scriptName,
   };
 
@@ -257,7 +256,6 @@ GM_notificationer.prototype.contentStart = function (
       if (details.timeout && (details.timeout > 0)) {
         GM_util.timeout(function () {
           if (notification) {
-            details.timeoutWasReached = true;
             notification.close();
           }
         }, details.timeout);
@@ -355,16 +353,24 @@ GM_notificationer.prototype.setupEvent = function (
       aEvt.preventDefault();
     }
     startEventCallback(aDetails["on" + aEvt.type]);
+    // ondone once per notification, as in Violentmonkey and Tampermonkey:
+    // when it closes, however it closes (a timeout too: it was skipped
+    // then, and scripts waiting on it hung), or on a click where no close
+    // event follows.
+    let done = function () {
+      if (!aDetails.doneCalled) {
+        aDetails.doneCalled = true;
+        startEventCallback(aDetails["on" + "done"]);
+      }
+    };
     switch (aEvt.type) {
       case "click":
-        startEventCallback(
-            aDetails["on" + "done"],
-            (typeof aNotification.onclose != "undefined"));
+        if (typeof aNotification.onclose == "undefined") {
+          done();
+        }
         break;
       case "close":
-        if (!aDetails.timeoutWasReached) {
-          startEventCallback(aDetails["on" + "done"]);
-        }
+        done();
         break;
       case "error":
         throw new aWrappedContentWin.Error(

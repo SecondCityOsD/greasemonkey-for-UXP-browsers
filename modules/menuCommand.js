@@ -8,7 +8,8 @@
  *
  *   [Chrome scope]
  *     content/menuCommander.js dispatches CustomEvents directly onto the
- *     active tab's content window:
+ *     active tab's page window and each of its frames' (each sandbox
+ *     listens on the window its script runs in):
  *       - "greasemonkey-menu-command-list-<suffix>" when the popup opens,
  *         to ask each sandbox for its registered commands.
  *       - "greasemonkey-menu-command-run-<suffix>" when the user clicks a
@@ -145,9 +146,10 @@ function MenuCommandSandbox(
     aMenuCommandEventNameSuffix) {
   // 1) Internally to this function's private scope,
   // maintain a set of registered menu commands.
-  var commands = {};
-  var commandFuncs = {};
-  var commandCookie = 0;
+  // Keyed by script-chosen strings (an id or a caption): no prototype,
+  // so "__proto__" is an ordinary key.
+  var commands = Object.create(null);
+  var commandFuncs = Object.create(null);
   // "var" instead of "let"
   // Firefox 43-
   // http://bugzil.la/932517
@@ -178,6 +180,10 @@ function MenuCommandSandbox(
           }
           // This event is for this script; stop propagating to other scripts.
           e.stopImmediatePropagation();
+          if (!(detail.cookie in commands)) {
+            // Unregistered while the menu was open.
+            return undefined;
+          }
           var commandFunc = commandFuncs[detail.cookie];
           if (!commandFunc) {
             throw new Error(
@@ -198,67 +204,91 @@ function MenuCommandSandbox(
   /**
    * GM_registerMenuCommand: registers a new menu command for this script.
    *
+   * A command's key is options.id, else its caption, as in Violentmonkey:
+   * registering a key again replaces that command where it is (the toggle
+   * pattern, re-registering "X: ON" / "X: OFF" with one id, keeps one row;
+   * it used to add a row each time).
+   *
    * @param {string}   aCommandName - Display name shown in the menu.
    * @param {function} aCommandFunc - Callback invoked when the user clicks
    *                                  the menu item.
-   * @param {string|object} [aAccesskey] - Single-character keyboard shortcut,
-   *                                       OR a Tampermonkey/Violentmonkey
-   *                                       options object of the form
-   *                                       { accessKey, id, autoClose, title }
-   *                                       (only accessKey is currently honoured).
+   * @param {string|object} [aOptions] - Single-character keyboard shortcut,
+   *                                     OR a Tampermonkey/Violentmonkey
+   *                                     options object of the form
+   *                                     { accessKey, id, autoClose, title }:
+   *                                     title is the item's tooltip, and
+   *                                     autoClose: false keeps the menu open.
    * @param {*}        [aUnused]    - Legacy parameter (ignored).
    * @param {string}   [aAccesskey2]- Legacy 5th-argument access key override.
-   * @throws {Error} If aAccesskey resolves to a non-single-character string.
+   * @returns {string} The command's key, for GM_unregisterMenuCommand.
+   * @throws {Error} If the access key resolves to a non-single-character
+   *   string.
    */
   this.GM_registerMenuCommand = function (
-      aCommandName, aCommandFunc, aAccesskey, aUnused, aAccesskey2) {
+      aCommandName, aCommandFunc, aOptions, aUnused, aAccesskey2) {
     aCommandName = String(aCommandName);
 
-    // Tampermonkey / Violentmonkey compatibility: the third argument may
-    // be an options object of the form { accessKey, id, autoClose, title }
-    // instead of a raw access-key string.  We only act on the access-key
-    // portion here; the other properties are accepted but currently have
-    // no visible effect.  Without this normalisation a script that passes
-    // {} as the third argument would hit the single-character validator
-    // below and throw "Invalid accesskey".
-    if (aAccesskey && typeof aAccesskey === "object") {
-      aAccesskey = aAccesskey.accessKey || null;
+    var accesskey = aOptions;
+    var id = null;
+    var title = null;
+    var autoClose = true;
+    if (aOptions && typeof aOptions === "object") {
+      accesskey = aOptions.accessKey || null;
+      if (aOptions.id != null) {
+        id = String(aOptions.id);
+      }
+      if (aOptions.title != null) {
+        title = String(aOptions.title);
+      }
+      autoClose = (aOptions.autoClose !== false);
     }
 
     // Legacy support:
     // If all five parameters were specified
     // (from when two were for accelerators) use the last one as the access key.
     if (typeof aAccesskey2 != "undefined") {
-      aAccesskey = aAccesskey2;
+      accesskey = aAccesskey2;
     }
 
-    if (aAccesskey
-        && ((typeof aAccesskey != "string") || (aAccesskey.length != 1))) {
+    if (accesskey
+        && ((typeof accesskey != "string") || (accesskey.length != 1))) {
       throw new Error(
           aMenuCommandInvalidAccesskeyErrorStr.replace("%1", aCommandName),
           aScriptFileURL, null);
     }
 
-    var command = {
-      "accesskey": aAccesskey,
-      "cookie": ++commandCookie,
+    var key = (id !== null) ? id : aCommandName;
+    commands[key] = {
+      "accesskey": accesskey || null,
+      "autoClose": autoClose,
+      "cookie": key,
       "name": aCommandName,
       "scriptName": aScriptName,
       "scriptUuid": aScriptUuid,
+      "title": title,
     };
-    commands[command.cookie] = command;
-    commandFuncs[command.cookie] = aCommandFunc;
+    commandFuncs[key] = aCommandFunc;
 
-    return command.cookie;
+    return key;
   };
 
   /**
    * GM_unregisterMenuCommand: removes a previously registered menu command.
    *
-   * @param {number} aCookie - The ID returned by GM_registerMenuCommand.
+   * @param {string} aKey - What GM_registerMenuCommand returned, or the
+   *                        command's caption (as Violentmonkey accepts).
    */
-  this.GM_unregisterMenuCommand = function (aCookie) {
-    delete commands[aCookie];
-    delete commandFuncs[aCookie];
+  this.GM_unregisterMenuCommand = function (aKey) {
+    var key = String(aKey);
+    if (!(key in commands)) {
+      for (var other in commands) {
+        if (commands[other].name === key) {
+          key = other;
+          break;
+        }
+      }
+    }
+    delete commands[key];
+    delete commandFuncs[key];
   };
 }`;
