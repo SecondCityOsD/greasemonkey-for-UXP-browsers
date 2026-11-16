@@ -662,9 +662,11 @@ RemoteScript.prototype.downloadScript = function (aCompletionCallback) {
  *     directory into the scripts dir, updates the config, and (unless silent)
  *     shows an install/update notification to the user.
  *   - aOnlyDependencies=true: Dependency-only update.  Moves individual
- *     dependency files into the existing script's base directory.
+ *     dependency files into aOldScript's base directory; the caller
+ *     announces the change.
  *
- * @param {Script}  [aOldScript]        - The previously installed Script to replace.
+ * @param {Script}  [aOldScript]        - The previously installed Script to
+ *   replace; required with aOnlyDependencies.
  * @param {boolean} [aOnlyDependencies=false] - Only update dependency files.
  * @throws {Error} If the script has not been downloaded yet (this.script is null).
  */
@@ -686,7 +688,13 @@ RemoteScript.prototype.install = function (aOldScript, aOnlyDependencies) {
   }
 
   if (aOnlyDependencies) {
-    // Just move the dependencies in.
+    // A local edit's new @require / @resource / @icon files, into the
+    // installed script's folder.  aOldScript is that script; this.script
+    // is the parsed copy of the edit, whose dependencies it has taken over
+    // (Script.updateFromNewScript).  The caller then announces the change
+    // for aOldScript: a "modified" for the copy, sent from here, made
+    // about:addons wrap the copy, which isn't in the config.
+    let baseDir = aOldScript.baseDirFile;
     for (let i = 0, iLen = this._dependencies.length; i < iLen; i++) {
       let dep = this._dependencies[i];
       // Make sure this is actually a file, not a data URI.
@@ -697,11 +705,11 @@ RemoteScript.prototype.install = function (aOldScript, aOnlyDependencies) {
       // See #1906.
       // Grab a unique file name to ensure we don't overwrite the script
       // in case it has the same name as one of the dependencies.
-      let target = GM_util.getTempFile(this.script.baseDirFile, dep.filename);
+      let target = GM_util.getTempFile(baseDir, dep.filename);
 
       let file = this._tempDir.clone();
       file.append(dep.filename);
-      file.moveTo(this.script.baseDirFile, target.leafName);
+      file.moveTo(baseDir, target.leafName);
 
       dep.setFilename(target);
     }
@@ -712,10 +720,6 @@ RemoteScript.prototype.install = function (aOldScript, aOnlyDependencies) {
     } catch (e) {
       // Silently ignore.
     }
-
-    // Part 1/2 (script.js - Part 2/2).
-    // The fix update icon in the AOM (after a change in the editor).
-    this.script._changed("modified", this.script.id);
   } else {
     // Completely install the new script.
     if (!this._baseName) {

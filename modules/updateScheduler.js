@@ -19,11 +19,13 @@
  * has elapsed, unless the browser-wide extensions.update.enabled switch is
  * off.  Sweeps drive the SAME check pipeline as the Add-ons Manager
  * (ScriptAddon.findUpdates → Script.checkForRemoteUpdate), so the
- * disabled-scripts / secure-scheme gates apply.  A found update is
- * installed only under the platform's own background-update rule
- * (PERM_CAN_UPGRADE + AddonManager.shouldAutoUpdate, i.e. the per-script
- * "Automatic Updates" radio), and never over local edits the user hasn't
- * agreed to lose.  Anything else stays listed in about:addons for the user.
+ * disabled-scripts / secure-scheme gates apply, and scripts whose
+ * Automatic Updates is Off are skipped (a click in about:addons still
+ * checks them).  A found update is installed only under the platform's own
+ * background-update rule (PERM_CAN_UPGRADE + AddonManager.shouldAutoUpdate:
+ * On, or Default with "Update Add-ons Automatically"), and never over
+ * local edits the user hasn't agreed to lose.  Anything else stays listed
+ * in about:addons for the user.
  *
  * ScriptAddon.findUpdates suppresses the AOM's own periodic sweep so
  * scripts aren't checked on two cadences; scheduler-driven checks pass

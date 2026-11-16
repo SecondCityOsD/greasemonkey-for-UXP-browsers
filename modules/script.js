@@ -1871,8 +1871,9 @@ Script.prototype.updateFromNewScript = function (
 
       this._runPendingExec(true);
 
-      // Part 2/2 (remoteScript.js - Part 1/2).
-      // The fix update "aAddon._script.filename" (that != null) in:
+      // The only announcement of the new files (RemoteScript.install sends
+      // none for a dependency-only install).  It also fixes
+      // "aAddon._script.filename" (that != null) in:
       // addonsOverlay.js - gViewController.commands.cmd_userscript_edit
       // It happens when updating the icon to the wrong "URL" (data:)
       // (e.g. "data:image" -> "data:mage").
@@ -2001,21 +2002,25 @@ Script.prototype.shouldAutoUpdate = function () {
  *
  * Short-circuits early (calling aCallback synchronously) when:
  *   - No updateURL is set.
- *   - shouldAutoUpdate() returns false and neither aForced nor aManual is
- *     set.
+ *   - Automatic Updates is Off for this script and neither aForced nor
+ *     aManual is set: only a click checks such a script.
  *   - An update is already cached in this.availableUpdate.
  *
- * The cached update is returned only after the auto-update gate.  An
- * automatic caller (the update scheduler) must never be handed an update
- * that an earlier manual check listed for the user to review.
+ * "Default" with the browser's "Update Add-ons Automatically" off is
+ * checked: like the platform's own sweep, the update scheduler checks and
+ * installs only what may update itself (shouldAutoUpdate()); the rest is
+ * listed in about:addons.  (Those scripts were never checked, so their
+ * updates went unseen.)  The cached update comes after the gate, so the
+ * scheduler isn't handed one for a script set to Off.
  *
  * Otherwise fetches the .meta.js (or falls back to .user.js) via XHR and
  * delegates version comparison to checkRemoteVersion().
  *
  * @param {function} aCallback - Called with ("updateAvailable") or
  *   ("noUpdateAvailable", infoObj) when the check completes.
- * @param {boolean}  aForced   - If true, bypasses auto-update and enabled checks.
- * @param {boolean}  aManual   - If true, bypasses auto-update check only.
+ * @param {boolean}  aForced   - If true, bypasses the Off gate and the
+ *   version comparison.
+ * @param {boolean}  aManual   - A click: bypasses the Off gate only.
  */
 Script.prototype.checkForRemoteUpdate = function (aCallback, aForced, aManual) {
   // "none" / ".../none": URLs saved by versions that resolved "none"
@@ -2033,13 +2038,13 @@ Script.prototype.checkForRemoteUpdate = function (aCallback, aForced, aManual) {
     });
   }
 
-  let _shouldAutoUpdate = this.shouldAutoUpdate();
-  if (!aManual && !aForced && !_shouldAutoUpdate) {
+  if (!aManual && !aForced
+      && (this.checkRemoteUpdates == AddonManager.AUTOUPDATE_DISABLE)) {
     return aCallback("noUpdateAvailable", {
       "name": this.localized.name,
       "fileURL": this.fileURL,
       "url": this.updateURL,
-      "info": " = (this.shouldAutoUpdate() == " + _shouldAutoUpdate + ")",
+      "info": " = (Automatic Updates: Off)",
       "updateStatus": "UPDATE_STATUS_NO_ERROR",
       "log": false,
     });

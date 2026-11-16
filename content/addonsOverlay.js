@@ -456,9 +456,9 @@ function init() {
           aAddon.forceUpdate = false;
           return;
         }
-        aAddon.manualUpdate = true;
+        // A click: findUpdates() gets UPDATE_WHEN_USER_REQUESTED, so it
+        // checks even with Automatic Updates Off.
         gViewController.commands.cmd_findItemUpdates.doCommand(aAddon);
-        aAddon.manualUpdate = false;
       }
   };
 

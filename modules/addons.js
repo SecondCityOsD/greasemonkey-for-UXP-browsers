@@ -418,8 +418,7 @@ ScriptAddon.prototype.findUpdates = function (aUpdateListener, aReason) {
   // browser's own daily background sweep so scripts aren't checked on two
   // schedules (or at all, when the interval is 0).  Scheduler-driven sweeps
   // mark the addon with _gmScheduledCheck around this synchronous call;
-  // manual checks (UPDATE_WHEN_USER_REQUESTED / this.manualUpdate) are
-  // unaffected.
+  // manual checks (UPDATE_WHEN_USER_REQUESTED) are unaffected.
   if ((aReason == AddonManager.UPDATE_WHEN_PERIODIC_UPDATE)
       && !this._gmScheduledCheck) {
     if (aUpdateListener
@@ -447,11 +446,9 @@ ScriptAddon.prototype.findUpdates = function (aUpdateListener, aReason) {
   }
 
   let callback = this._handleRemoteUpdate.bind(this, aUpdateListener);
-  // Treat user-initiated update checks (clicking "Check for Updates") as
-  // manual — bypasses the shouldAutoUpdate() gate so scripts get checked
-  // even when "Update Add-ons Automatically" is disabled.
-  let isManual = this.manualUpdate
-      || (aReason == AddonManager.UPDATE_WHEN_USER_REQUESTED);
+  // A click (about:addons' Check for Updates, Find Updates) checks scripts
+  // whose Automatic Updates is Off too; scheduled sweeps skip those.
+  let isManual = (aReason == AddonManager.UPDATE_WHEN_USER_REQUESTED);
   this._script.checkForRemoteUpdate(callback, this.forceUpdate, isManual);
 };
 
@@ -651,12 +648,33 @@ ScriptInstall.prototype.install = function () {
   AddonManagerPrivate.callInstallListeners(
       "onDownloadStarted", this._listeners, this);
   this.state = AddonManager.STATE_DOWNLOADING;
+  this.error = null;
 
   var rs = new RemoteScript(this._script.downloadURL);
   rs.messageName = "script.updated";
-  rs.onProgress(this._progressCallback);
-  rs.download(function (aSuccess, aType) {
-    if (aSuccess && (aType == "dependencies")) {
+  // RemoteScript calls it as a plain function.
+  rs.onProgress(this._progressCallback.bind(this));
+  this._remoteScript = rs;
+  rs.download(function (aSuccess, aType, aStatus) {
+    if (this._remoteScript !== rs) {
+      // Cancelled: cancel() has told about:addons.  The abort comes back
+      // here as a failure, which it isn't.
+      return undefined;
+    }
+    if ((aType == "script") && aSuccess && !rs.errorMessage) {
+      // The script is in; the dependencies follow.
+      return undefined;
+    }
+    if (!aSuccess || rs.errorMessage) {
+      // For the install window, RemoteScript reports an HTTP 429 or 500,
+      // and a script that doesn't parse, as a downloaded script with an
+      // errorMessage, and nothing after it: this waited for ever, with
+      // about:addons at "Downloading".
+      this._downloadFailed(rs, (aType == "script") && aSuccess
+          && !((aStatus >= 400) || (aStatus < 0)));
+      return undefined;
+    }
+    if (aType == "dependencies") {
       this._progressCallback(rs, "progress", 1);
       AddonManagerPrivate.callInstallListeners(
           "onDownloadEnded", this._listeners, this);
@@ -679,23 +697,76 @@ ScriptInstall.prototype.install = function () {
 
       // Note: This call also takes care of replacing the cached ScriptAddon
       // object with a new one for the updated script.
-      rs.install(this._script);
+      try {
+        rs.install(this._script);
+      } catch (e) {
+        // The files couldn't be moved into place; the old version is back
+        // (RemoteScript.install puts it back before throwing).
+        this._remoteScript = null;
+        this.state = AddonManager.STATE_INSTALL_FAILED;
+        this.error = AddonManager.ERROR_FILE_ACCESS;
+        this.addon = null;
+        delete ScriptInstallCache[this.existingAddon.id];
+        this._logFailure(e.message || String(e));
+        AddonManagerPrivate.callInstallListeners(
+            "onInstallFailed", this._listeners, this);
+        return undefined;
+      }
+      this._remoteScript = null;
 
       this.addon = ScriptAddonFactoryByScript(rs.script);
       AddonManagerPrivate.callInstallListeners(
           "onInstallEnded", this._listeners, this, this.addon);
-    } else if (!aSuccess) {
-      this.state = AddonManager.STATE_DOWNLOAD_FAILED;
-      AddonManagerPrivate.callInstallListeners(
-          "onDownloadFailed", this._listeners, this);
     }
+    return undefined;
   }.bind(this));
-  this._remoteScript = rs;
 };
 
 /**
- * Progress callback fed to RemoteScript.onProgress().
- * Converts fractional progress [0–1] to integer percentage and notifies AOM.
+ * Ends an update whose download failed, as the platform does: state
+ * STATE_DOWNLOAD_FAILED and onDownloadFailed (about:addons puts the row
+ * back as it was).  The reason goes to the Browser Console.  The update
+ * itself is still there, so about:addons offers Update Now again the next
+ * time it lists the installs.
+ *
+ * @param {RemoteScript} aRemoteScript
+ * @param {boolean}      aCorrupt - The file came, but isn't a usable script.
+ */
+ScriptInstall.prototype._downloadFailed = function (aRemoteScript, aCorrupt) {
+  this._remoteScript = null;
+  if (!aRemoteScript.done) {
+    // A downloaded file with no script in it: nothing has removed the
+    // temporary files yet.
+    aRemoteScript.cleanup(aRemoteScript.errorMessage);
+  }
+  this.state = AddonManager.STATE_DOWNLOAD_FAILED;
+  this.error = aCorrupt
+      ? AddonManager.ERROR_CORRUPT_FILE : AddonManager.ERROR_NETWORK_FAILURE;
+  delete ScriptInstallCache[this.existingAddon.id];
+  this._logFailure(aRemoteScript.errorMessage);
+  AddonManagerPrivate.callInstallListeners(
+      "onDownloadFailed", this._listeners, this);
+};
+
+/**
+ * Logs why an update failed, as a failed update check is logged.
+ *
+ * @param {string} [aReason]
+ */
+ScriptInstall.prototype._logFailure = function (aReason) {
+  GM_util.logError(
+      GM_CONSTANTS.localeStringBundle.createBundle(
+          GM_CONSTANTS.localeGmAddonsProperties)
+          .GetStringFromName("script.updated.failure")
+      + ' "' + this._script.localized.name + '" - "'
+      + this._script.downloadURL + '"' + (aReason ? "\n" + aReason : ""),
+      false, this._script.fileURL, null);
+};
+
+/**
+ * Progress callback fed to RemoteScript.onProgress() (bound to this
+ * install).  Converts fractional progress [0, 1] to a percentage for
+ * about:addons' progress bar.
  *
  * @param {RemoteScript} aRemoteScript - The downloading script (unused here).
  * @param {string}       aType         - Callback type string (unused here).
@@ -709,17 +780,30 @@ ScriptInstall.prototype._progressCallback = function (
       "onDownloadProgress", this._listeners, this);
 };
 
-/** Cancels an in-progress download and notifies AOM listeners. */
+/**
+ * Stops a download (the Cancel button of about:addons' progress bar).
+ *
+ * The platform reports that as onDownloadCancelled; about:addons' rows
+ * don't handle it, so onInstallEnded with the installed add-on draws the
+ * row again as it was.  The install is available again: the update still
+ * is.  (It sent onInstallCancelled, which made the detail pane throw on
+ * the install's null addon, and the abort then came back as a download
+ * failure.)
+ */
 ScriptInstall.prototype.cancel = function () {
+  let rs = this._remoteScript;
+  this._remoteScript = null;
+  if (rs) {
+    rs.cancel();
+  }
   this.state = AddonManager.STATE_AVAILABLE;
+  this.error = null;
+  this.progress = 0;
+  this.maxProgress = -1;
+  AddonManagerPrivate.callInstallListeners(
+      "onDownloadCancelled", this._listeners, this);
   AddonManagerPrivate.callInstallListeners(
       "onInstallEnded", this._listeners, this, this.existingAddon);
-  AddonManagerPrivate.callInstallListeners(
-      "onInstallCancelled", this._listeners, this);
-  if (this._remoteScript) {
-    this._remoteScript.cleanup();
-    this._remoteScript = null;
-  }
 };
 
 /**
