@@ -871,7 +871,9 @@ RemoteScript.prototype._finishInstall = function () {
     if (warnings.length) {
       // The popup collapses line breaks, hence the dashes.  Own topic,
       // so muting plain "installed" messages doesn't hide warnings.
-      message += " — " + warnings.join(" — ");
+      // The em dashes are written as escapes: a module's source is read
+      // as Latin-1, so a literal one showed as "â".
+      message += " \u2014 " + warnings.join(" \u2014 ");
       topic = "script.parseWarnings";
     }
     if ((this.messageName == "script.updated") || warnings.length) {

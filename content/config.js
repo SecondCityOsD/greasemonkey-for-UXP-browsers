@@ -42,10 +42,14 @@ Config.prototype.initialize = function () {
   this._load();
   this._orphans = this._scanOrphans();
   if (this._orphans.length > 0) {
+    // Non-ASCII text in code is written as escapes, which read the same
+    // whatever charset the file is loaded with: modules, and subscripts
+    // loaded without one, are read as Latin-1, so a literal em dash
+    // showed as "â" (issue #28).
     let lines = ["Greasemonkey: found "
         + this._orphans.length
         + " orphaned script directory(ies) under <profile>/gm_scripts/"
-        + " — script files exist on disk but no <Script> entry in"
+        + " \u2014 script files exist on disk but no <Script> entry in"
         + " config.xml references them.  Open the User Scripts pane"
         + " in about:addons and click \"Recover Orphans\" to reinstall."];
     for (let i = 0; i < this._orphans.length; i++) {
@@ -538,7 +542,7 @@ Config.prototype.updateModifiedScripts = function (
       if (problems.length) {
         // The notification bar collapses line breaks, hence the dashes.
         let message = "(" + script.localized.name + ") "
-            + problems.join(" — ");
+            + problems.join(" \u2014 ");
         let chromeWin = GM_util.getBrowserWindow();
         if (chromeWin && chromeWin.gBrowser) {
           let buttons = [];

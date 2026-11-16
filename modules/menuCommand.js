@@ -235,7 +235,7 @@ function MenuCommandSandbox(
   }
   // 4) Export the "register a command" API function to the sandbox scope.
   /**
-   * GM_registerMenuCommand — registers a new menu command for this script.
+   * GM_registerMenuCommand: registers a new menu command for this script.
    *
    * @param {string}   aCommandName - Display name shown in the menu.
    * @param {function} aCommandFunc - Callback invoked when the user clicks
@@ -292,7 +292,7 @@ function MenuCommandSandbox(
   };
 
   /**
-   * GM_unregisterMenuCommand — removes a previously registered menu command.
+   * GM_unregisterMenuCommand: removes a previously registered menu command.
    *
    * @param {number} aCookie - The ID returned by GM_registerMenuCommand.
    */

@@ -66,10 +66,13 @@ function startup(aService) {
   GM_CONSTANTS.jsSubScriptLoader.loadSubScript(
       "chrome://global/content/XPCNativeWrapper.js");
 
+  // Read as UTF-8: without a charset, loadSubScript reads the file as
+  // Latin-1, which garbles any non-ASCII character in its strings.  A
+  // null target is the default, this component's global.
   GM_CONSTANTS.jsSubScriptLoader.loadSubScript(
-      "chrome://greasemonkey/content/config.js");
+      "chrome://greasemonkey/content/config.js", null, "UTF-8");
   GM_CONSTANTS.jsSubScriptLoader.loadSubScript(
-      "chrome://greasemonkey/content/thirdParty/mplUtils.js");
+      "chrome://greasemonkey/content/thirdParty/mplUtils.js", null, "UTF-8");
 
   // UXP is single-process: storage RPCs (modules/storageBack.js) and
   // service RPCs (script-install, script-open-folder, url-is-temp-file,

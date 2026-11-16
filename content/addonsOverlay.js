@@ -1276,7 +1276,7 @@ function GM_recoverOrphans() {
         + "Already installed, left as they are: %2\nFailed: %3",
         [recovered, skipped, failed]);
     if (problems.length) {
-      msg += "\n\n" + problems.join("\n");
+      msg += "\n\n" + recoverOrphansProblemList(problems);
     }
     if (recovered) {
       msg += "\n\n" + recoverString("recoverOrphans.kept",
@@ -1332,6 +1332,28 @@ function GM_recoverOrphans() {
   }
 
   next(0);
+}
+
+/**
+ * Lays out the Recover Orphans summary's per-script lines.  A message can
+ * span lines (a failed download gives the address, then the reason, with
+ * a blank line between): blank lines inside one are dropped, and when any
+ * spans lines, a blank line separates every entry, so the last line of
+ * one no longer reads as the start of the next (issue #28).
+ *
+ * @param {string[]} aProblems - One message per script.
+ * @returns {string} The list, ready for the summary.
+ */
+function recoverOrphansProblemList(aProblems) {
+  let entries = aProblems.map(function (aProblem) {
+    return String(aProblem).replace(/\r\n?/g, "\n")
+        .replace(/\n\s*\n/g, "\n").trim();
+  });
+  let multiline = entries.some(function (aEntry) {
+    return aEntry.indexOf("\n") > -1;
+  });
+
+  return entries.join(multiline ? "\n\n" : "\n");
 }
 
 /**
