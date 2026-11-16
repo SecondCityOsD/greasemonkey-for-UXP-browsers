@@ -1127,7 +1127,17 @@ function GM_backupImport() {
         .replace("%1", aResult.imported)
         .replace("%2", aResult.skipped);
     if (aResult.errors && aResult.errors.length) {
-      msg += "\n\n" + aResult.errors.join("\n");
+      // As many as fit; all of them in the Browser Console (an import of
+      // many scripts pushed the alert's OK button off the screen).
+      let list = alertProblemList(aResult.errors);
+      msg += "\n\n" + list.text;
+      if (list.omitted) {
+        msg += list.separator + recoverString("recoverOrphans.moreInConsole",
+            "…and %1 more: the full list is in the Browser Console.",
+            [list.omitted]);
+        Services.console.logStringMessage(
+            bundle.GetStringFromName("backup.importTitle") + "\n\n" + list.full);
+      }
     }
     alert(msg);
   });
@@ -1188,15 +1198,16 @@ function updateRecoverOrphansLink() {
 const RECOVER_ORPHANS_LISTED = 15;
 
 /**
- * About how many lines of per-script results the summary shows before
- * "…and N more".  The alert can't scroll or be resized: it grows with its
- * text, and with a long list its OK button went below the screen.  Lines,
- * not entries, because a failed download takes three or four.
+ * About how many lines of per-script results a summary alert (Recover
+ * Orphans, backup import) shows before "…and N more".  The alert can't
+ * scroll or be resized: it grows with its text, and with a long list its
+ * OK button went below the screen.  Lines, not entries, because a failed
+ * download takes three or four.
  */
-const RECOVER_ORPHANS_RESULT_LINES = 20;
+const ALERT_LIST_LINES = 20;
 
 /** About how many characters fit on one line of the alert (45em wide). */
-const RECOVER_ORPHANS_LINE_CHARS = 80;
+const ALERT_LINE_CHARS = 80;
 
 /**
  * "Recover N orphan(s)..." in the User Scripts pane.
@@ -1287,7 +1298,7 @@ function GM_recoverOrphans() {
         + "Already installed, left as they are: %2\nFailed: %3",
         [recovered, skipped, failed]);
     let msg = counts;
-    let list = recoverOrphansProblemList(problems);
+    let list = alertProblemList(problems);
     if (list.text) {
       msg += "\n\n" + list.text;
     }
@@ -1356,7 +1367,8 @@ function GM_recoverOrphans() {
 }
 
 /**
- * Lays out the Recover Orphans summary's per-script lines (issue #28).
+ * Lays out the per-script lines of a summary alert: Recover Orphans'
+ * (issue #28) and the backup import's.
  *
  * - A message can span lines (a failed download gives the address, then
  *   the reason, with a blank line between): blank lines inside one are
@@ -1364,7 +1376,7 @@ function GM_recoverOrphans() {
  *   every entry, so the last line of one doesn't read as the start of the
  *   next.
  * - The alert can't scroll, so it gets only the entries that fit in about
- *   RECOVER_ORPHANS_RESULT_LINES lines (always at least one); the caller
+ *   ALERT_LIST_LINES lines (always at least one); the caller
  *   says how many more there are and logs the full list.
  *
  * @param {string[]} aProblems - One message per script.
@@ -1373,7 +1385,7 @@ function GM_recoverOrphans() {
  *   them; omitted: how many text leaves out; separator: what goes between
  *   two entries (and before a "…and N more" line).
  */
-function recoverOrphansProblemList(aProblems) {
+function alertProblemList(aProblems) {
   let entries = aProblems.map(function (aProblem) {
     return String(aProblem).replace(/\r\n?/g, "\n")
         .replace(/\n\s*\n/g, "\n").trim();
@@ -1382,7 +1394,7 @@ function recoverOrphansProblemList(aProblems) {
   let linesOf = function (aEntry) {
     return aEntry.split("\n").reduce(function (aSum, aLine) {
       return aSum + Math.max(1,
-          Math.ceil(aLine.length / RECOVER_ORPHANS_LINE_CHARS));
+          Math.ceil(aLine.length / ALERT_LINE_CHARS));
     }, 0);
   };
   let multiline = entries.some(function (aEntry) {
@@ -1394,7 +1406,7 @@ function recoverOrphansProblemList(aProblems) {
   let used = 0;
   while (shown < entries.length) {
     let cost = linesOf(entries[shown]) + ((shown && multiline) ? 1 : 0);
-    if (shown && (used + cost > RECOVER_ORPHANS_RESULT_LINES)) {
+    if (shown && (used + cost > ALERT_LIST_LINES)) {
       break;
     }
     used += cost;
