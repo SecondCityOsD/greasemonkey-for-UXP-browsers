@@ -612,7 +612,46 @@ function createSandbox(aContentWin, aUrl, aScript, aRunAt) {
   // GM_info is always provided.
   injectGMInfo(sandbox, aContentWin, aScript);
 
+  installUrlChangeSupport(sandbox);
+
   return sandbox;
+}
+
+/**
+ * window.onurlchange for a sandbox with GM APIs.  Its `window` is an X-ray
+ * view of the page, which shows neither the page's onurlchange sentinel
+ * (scriptInjector.js setupUrlChangeMonitor) nor a handler this script
+ * assigns, so `window.onurlchange === null` was false and the handler
+ * never ran.  This gives the sandbox its own property (an X-ray expando,
+ * seen by this sandbox only) and calls it on each "urlchange" event; it
+ * also sets the event's `url`, which Tampermonkey scripts read.  Added
+ * before the script runs, so this listener comes first.
+ *
+ * @param {Sandbox} aSandbox
+ * @returns {void}
+ */
+function installUrlChangeSupport(aSandbox) {
+  if (!GM_prefRoot.getValue("api.window.onurlchange", true)) {
+    return undefined;
+  }
+  try {
+    Cu.evalInSandbox(
+        "(function () {"
+        + "  Object.defineProperty(window, \"onurlchange\", {"
+        + "    \"configurable\": true, \"enumerable\": true,"
+        + "    \"value\": null, \"writable\": true});"
+        + "  window.addEventListener(\"urlchange\", function (aEvent) {"
+        + "    try { aEvent.url = aEvent.detail.url; } catch (e) {}"
+        + "    var handler = window.onurlchange;"
+        + "    if (typeof handler == \"function\") {"
+        + "      handler.call(window, aEvent);"
+        + "    }"
+        + "  }, true);"
+        + "})();", aSandbox);
+  } catch (e) {
+    // The page is gone, or its window refuses the property: no support.
+  }
+  return undefined;
 }
 
 /**

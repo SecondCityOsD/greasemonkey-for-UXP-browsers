@@ -63,81 +63,70 @@ const CSP_GUARDED_TAGS = { "script": "script", "style": "style" };
 // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ //
 
 /**
- * Injects a CSS string into the page as a <style> element.
+ * Puts aElement into aDoc at once when it can (in aParent, else <head> /
+ * <body> as aPreferred says, else the root element), or else as soon as
+ * the document has a root element: at document-start the earliest scripts
+ * run before the page has any element (see #2515, #1849,
+ * http://bugzil.la/1333990).  Either way the script gets the element at
+ * once, as in Violentmonkey; it used to get null, and `s.id = ...` threw.
  *
- * If the document's <head> already exists, the <style> is appended immediately.
- * If <head> does not yet exist (run-at "document-start"), a MutationObserver
- * watches the document and inserts the style as soon as <head> is added.
+ * @param {Window}  aWin       - The content window.
+ * @param {Document} aDoc      - Its document.
+ * @param {Element} aElement   - The element to insert.
+ * @param {?Node}   aParent    - Where the script asked for it, or null.
+ * @param {string}  aPreferred - "head" or "body".
+ * @returns {Element} aElement.
+ */
+function insertElement(aWin, aDoc, aElement, aParent, aPreferred) {
+  let parent = aParent
+      || aDoc.getElementsByTagName(aPreferred)[0]
+      || ((aPreferred == "head") ? aDoc.getElementsByTagName("body")[0] : null)
+      || aDoc.documentElement;
+  if (parent) {
+    parent.appendChild(aElement);
+    return aElement;
+  }
+  let observer = new aWin.MutationObserver(function () {
+    if (aDoc.documentElement) {
+      observer.disconnect();
+      aDoc.documentElement.appendChild(aElement);
+    }
+  });
+  observer.observe(aDoc, {"childList": true});
+  return aElement;
+}
+
+/**
+ * Injects a CSS string into the page as a <style> element: in <head>, else
+ * wherever the page lets it go now (see insertElement), at every run-at
+ * and in documents without a <head> (SVG, XML).
  *
  * @param {Window} aWrappedContentWin - The content window (Xray-wrapped).
  * @param {string} aFileURL           - Script URL for error attribution.
- * @param {string} aRunAt             - Script run-at phase ("document-start",
- *   "document-end", or "document-idle").
+ * @param {string} aRunAt             - Script run-at phase.
  * @param {string} aCss               - The CSS text to inject.
- * @returns {HTMLStyleElement|null} The injected <style> element if the head
- *   already existed, or null if injection was deferred/impossible.
+ * @returns {HTMLStyleElement|null} The <style> element; null only without
+ *   a document.
  */
 function GM_addStyle(aWrappedContentWin, aFileURL, aRunAt, aCss) {
-  var elementName = "head";
-
-  aCss = String(aCss);
-
-  function addStyle(aDoc, aHead, aCss) {
-    let style = aDoc.createElement("style");
-
-    style.textContent = aCss;
-    style.type = "text/css";
-    // Pages with a `style-src 'nonce-…'` CSP block any <style>
-    // element without a matching nonce.  Attach the page's nonce so
-    // GM_addStyle works on those pages — same reasoning as the nonce
-    // attachment in GM_addElement above.  No-op on pages without a
-    // nonce CSP.
-    let cspNonce = getNonceForWindow(aWrappedContentWin);
-    if (cspNonce) {
-      style.setAttribute("nonce", cspNonce);
-    }
-    aHead.appendChild(style);
-
-    return style;
-  }
-
   var doc = aWrappedContentWin.document;
   if (!doc) {
     return null;
   }
-  let head = doc.getElementsByTagName(elementName)[0];
-  if (head) {
-    return addStyle(doc, head, aCss);
-  } else if (aRunAt == "document-start") {
-    // See #2515 and #1849.
-    // http://bugzil.la/1333990
-    try {
-      let MutationObserver = aWrappedContentWin.MutationObserver;
-      var observer = new MutationObserver(function (aMutations) {
-        aMutations.forEach(function (aMutation) {
-          let addedNodes = aMutation.addedNodes;
-          for (let i = 0, iLen = addedNodes.length; i < iLen; i++) {
-            let node = addedNodes[i];
-            if ((node.nodeType == 1)
-                && (node.nodeName.toLowerCase() == elementName)) {
-              observer.disconnect();
-              addStyle(doc, node, aCss);
-              break;
-            }
-          }
-        });
-      });
-      observer.observe(doc, {
-        "attributes": true,
-        "childList": true,
-        "subtree": true,
-      });
-    } catch (e) {
-      throw new aWrappedContentWin.Error(e.message, aFileURL, null);
+  try {
+    let style = doc.createElement("style");
+    style.textContent = String(aCss);
+    style.type = "text/css";
+    // Pages with a `style-src 'nonce-…'` CSP block any <style> element
+    // without a matching nonce.  No-op on pages without a nonce CSP.
+    let cspNonce = getNonceForWindow(aWrappedContentWin, "style");
+    if (cspNonce) {
+      style.setAttribute("nonce", cspNonce);
     }
+    return insertElement(aWrappedContentWin, doc, style, null, "head");
+  } catch (e) {
+    throw new aWrappedContentWin.Error(e.message, aFileURL, null);
   }
-
-  return null;
 }
 
 // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ //
@@ -158,7 +147,8 @@ function GM_addStyle(aWrappedContentWin, aFileURL, aRunAt, aCss) {
  * @param {Node|string}    aParentOrTag - Parent node (3-arg form) or tag name (2-arg).
  * @param {string|object}  [aTagOrAttrs] - Tag name (3-arg) or attributes object (2-arg).
  * @param {object}  [aAttrs]           - Attributes object (3-arg form only).
- * @returns {Element|null} The created element, or null if deferred via observer.
+ * @returns {Element|null} The element (see insertElement); null only
+ *   without a document.
  */
 function GM_addElement(
     aWrappedContentWin, aFileURL, aRunAt,
@@ -184,89 +174,48 @@ function GM_addElement(
     attrs = aAttrs || {};
   }
 
-  function createElement(aDoc, aParent) {
-    let elem = aDoc.createElement(tagName);
+  let elem = doc.createElement(tagName);
 
-    // If the script is injecting a <script> or <style> into a page
-    // protected by a nonce-based CSP, attach the page's nonce so the
-    // injected element passes the script-src / style-src check.  No-op
-    // on pages without a nonce CSP — the element is then injected
-    // un-attributed, which is also fine on no-CSP pages.  The script
-    // author can still override via `attrs.nonce` (handled below by
-    // the normal attribute application loop).
-    let tagLower = (tagName || "").toLowerCase();
-    if (Object.prototype.hasOwnProperty.call(CSP_GUARDED_TAGS, tagLower)) {
-      let cspNonce = getNonceForWindow(aWrappedContentWin);
-      if (cspNonce) {
-        elem.setAttribute("nonce", cspNonce);
-      }
-    }
-
-    // Apply attributes.  Call hasOwnProperty via Object.prototype so a
-    // script that passes `Object.create(null)` (or any object whose own
-    // `hasOwnProperty` has been shadowed) doesn't crash the API here.
-    for (let key in attrs) {
-      if (!Object.prototype.hasOwnProperty.call(attrs, key)) {
-        continue;
-      }
-      let val = attrs[key];
-      // Properties that must be set directly (not via setAttribute).
-      if (key == "textContent" || key == "innerHTML") {
-        elem[key] = val;
-      } else {
-        elem.setAttribute(key, val);
-      }
-    }
-
-    aParent.appendChild(elem);
-    return elem;
-  }
-
-  // Resolve default parent if not given.
-  if (!parentNode) {
-    let headTags = {"script": 1, "style": 1, "link": 1, "meta": 1};
-    let targetName = (tagName.toLowerCase() in headTags) ? "head" : "body";
-    parentNode = doc.getElementsByTagName(targetName)[0];
-
-    if (!parentNode) {
-      // At document-start, head/body may not exist yet.
-      // Fall back to documentElement if available.
-      parentNode = doc.documentElement;
-    }
-
-    if (!parentNode && aRunAt == "document-start") {
-      // Use MutationObserver to wait for the target element.
-      try {
-        let MutationObserver = aWrappedContentWin.MutationObserver;
-        var observer = new MutationObserver(function (aMutations) {
-          aMutations.forEach(function (aMutation) {
-            let addedNodes = aMutation.addedNodes;
-            for (let i = 0, iLen = addedNodes.length; i < iLen; i++) {
-              let node = addedNodes[i];
-              if (node.nodeType == 1) {
-                observer.disconnect();
-                createElement(doc, node);
-                break;
-              }
-            }
-          });
-        });
-        observer.observe(doc, {
-          "childList": true,
-          "subtree": true,
-        });
-      } catch (e) {
-        throw new aWrappedContentWin.Error(e.message, aFileURL, null);
-      }
-      return null;
+  // If the script is injecting a <script> or <style> into a page
+  // protected by a nonce-based CSP, attach the page's nonce so the
+  // injected element passes the script-src / style-src check.  No-op
+  // on pages without a nonce CSP — the element is then injected
+  // un-attributed, which is also fine on no-CSP pages.  The script
+  // author can still override via `attrs.nonce` (handled below by
+  // the normal attribute application loop).
+  let tagLower = (tagName || "").toLowerCase();
+  if (Object.prototype.hasOwnProperty.call(CSP_GUARDED_TAGS, tagLower)) {
+    let cspNonce = getNonceForWindow(aWrappedContentWin, tagLower);
+    if (cspNonce) {
+      elem.setAttribute("nonce", cspNonce);
     }
   }
 
-  if (!parentNode) {
-    return null;
+  // Apply attributes.  Call hasOwnProperty via Object.prototype so a
+  // script that passes `Object.create(null)` (or any object whose own
+  // `hasOwnProperty` has been shadowed) doesn't crash the API here.
+  for (let key in attrs) {
+    if (!Object.prototype.hasOwnProperty.call(attrs, key)) {
+      continue;
+    }
+    let val = attrs[key];
+    // Properties that must be set directly (not via setAttribute).
+    if (key == "textContent" || key == "innerHTML") {
+      elem[key] = val;
+    } else {
+      elem.setAttribute(key, val);
+    }
   }
 
-  return createElement(doc, parentNode);
+  // Default parent: <head> for script/style/link/meta, else <body>; at
+  // document-start, wherever the page lets it go now (insertElement).
+  let headTags = {"script": 1, "style": 1, "link": 1, "meta": 1};
+  try {
+    return insertElement(aWrappedContentWin, doc, elem, parentNode || null,
+        (tagLower in headTags) ? "head" : "body");
+  } catch (e) {
+    throw new aWrappedContentWin.Error(e.message, aFileURL, null);
+  }
 }
 
 // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ // \\ //

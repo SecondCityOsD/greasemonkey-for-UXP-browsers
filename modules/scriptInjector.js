@@ -88,17 +88,28 @@ const URL_USER_PASS_STRIP_REGEXP = new RegExp(
     GM_CONSTANTS.urlUserPassStripRegexp, "");
 
 /**
- * Tracks windows where document-start scripts have already been
- * injected via the early observer, so the normal observer can skip
- * them and only run deferred scripts.  WeakSet → no GC retention.
+ * Documents whose document-start scripts the early observer already ran,
+ * so the normal observer runs only the deferred ones.  Per document, not
+ * per window: an iframe's initial about:blank window is reused for a
+ * same-origin page without a new early notification, and the flag it left
+ * made that page skip its document-start scripts.  WeakSet → no GC
+ * retention.
  *
- * @type {WeakSet<Window>}
+ * @type {WeakSet<Document>}
  */
-var gEarlyStartWindows = new WeakSet();
+var gEarlyStartDocs = new WeakSet();
 
-// Content windows that already have a window.onurlchange monitor attached
-// (see setupUrlChangeMonitor); one per window, never double-attached.
-var gUrlChangeWindows = new WeakSet();
+/**
+ * Documents whose document-start phase has run, so nothing runs it twice
+ * (about:reader did, from contentLoad).
+ *
+ * @type {WeakSet<Document>}
+ */
+var gStartRanDocs = new WeakSet();
+
+// Documents that already have a window.onurlchange monitor (see
+// setupUrlChangeMonitor): one per page, so every page of a tab gets one.
+var gUrlChangeDocs = new WeakSet();
 
 /**
  * Idempotency flag for startScriptInjector().  Re-registering the
@@ -264,14 +275,22 @@ function urlsOfAllFrames(aContentWin) {
 }
 
 /**
- * Top-level document -> what ran in it and its frames (the toolbar badge):
- * {ids: the Set of script ids, frames: a Map from each window, the top one
- * included, to {doc, ids} for the page it showed}.  Keyed on the document,
- * not the window: a tab's window is reused when it navigates, its document
- * isn't, and Back/Forward restores the very same document from the
- * bfcache.  The WeakMap lets a closed page's record go with it.
+ * What ran where, for the toolbar badge.  Both keyed on documents, not
+ * windows: a tab's window is reused when it navigates, its document isn't,
+ * and Back/Forward restores the very same document from the bfcache.
+ *
+ *   gScriptsRan:  top-level document -> the Set of ids of the scripts that
+ *                 ran in it or its frames (scriptsRanIn).
+ *   gFrameRuns:   any document (the top one included) -> the Set of ids of
+ *                 the scripts that ran in it (scriptRunCountIn adds these
+ *                 up over the frames the page has now).
+ *
+ * Neither holds a window or a document strongly: a removed iframe's
+ * record goes with it.  (A Map of frame windows to {doc, ids} kept every
+ * iframe a long-lived page ever had alive.)
  */
 var gScriptsRan = new WeakMap();
+var gFrameRuns = new WeakMap();
 
 /**
  * Records that aScript ran in aContentWin (a page or a frame), and
@@ -291,22 +310,21 @@ function noteScriptRan(aContentWin, aScript) {
   } catch (e) {
     return;
   }
-  let ran = gScriptsRan.get(top.document);
-  if (!ran) {
-    ran = {"frames": new Map(), "ids": new Set()};
-    gScriptsRan.set(top.document, ran);
+  let frameIds = gFrameRuns.get(doc);
+  if (!frameIds) {
+    frameIds = new Set();
+    gFrameRuns.set(doc, frameIds);
   }
-  // A frame that loaded another page starts its count again.
-  let frame = ran.frames.get(aContentWin);
-  if (!frame || (frame.doc !== doc)) {
-    frame = {"doc": doc, "ids": new Set()};
-    ran.frames.set(aContentWin, frame);
-  }
-  if (frame.ids.has(aScript.id)) {
+  if (frameIds.has(aScript.id)) {
     return;
   }
-  frame.ids.add(aScript.id);
-  ran.ids.add(aScript.id);
+  frameIds.add(aScript.id);
+  let topIds = gScriptsRan.get(top.document);
+  if (!topIds) {
+    topIds = new Set();
+    gScriptsRan.set(top.document, topIds);
+  }
+  topIds.add(aScript.id);
   Services.obs.notifyObservers(top, "greasemonkey:scripts-ran", null);
 }
 
@@ -316,31 +334,34 @@ function noteScriptRan(aContentWin, aScript) {
  *          frames included, each once.
  */
 function scriptsRanIn(aTopWin) {
-  let ran = aTopWin && aTopWin.document && gScriptsRan.get(aTopWin.document);
-  return ran ? Array.from(ran.ids) : [];
+  let ids = aTopWin && aTopWin.document && gScriptsRan.get(aTopWin.document);
+  return ids ? Array.from(ids) : [];
 }
 
 /**
  * @param {Window} aTopWin - A tab's content window.
  * @returns {number} How many scripts ran in its current page, each counted
- *          once per frame it runs in (Violentmonkey's "total").  Frames
- *          that are gone, or show another page by now, don't count.
+ *          once per frame it runs in (Violentmonkey's "total").  Only the
+ *          frames the page has now count, each for the page it shows.
  */
 function scriptRunCountIn(aTopWin) {
-  let ran = aTopWin && aTopWin.document && gScriptsRan.get(aTopWin.document);
-  if (!ran) {
-    return 0;
-  }
   let count = 0;
-  ran.frames.forEach(function (aFrame, aWin) {
+  let visit = function (aWin) {
     try {
-      if (!aWin.closed && (aWin.document === aFrame.doc)) {
-        count += aFrame.ids.size;
+      let ids = gFrameRuns.get(aWin.document);
+      if (ids) {
+        count += ids.size;
+      }
+      for (let i = 0; i < aWin.frames.length; i++) {
+        visit(aWin.frames[i]);
       }
     } catch (e) {
-      // A frame we can no longer reach is gone.
+      // A frame we can't reach (going away) doesn't count.
     }
-  });
+  };
+  if (aTopWin && aTopWin.document && gScriptsRan.has(aTopWin.document)) {
+    visit(aTopWin);
+  }
   return count;
 }
 
@@ -524,6 +545,30 @@ ${safeGlobalsSnapshot}
   return injectCode(wrappedCode, aScript.fileURL);
 }
 
+/** @grant values that aren't GM APIs: a page script has these too. */
+const PAGE_SAFE_GRANTS = [
+  "none", "gm_info", "gm.info", "unsafewindow", "window.onurlchange",
+];
+
+/**
+ * Whether aScript runs as a <script> in the page: only for @inject-into
+ * page, and only without GM APIs to grant.  A page script gets GM_info and
+ * unsafeWindow and nothing else, so a script with, say, @grant GM_setValue
+ * failed at its first call.  Those run in the sandbox instead, which has
+ * the page through unsafeWindow (Violentmonkey bridges its API into the
+ * page instead; exposing privileged functions to the page is what the
+ * sandbox avoids).
+ *
+ * @param {IPCScript} aScript
+ * @returns {boolean}
+ */
+function runsInPage(aScript) {
+  return (aScript.injectInto == "page")
+      && (aScript.grants || []).every(function (aGrant) {
+        return PAGE_SAFE_GRANTS.indexOf(String(aGrant).toLowerCase()) > -1;
+      });
+}
+
 /**
  * Routes a list of scripts to either the page-context injector or the
  * sandbox path, one at a time.  A script's failure is logged but does
@@ -556,14 +601,15 @@ function injectScripts(aScripts, aRunAt, aContentWin) {
     }
     try {
       // Routing:
-      //   @inject-into page (EXPLICIT)
+      //   @inject-into page (EXPLICIT), with no GM APIs granted
       //       → true DOM-<script> injection via injectScriptIntoPage.
       //         The author opted into page-script semantics (visible
       //         in DevTools, perfect instanceof against page-side
       //         objects, page-style eval/Function) and accepts the
       //         CSP risk that comes with it.  Built-in fallback in
       //         injectScriptIntoPage drops down to the sandbox path
-      //         if the test-probe detects a CSP block.
+      //         if the test-probe detects a CSP block.  With GM APIs
+      //         granted it takes the sandbox path (runsInPage).
       //
       //   everything else, INCLUDING @grant none
       //       → sandbox-with-page-prototype via createSandbox.
@@ -598,8 +644,7 @@ function injectScripts(aScripts, aRunAt, aContentWin) {
       //   - rare polyfills that need true page-script `eval()` realm
       //     semantics (uncommon) should add @inject-into page to opt
       //     back into the DOM-injection path
-      if (script.injectInto == "page"
-          && aContentWin.document.documentElement) {
+      if (runsInPage(script) && aContentWin.document.documentElement) {
         if (injectScriptIntoPage(aContentWin, script, aRunAt)) {
           noteScriptRan(aContentWin, script);
         }
@@ -639,6 +684,25 @@ function runScripts(aRunAt, aContentWin) {
   injectScripts(scripts, aRunAt, aContentWin);
 }
 
+
+/**
+ * Whether a document-start script runs at TOPIC_EARLY, before the page has
+ * any element: sandbox scripts without @require.  Scripts that need the
+ * page's DOM (@grant none, @inject-into page, unless @inject-into content)
+ * and those with @require (jQuery etc.) wait for TOPIC_NORMAL.
+ *
+ * @param {IPCScript} aScript
+ * @returns {boolean}
+ */
+function runsEarly(aScript) {
+  let needsPageContext = aScript.grants.includes("none")
+      || (aScript.injectInto == "page");
+  if (aScript.injectInto == "content") {
+    needsPageContext = false;
+  }
+  return !needsPageContext
+      && (!aScript.requires || (aScript.requires.length == 0));
+}
 
 /**
  * Handles a new content document at its earliest observable moment.
@@ -681,18 +745,12 @@ function contentObserver(aContentWin, aTopic) {
     let scripts = IPCScript.scriptsForUrl(
         earlyUrl, "document-start",
         GM_util.windowId(aContentWin, "outer"));
-    // Only sandbox scripts without @require run this early; everything
-    // else needs DOM and is deferred to TOPIC_NORMAL.
-    let earlyScripts = scripts.filter(function (s) {
-      let needsPageContext = s.grants.includes("none")
-          || s.injectInto == "page";
-      if (s.injectInto == "content") needsPageContext = false;
-      return !needsPageContext
-          && (!s.requires || s.requires.length == 0);
-    });
+    let earlyScripts = scripts.filter(runsEarly);
     if (earlyScripts.length > 0) {
       injectScripts(earlyScripts, "document-start", aContentWin);
-      gEarlyStartWindows.add(aContentWin);
+      // The document this window has now (the notification comes after
+      // the window gets its new document).
+      gEarlyStartDocs.add(aContentWin.document);
     }
     return undefined;
   }
@@ -711,29 +769,26 @@ function contentObserver(aContentWin, aTopic) {
   // the read-only location monitor before any document-start script runs.
   setupUrlChangeMonitor(aContentWin);
 
-  if (!gEarlyStartWindows.has(aContentWin)) {
-    // Early did nothing — run all document-start scripts normally.
+  if (!gEarlyStartDocs.has(doc)) {
+    // Early did nothing for this document — run all document-start
+    // scripts normally.
     runScripts("document-start", aContentWin);
   } else {
     // Early ran the sandbox-no-require subset.  Run the rest now.
-    gEarlyStartWindows.delete(aContentWin);
+    gEarlyStartDocs.delete(doc);
     let deferredUrl = urlForWin(aContentWin);
     if (deferredUrl) {
-      let allStartScripts = IPCScript.scriptsForUrl(
+      let deferredScripts = IPCScript.scriptsForUrl(
           deferredUrl, "document-start",
-          GM_util.windowId(aContentWin, "outer"));
-      let deferredScripts = allStartScripts.filter(function (s) {
-        let needsPageContext = s.grants.includes("none")
-            || s.injectInto == "page";
-        if (s.injectInto == "content") needsPageContext = false;
-        return needsPageContext
-            || (s.requires && s.requires.length > 0);
-      });
+          GM_util.windowId(aContentWin, "outer")).filter(function (s) {
+            return !runsEarly(s);
+          });
       if (deferredScripts.length > 0) {
         injectScripts(deferredScripts, "document-start", aContentWin);
       }
     }
   }
+  gStartRanDocs.add(doc);
 
   // @run-at document-body — fire when <body> first appears.
   if (doc.body) {
@@ -768,11 +823,38 @@ function contentObserver(aContentWin, aTopic) {
  * fires exactly once.  Runs document-end immediately and queues
  * document-idle for 50 ms later — the 50 ms gap matches the timing
  * that userscripts in the wild depend on.
+ *
+ * Only the browser's own events for the document count: the capturing
+ * "load" listener also hears every <img> / <script> / <iframe> load (it
+ * threw on each, as their target has no defaultView), and a page could
+ * fire a fake DOMContentLoaded to run document-end scripts early.
  */
 function contentLoad(aEvent) {
-  let aContentWin = aEvent.target.defaultView;
+  let doc = aEvent.target;
+  if (!aEvent.isTrusted || !doc || (doc.nodeType !== 9)) {
+    return undefined;
+  }
+  let aContentWin = doc.defaultView;
+  if (!aContentWin) {
+    return undefined;
+  }
   aContentWin.removeEventListener("DOMContentLoaded", contentLoad, true);
   aContentWin.removeEventListener("load", contentLoad, true);
+
+  // For about: pages whose document-start phase didn't run (bug #1820,
+  // #2371, #2195), run it now; never a second time (about:reader ran its
+  // document-start scripts twice).
+  try {
+    let href = aContentWin.location.href;
+    if (!gStartRanDocs.has(doc) && isWindowVisible(aContentWin)
+        && ((href == GM_CONSTANTS.urlAboutPart1)
+            || (href && href.match(URL_ABOUT_PART2_REGEXP)))) {
+      gStartRanDocs.add(doc);
+      runScripts("document-start", aContentWin);
+    }
+  } catch (e) {
+    // location access can throw on torn-down windows.
+  }
 
   runScripts("document-end", aContentWin);
   GM_util.timeout(function () {
@@ -786,58 +868,32 @@ function contentLoad(aEvent) {
   // effects.  Firefox/Chrome content scripts, Violentmonkey and
   // Tampermonkey don't re-run either.  A script that wants to react to a
   // restore can listen for pageshow itself.
-
-  // Special-case for the "about:" URLs whose document lifecycle didn't
-  // fire content-document-global-created / document-element-inserted
-  // in the expected order (bug #1820, #2371, #2195).  If GM is
-  // disabled, instead surface the navigation to the chrome UI so it
-  // can render the "scripts are disabled" affordance.
-  try {
-    let href = aContentWin.location.href;
-    if ((href == GM_CONSTANTS.urlAboutPart1)
-        || (href && href.match(URL_ABOUT_PART2_REGEXP))) {
-      if (!GM_util.getEnabled()) {
-        // UXP runs chrome and content in the same JS runtime, so this
-        // routes straight to GM_BrowserUI.checkDisabledScriptNavigation
-        // on the chrome window — no message-manager hop needed.
-        try {
-          let chromeWin = getChromeWinForContentWin(aContentWin);
-          if (chromeWin && chromeWin.GM_BrowserUI
-              && typeof chromeWin.GM_BrowserUI.checkDisabledScriptNavigation
-                  === "function") {
-            chromeWin.GM_BrowserUI.checkDisabledScriptNavigation(
-                aContentWin.document.contentType, href);
-          }
-        } catch (e) {
-          GM_util.logError(e, true, e.fileName || null, e.lineNumber || 0);
-        }
-      } else if (isWindowVisible(aContentWin)) {
-        // For about: URLs the document-element-inserted path may not
-        // have fired document-start — run it now defensively.
-        runScripts("document-start", aContentWin);
-      }
-    }
-  } catch (e) {
-    // location access can throw on torn-down windows.
-  }
+  return undefined;
 }
 
 
 /**
- * Attaches a read-only URL-change monitor to a content window so scripts
- * can observe SPA navigations via window.addEventListener("urlchange", fn)
- * or the window.onurlchange property (Tampermonkey-compatible).  The
- * support sentinel is `window.onurlchange === null` (undefined when the
- * feature is disabled by pref).
+ * Attaches a read-only URL-change monitor to a page so scripts can observe
+ * SPA navigations via window.addEventListener("urlchange", fn) or the
+ * window.onurlchange property (Tampermonkey-compatible).  The support
+ * sentinel is `window.onurlchange === null` (undefined when the feature is
+ * disabled by pref).  The event has the new address as `url` (Tampermonkey
+ * scripts read `info.url`) and as `detail.url`.
  *
  * Implementation notes:
+ *   - One monitor per document: every page of a tab gets its own (a
+ *     WeakSet of windows gave only a tab's first page one), with its own
+ *     starting address (the old one's fired a false event about a second
+ *     after each navigation) and its own listeners.
  *   - Read-only: it never patches history.pushState, so it cannot break a
  *     page's own navigation.  popstate / hashchange are handled at once;
  *     a ~1s location poll catches pushState / replaceState routes.
- *   - The poll self-stops once the window is gone (no leak); the whole
- *     monitor is gated by the api.window.onurlchange pref.
- *   - Single-process UXP: this chrome code touches the content window
- *     directly through waived Xrays and dispatches a content-realm event.
+ *   - The poll stops when the window closes or shows another page; the
+ *     whole monitor is gated by the api.window.onurlchange pref.
+ *   - The sentinel and the handler here are the page's own (page-mode and
+ *     @grant none scripts share them).  A sandbox with GM APIs can't see
+ *     those through its X-ray view of window, so sandbox.js gives each one
+ *     its own (installUrlChangeSupport there).
  *
  * @param {Window} aContentWin
  */
@@ -845,10 +901,16 @@ function setupUrlChangeMonitor(aContentWin) {
   if (!GM_prefRoot.getValue("api.window.onurlchange", true)) {
     return undefined;
   }
-  if (gUrlChangeWindows.has(aContentWin)) {
+  let doc;
+  try {
+    doc = aContentWin.document;
+  } catch (e) {
     return undefined;
   }
-  gUrlChangeWindows.add(aContentWin);
+  if (!doc || gUrlChangeDocs.has(doc)) {
+    return undefined;
+  }
+  gUrlChangeDocs.add(doc);
 
   let waived;
   try {
@@ -868,7 +930,20 @@ function setupUrlChangeMonitor(aContentWin) {
     return undefined;
   }
 
+  /** @returns {boolean} Whether the window still shows this page. */
+  function current() {
+    try {
+      return !GM_util.windowIsClosed(aContentWin)
+          && (aContentWin.document === doc);
+    } catch (e) {
+      return false;
+    }
+  }
+
   function fire() {
+    if (!current()) {
+      return undefined;
+    }
     let href;
     try {
       href = aContentWin.location.href;
@@ -883,6 +958,8 @@ function setupUrlChangeMonitor(aContentWin) {
       let ev = new aContentWin.CustomEvent("urlchange", {
         "detail": Cu.cloneInto({ "url": href }, aContentWin),
       });
+      // For the page's own listeners (sandboxes add theirs, sandbox.js).
+      Cu.waiveXrays(ev).url = href;
       aContentWin.dispatchEvent(ev);
     } catch (e) {
       // Best effort.
@@ -906,7 +983,7 @@ function setupUrlChangeMonitor(aContentWin) {
   }
 
   function pollTick() {
-    if (GM_util.windowIsClosed(aContentWin)) {
+    if (!current()) {
       return undefined;
     }
     fire();
@@ -925,7 +1002,8 @@ function setupUrlChangeMonitor(aContentWin) {
  */
 const injectorObserver = {
   "observe": function (aSubject, aTopic, aData) {
-    if (!GM_util.getEnabled()) {
+    let enabled = GM_util.getEnabled();
+    if (!enabled && (aTopic !== TOPIC_NORMAL)) {
       return undefined;
     }
     let aContentWin;
@@ -952,9 +1030,42 @@ const injectorObserver = {
     } catch (e) {
       // Not a chrome window — proceed.
     }
+    if (!enabled) {
+      offerInstallWhileDisabled(aContentWin);
+      return undefined;
+    }
     contentObserver(aContentWin, aTopic);
   },
 };
+
+/**
+ * While Greasemonkey is switched off, a .user.js opened in a tab shows as
+ * text.  This offers, in that tab, to switch Greasemonkey on and install
+ * it (GM_BrowserUI.checkDisabledScriptNavigation, which checks the address
+ * and type).  It used to be reachable only from contentLoad, whose
+ * listeners are never attached while Greasemonkey is off.
+ *
+ * @param {Window} aContentWin - A page whose root element just appeared.
+ */
+function offerInstallWhileDisabled(aContentWin) {
+  try {
+    let doc = aContentWin.document;
+    if (!windowIsTop(aContentWin)
+        || (doc.documentURI.indexOf(GM_CONSTANTS.fileScriptExtension) == -1)) {
+      return undefined;
+    }
+    let chromeWin = getChromeWinForContentWin(aContentWin);
+    if (!chromeWin || !chromeWin.GM_BrowserUI || !chromeWin.gBrowser) {
+      return undefined;
+    }
+    chromeWin.GM_BrowserUI.checkDisabledScriptNavigation(
+        doc.contentType, doc.documentURI,
+        chromeWin.gBrowser.getBrowserForDocument(doc));
+  } catch (e) {
+    GM_util.logError(e, true, e.fileName || null, e.lineNumber || 0);
+  }
+  return undefined;
+}
 
 
 /**

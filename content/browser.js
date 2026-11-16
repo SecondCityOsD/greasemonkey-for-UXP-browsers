@@ -421,7 +421,8 @@ GM_BrowserUI.isModelessOptions = function (aWin) {
   return !!(args && args[0] && args[0].modeless);
 };
 
-GM_BrowserUI.checkDisabledScriptNavigation = function (aContentType, aHref) {
+GM_BrowserUI.checkDisabledScriptNavigation = function (
+    aContentType, aHref, aBrowser) {
   if (GM_util.getEnabled()) {
     return undefined;
   }
@@ -463,7 +464,9 @@ GM_BrowserUI.checkDisabledScriptNavigation = function (aContentType, aHref) {
     "popup": null,
   });
 
-  let notificationBox = gBrowser.getNotificationBox();
+  // The tab the script opened in (a background one, perhaps), else the
+  // selected one.
+  let notificationBox = gBrowser.getNotificationBox(aBrowser || undefined);
   let notification = notificationBox.appendNotification(
       GM_BrowserUI.bundle.GetStringFromName("greeting.msg"),
       "greasemonkey-install-userscript",
