@@ -34,9 +34,7 @@
  */
 
 const EXPORTED_SYMBOLS = [
-  "MenuCommandEventNameSuffix",
-  "MenuCommandListRequest", "MenuCommandRespond",
-  "MenuCommandRun", "MenuCommandSandbox",
+  "MenuCommandEventNameSuffix", "MenuCommandRespond", "MenuCommandSandbox",
 ];
 
 if (typeof Cc === "undefined") {
@@ -80,24 +78,6 @@ var MenuCommandEventNameSuffix = (function () {
 })();
 
 /**
- * Dispatches a "greasemonkey-menu-command-list-<suffix>" CustomEvent on the
- * given content window, carrying aMessage.data.cookie as the detail.  No
- * live caller — kept only to satisfy the EXPORTED_SYMBOLS contract for any
- * external module that imports it by name.
- *
- * @param {Window} aContent  - The content window of the tab.
- * @param {object} aMessage  - Object with aMessage.data.cookie identifying
- *                             this request.
- */
-function MenuCommandListRequest(aContent, aMessage) {
-  let e = new aContent.CustomEvent(
-      "greasemonkey-menu-command-list-" + MenuCommandEventNameSuffix, {
-        "detail": aMessage.data.cookie,
-      });
-  aContent.dispatchEvent(e);
-}
-
-/**
  * Callback invoked from inside the script sandbox when it responds to a
  * list-commands request.  Forwards the list to any subscribed chrome menu
  * commander via the platform observer service.
@@ -118,25 +98,6 @@ function MenuCommandRespond(aCookie, aData) {
   });
   Services.obs.notifyObservers(null,
       "greasemonkey:menu-command-response", payload);
-}
-
-/**
- * Dispatches a "greasemonkey-menu-command-run-<suffix>" CustomEvent on the
- * given content window, carrying JSON.stringify(aMessage.data) as the
- * detail.  No live caller — kept only to satisfy the EXPORTED_SYMBOLS
- * contract for any external module that imports it by name.
- *
- * @param {Window} aContent  - The content window of the tab.
- * @param {object} aMessage  - Object with aMessage.data carrying the
- *                             scriptUuid and cookie identifying which command
- *                             to run.
- */
-function MenuCommandRun(aContent, aMessage) {
-  let e = new aContent.CustomEvent(
-      "greasemonkey-menu-command-run-" + MenuCommandEventNameSuffix, {
-        "detail": JSON.stringify(aMessage.data),
-      });
-  aContent.dispatchEvent(e);
 }
 
 /**
