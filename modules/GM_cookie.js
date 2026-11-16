@@ -51,10 +51,11 @@ Cu.import("chrome://greasemonkey-modules/content/prefManager.js");
 // allowed.  There is no global host-lock constant anymore.
 
 /**
- * Default expiration for set() when no `expirationDate` / `expiration` is
- * supplied.  2038-01-17 is just before the Unix-time-2^31 cliff.
+ * The expiry add() is given for a session cookie, which ends with the
+ * session anyway (add() needs one, and checks it).  Far off, so it never
+ * expires first.
  */
-const DEFAULT_EXPIRATION_SEC = Date.parse("Jan 17, 2038") / 1000;
+const SESSION_COOKIE_EXPIRY_SEC = Math.pow(2, 52);
 
 
 /**
@@ -117,6 +118,25 @@ function sameSiteToInt(aValue) {
 }
 
 /**
+ * A cookie's SameSite as chrome.cookies names it (Violentmonkey and
+ * Tampermonkey give these): nsICookie2's 1 / 2 are "lax" / "strict";
+ * unset (0, or a build without the field) is "unspecified".
+ *
+ * @param {number|undefined} aValue
+ * @returns {string}
+ */
+function sameSiteName(aValue) {
+  switch (aValue) {
+    case 1:
+      return "lax";
+    case 2:
+      return "strict";
+    default:
+      return "unspecified";
+  }
+}
+
+/**
  * Tests whether an nsICookie2 record applies to a given page host.
  * Mirrors the matching the platform performs internally:
  *   - dot-prefixed cookie host ".example.com" matches sub.example.com
@@ -170,9 +190,12 @@ function listCookiesForHost(aContentWin, aHost) {
  * `delete` methods exported via Cu.exportFunction.
  *
  * Each method is synchronous from the chrome side (returns the result
- * directly).  The optional callback (TM/VM-style) is invoked with
- * (result, errorOrNull).  buildGMObject wraps each method in a Promise
- * for the GM4 `await GM.cookie.X(...)` form.
+ * directly).  The optional callback is invoked as in Violentmonkey and
+ * Tampermonkey: list's with (cookies, error), set's and delete's with
+ * (error), undefined when there's none; with a callback, errors go to it
+ * instead of being thrown (see fail()).  buildGMObject wraps each method
+ * in a Promise for the GM4 `await GM.cookie.X(...)` form, without a
+ * callback.
  *
  * @param {Window}  aWrappedContentWin - X-ray wrapped content window
  *   (used for Error construction in sandbox scope and originAttributes).
@@ -298,19 +321,85 @@ function createGMCookieAPI(
   }
 
   /**
-   * Resolves a callback safely — never lets a script-side throw escape
-   * back into the chrome implementation.
+   * Whether set() may make a domain cookie for aDomain (".example.com",
+   * sent to every subdomain): for the page's own host or a host @connect
+   * allows, and for a parent domain of the page, as the page's own
+   * document.cookie may.  Never for a public suffix ("com", "co.uk",
+   * "github.io") or an IP address.
+   *
+   * @param {string} aDomain - Without the leading dot, lowercase.
+   * @returns {boolean}
    */
-  function safeCall(aCallback, aResult, aError) {
+  function domainCookieAllowed(aDomain) {
+    if (!aDomain) {
+      return false;
+    }
+    try {
+      if (Services.eTLD.getPublicSuffixFromHost(aDomain) === aDomain) {
+        return false;
+      }
+    } catch (e) {
+      // An IP address or a one-label name: no domain cookies.
+      return false;
+    }
+    if ((aDomain === pageHost) || hostAllowed(aDomain)) {
+      return true;
+    }
+    return !!pageHost && pageHost.endsWith("." + aDomain);
+  }
+
+  /**
+   * Calls a script callback, never letting its throw escape back into the
+   * chrome implementation.
+   *
+   * @param {Function} aCallback
+   * @param {Array}    aArgs
+   */
+  function safeCall(aCallback, aArgs) {
     if (typeof aCallback !== "function") {
       return undefined;
     }
     try {
-      aCallback(aResult, aError);
+      aCallback.apply(null, aArgs);
     } catch (e) {
       // Script callback threw; log but don't propagate.
       GM_util.logError(e, false, aFileURL, e.lineNumber || 0);
     }
+  }
+
+  /**
+   * Reports a failure as Violentmonkey and Tampermonkey do: to the
+   * callback when there is one, with (undefined, error) for list and
+   * (error) for set and delete; otherwise as a throw, which GM.cookie's
+   * promise turns into a rejection.  It used to call the callback with
+   * (null, error) and throw as well.
+   *
+   * @param {Function} aCallback
+   * @param {boolean}  aIsList
+   * @param {Error}    aError
+   * @returns {undefined}
+   */
+  function fail(aCallback, aIsList, aError) {
+    if (typeof aCallback !== "function") {
+      throw aError;
+    }
+    safeCall(aCallback, aIsList ? [undefined, aError] : [aError]);
+    return undefined;
+  }
+
+  /**
+   * @param {string} aCookiePath  - A cookie's path.
+   * @param {string} aRequestPath - A URL's path.
+   * @returns {boolean} Whether a request to aRequestPath gets the cookie
+   *   (RFC 6265 path-match).
+   */
+  function pathMatches(aCookiePath, aRequestPath) {
+    if (aCookiePath === aRequestPath) {
+      return true;
+    }
+    return aRequestPath.startsWith(aCookiePath)
+        && (aCookiePath.endsWith("/")
+            || (aRequestPath.charAt(aCookiePath.length) === "/"));
   }
 
   /**
@@ -319,27 +408,75 @@ function createGMCookieAPI(
    * Returns an array of cookie records (cloned into the sandbox).  The
    * target host defaults to the page's own host; a filter.domain /
    * filter.url / filter.host naming a different host is honored only when
-   * that host is permitted by the script's @connect.  The optional
-   * callback is invoked with (cookies, null).
+   * that host is permitted by the script's @connect.  As chrome.cookies
+   * does (Violentmonkey, Tampermonkey), filter.name and filter.path pick
+   * cookies with exactly that name / path, filter.secure and
+   * filter.session by those flags, and filter.url only the cookies a
+   * request to it would send.  The optional callback is invoked with
+   * (cookies, undefined) or (undefined, error).
+   *
+   * Each record has the chrome.cookies fields (domain, expirationDate,
+   * hostOnly, httpOnly, name, path, sameSite, secure, session, value) and,
+   * as before, Gecko's own (host, isDomain, isHttpOnly, ...).
    */
   function listImpl(aFilter, aCallback) {
-    let host = resolveHost(aFilter);
+    let filter = (aFilter && (typeof aFilter === "object")) ? aFilter : {};
+    let host = resolveHost(filter);
     if (host === null) {
-      let err = new aWrappedContentWin.Error(
+      return fail(aCallback, true, new aWrappedContentWin.Error(
           "GM_cookie.list: cross-domain access to that host is not "
-          + "permitted by the script's @connect.", aFileURL, null);
-      safeCall(aCallback, null, err);
-      throw err;
+          + "permitted by the script's @connect.", aFileURL, null));
+    }
+    let byUrl = null;
+    if (filter.url) {
+      try {
+        byUrl = new URL(String(filter.url));
+      } catch (e) {
+        byUrl = null;
+      }
     }
     // Without leave to reach HTTP-only cookies, the list leaves them out,
     // as Violentmonkey's does.
     let allowed = httpOnlyAllowed();
     let raw = listCookiesForHost(aWrappedContentWin, host)
         .filter(function (aCookie) {
-          return allowed || !aCookie.isHttpOnly;
+          if (!allowed && aCookie.isHttpOnly) {
+            return false;
+          }
+          if ((filter.name != null) && (aCookie.name !== String(filter.name))) {
+            return false;
+          }
+          if ((filter.path != null) && (aCookie.path !== String(filter.path))) {
+            return false;
+          }
+          if ((typeof filter.secure === "boolean")
+              && (aCookie.isSecure !== filter.secure)) {
+            return false;
+          }
+          if ((typeof filter.session === "boolean")
+              && (aCookie.isSession !== filter.session)) {
+            return false;
+          }
+          if (byUrl && (!pathMatches(aCookie.path, byUrl.pathname)
+              || (aCookie.isSecure && (byUrl.protocol !== "https:")))) {
+            return false;
+          }
+          return true;
         });
     let cookies = raw.map(function (aCookie) {
       return {
+        // chrome.cookies, as Violentmonkey and Tampermonkey give them.
+        "domain":         aCookie.host,
+        "expirationDate": aCookie.isSession ? undefined : aCookie.expiry,
+        "hostOnly":       !aCookie.isDomain,
+        "httpOnly":       aCookie.isHttpOnly,
+        "name":           aCookie.name,
+        "path":           aCookie.path,
+        "sameSite":       sameSiteName(aCookie.sameSite),
+        "secure":         aCookie.isSecure,
+        "session":        aCookie.isSession,
+        "value":          aCookie.value,
+        // Gecko's own (nsICookie2), as before.
         "creationTime": aCookie.creationTime,
         "expires":      aCookie.expires,
         "expiry":       aCookie.expiry,
@@ -349,98 +486,108 @@ function createGMCookieAPI(
         "isSecure":     aCookie.isSecure,
         "isSession":    aCookie.isSession,
         "lastAccessed": aCookie.lastAccessed,
-        "name":         aCookie.name,
-        "path":         aCookie.path,
         "policy":       aCookie.policy,
         "rawHost":      aCookie.rawHost,
-        "sameSite":     aCookie.sameSite,
         "status":       aCookie.status,
-        "value":        aCookie.value,
       };
     });
     let cloned = Cu.cloneInto(cookies, aSandbox);
-    safeCall(aCallback, cloned, null);
+    safeCall(aCallback, [cloned, undefined]);
     return cloned;
+  }
+
+  /**
+   * @param {string} aFunction - "set" or "delete".
+   * @param {string} aKey      - The greasemonkey.properties key.
+   * @param {*}      aValue    - What the script gave.
+   * @returns {Error} A sandbox Error for a bad argument.
+   */
+  function argumentError(aFunction, aKey, aValue) {
+    return new aWrappedContentWin.Error(
+        GM_CONSTANTS.localeStringBundle.createBundle(
+              GM_CONSTANTS.localeGreasemonkeyProperties)
+              .GetStringFromName(aKey)
+              .replace("%1", aFunction)
+              .replace("%2", typeof aValue),
+        aFileURL, null);
   }
 
   /**
    * GM_cookie.set(details, callback)
    *
-   * Creates or updates a cookie on the page's current host.  details
-   * fields:
-   *   name (required), value (required), path, secure, httpOnly,
-   *   session, expiration / expirationDate (seconds since epoch),
+   * Creates or updates a cookie, as chrome.cookies.set does (Violentmonkey,
+   * Tampermonkey).  details fields:
+   *   name (required), value (required; "" is a value), path ("/"),
+   *   domain (a domain cookie, sent to subdomains too; see
+   *   domainCookieAllowed), url / host (whose host-only cookie; default the
+   *   page's), secure, httpOnly, expirationDate / expiration (seconds since
+   *   epoch; without one the cookie lasts for the session, as in
+   *   chrome.cookies, not until 2038), session (overrides that),
    *   sameSite ("lax" / "strict" / "none" or 0/1/2; applied when the
    *   platform's cookie add() accepts it, otherwise ignored).
-   * Callback receives (true, null) on success or (null, error) on failure.
+   * Callback receives (undefined) on success or (error) on failure; without
+   * one, returns true or throws.
    */
   function setImpl(aDetails, aCallback) {
     if (!aDetails || typeof aDetails !== "object") {
-      let err = new aWrappedContentWin.Error(
-          GM_CONSTANTS.localeStringBundle.createBundle(
-                GM_CONSTANTS.localeGreasemonkeyProperties)
-                .GetStringFromName("error.cookie.argument")
-                .replace("%1", "set")
-                .replace("%2", typeof aDetails),
-          aFileURL, null);
-      safeCall(aCallback, null, err);
-      throw err;
+      return fail(aCallback, false,
+          argumentError("set", "error.cookie.argument", aDetails));
     }
 
-    let host = resolveHost(aDetails);
-    if (host === null) {
-      let err = new aWrappedContentWin.Error(
-          "GM_cookie.set: cross-domain access to that host is not "
-          + "permitted by the script's @connect.", aFileURL, null);
-      safeCall(aCallback, null, err);
-      throw err;
+    let host;
+    let cookieHost;
+    if (aDetails.domain) {
+      let domain = String(aDetails.domain).trim().toLowerCase()
+          .replace(/^\./, "");
+      if (!domainCookieAllowed(domain)) {
+        return fail(aCallback, false, new aWrappedContentWin.Error(
+            "GM_cookie.set: a cookie for the domain " + domain + " needs "
+            + "the page to be on it, or @connect to name it.",
+            aFileURL, null));
+      }
+      host = domain;
+      cookieHost = "." + domain;
+    } else {
+      host = resolveHost(aDetails);
+      cookieHost = host;
     }
-    let path     = aDetails.path     ? String(aDetails.path)  : "/";
-    let name     = aDetails.name     ? String(aDetails.name)  : undefined;
-    let value    = aDetails.value    ? String(aDetails.value) : undefined;
+    if (host === null) {
+      return fail(aCallback, false, new aWrappedContentWin.Error(
+          "GM_cookie.set: cross-domain access to that host is not "
+          + "permitted by the script's @connect.", aFileURL, null));
+    }
+    let path     = aDetails.path ? String(aDetails.path) : "/";
+    let name     = (aDetails.name == null) ? undefined : String(aDetails.name);
+    let value    = (aDetails.value == null)
+        ? undefined : String(aDetails.value);
     let secure   = !!aDetails.secure;
     let httpOnly = !!aDetails.httpOnly;
-    let session  = !!aDetails.session;
-    let expiry   = aDetails.expirationDate
-        ? Number(aDetails.expirationDate)
-        : (aDetails.expiration
-            ? Number(aDetails.expiration)
-            : DEFAULT_EXPIRATION_SEC);
+    let expiresAt = (aDetails.expirationDate != null)
+        ? aDetails.expirationDate : aDetails.expiration;
+    let session  = (aDetails.session != null)
+        ? !!aDetails.session : (expiresAt == null);
+    let expiry   = (!session && (expiresAt != null))
+        ? Math.floor(Number(expiresAt)) : SESSION_COOKIE_EXPIRY_SEC;
 
     if (typeof name === "undefined") {
-      let err = new aWrappedContentWin.Error(
-          GM_CONSTANTS.localeStringBundle.createBundle(
-                GM_CONSTANTS.localeGreasemonkeyProperties)
-                .GetStringFromName("error.cookie.argument.name")
-                .replace("%1", "set")
-                .replace("%2", typeof name),
-          aFileURL, null);
-      safeCall(aCallback, null, err);
-      throw err;
+      return fail(aCallback, false,
+          argumentError("set", "error.cookie.argument.name", name));
     }
     if (typeof value === "undefined") {
-      let err = new aWrappedContentWin.Error(
-          GM_CONSTANTS.localeStringBundle.createBundle(
-                GM_CONSTANTS.localeGreasemonkeyProperties)
-                .GetStringFromName("error.cookie.argument.value")
-                .replace("%1", "set")
-                .replace("%2", typeof value),
-          aFileURL, null);
-      safeCall(aCallback, null, err);
-      throw err;
+      return fail(aCallback, false,
+          argumentError("set", "error.cookie.argument.value", value));
     }
 
     // An HTTP-only cookie, new or one this would overwrite, needs leave.
     if (!httpOnlyAllowed() && (httpOnly
         || listCookiesForHost(aWrappedContentWin, host).some(function (aC) {
-          return aC.isHttpOnly && (aC.name === name) && (aC.path === path);
+          return aC.isHttpOnly && (aC.host === cookieHost)
+              && (aC.name === name) && (aC.path === path);
         }))) {
-      let err = new aWrappedContentWin.Error(
+      return fail(aCallback, false, new aWrappedContentWin.Error(
           "GM_cookie.set: HTTP-only cookies need both Greasemonkey "
           + "Preferences and this script's Options window to allow them.",
-          aFileURL, null);
-      safeCall(aCallback, null, err);
-      throw err;
+          aFileURL, null));
     }
 
     let sameSite = sameSiteToInt(aDetails.sameSite);
@@ -455,7 +602,7 @@ function createGMCookieAPI(
       if (sameSite !== null) {
         try {
           cookiesService.add(
-              host, path, name, value,
+              cookieHost, path, name, value,
               secure, httpOnly, session, expiry, oa, sameSite);
           added = true;
         } catch (eSameSite) {
@@ -464,17 +611,15 @@ function createGMCookieAPI(
       }
       if (!added) {
         cookiesService.add(
-            host, path, name, value,
+            cookieHost, path, name, value,
             secure, httpOnly, session, expiry, oa);
       }
-      safeCall(aCallback, true, null);
-      return true;
     } catch (e) {
-      let err = new aWrappedContentWin.Error(
-          'GM_cookie.set: ' + e.message, aFileURL, null);
-      safeCall(aCallback, null, err);
-      throw err;
+      return fail(aCallback, false, new aWrappedContentWin.Error(
+          "GM_cookie.set: " + e.message, aFileURL, null));
     }
+    safeCall(aCallback, [undefined]);
+    return true;
   }
 
   /**
@@ -483,31 +628,24 @@ function createGMCookieAPI(
    * Removes one or more cookies matching details.name (and optional .path).
    * Defaults to the page's own host; a details.domain / .url / .host naming
    * a different host is honored only when permitted by @connect.  Callback
-   * receives (count, null) where count is the number of cookies removed.
+   * receives (undefined) on success or (error) on failure; without one,
+   * returns the number of cookies removed or throws.
    */
   function deleteImpl(aDetails, aCallback) {
-    let name = (aDetails && aDetails.name) ? String(aDetails.name) : undefined;
+    let name = (aDetails && (aDetails.name != null))
+        ? String(aDetails.name) : undefined;
     let path = (aDetails && aDetails.path) ? String(aDetails.path) : undefined;
 
     if (typeof name === "undefined") {
-      let err = new aWrappedContentWin.Error(
-          GM_CONSTANTS.localeStringBundle.createBundle(
-                GM_CONSTANTS.localeGreasemonkeyProperties)
-                .GetStringFromName("error.cookie.argument.name")
-                .replace("%1", "delete")
-                .replace("%2", typeof name),
-          aFileURL, null);
-      safeCall(aCallback, null, err);
-      throw err;
+      return fail(aCallback, false,
+          argumentError("delete", "error.cookie.argument.name", name));
     }
 
     let host = resolveHost(aDetails);
     if (host === null) {
-      let err = new aWrappedContentWin.Error(
+      return fail(aCallback, false, new aWrappedContentWin.Error(
           "GM_cookie.delete: cross-domain access to that host is not "
-          + "permitted by the script's @connect.", aFileURL, null);
-      safeCall(aCallback, null, err);
-      throw err;
+          + "permitted by the script's @connect.", aFileURL, null));
     }
 
     let count = 0;
@@ -526,12 +664,10 @@ function createGMCookieAPI(
         count++;
       }
     } catch (e) {
-      let err = new aWrappedContentWin.Error(
-          'GM_cookie.delete: ' + e.message, aFileURL, null);
-      safeCall(aCallback, null, err);
-      throw err;
+      return fail(aCallback, false, new aWrappedContentWin.Error(
+          "GM_cookie.delete: " + e.message, aFileURL, null));
     }
-    safeCall(aCallback, count, null);
+    safeCall(aCallback, [undefined]);
     return count;
   }
 

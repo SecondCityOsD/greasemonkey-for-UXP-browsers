@@ -924,8 +924,10 @@ function runScriptInSandbox(aSandbox, aScript) {
               // it read `.length` off a privileged object (the security-
               // wrapper warning).  slice.call runs in chrome (chrome reading
               // chrome); the result is then cloned into the sandbox.
+              // Only the details: a callback would take the method's errors
+              // (GM_cookie.js fail()), and the promise must see them.
               let args = Cu.cloneInto(
-                  Array.prototype.slice.call(arguments), aSandbox,
+                  Array.prototype.slice.call(arguments, 0, 1), aSandbox,
                   { "cloneFunctions": true });
               return new aSandbox.Promise(function (resolve, reject) {
                 try {

@@ -44,11 +44,11 @@
  *
  *   await GM.download(details)   // Promise wrapper added by buildGMObject
  *
- * Filename extension policy: a whitelist is enforced (the polyfill's
- * original list, e.g. archives, images, video, audio, text), and an
- * optional blacklist (bat/com/crx/exe/scr/sh) is supported but disabled
- * by default — flipping it on adds a defence-in-depth layer at the
- * cost of breaking edge-case scripts.
+ * Safety: the address may be http(s), ftp, data or blob (resolved against
+ * the page); the name may name subfolders of Downloads but never leave
+ * it (fileNameParts); executable types are refused
+ * (NAME_EXTENSION_BLACKLIST); and a silent download never replaces an
+ * existing file (uniqueTargetFile).
  *
  * Each call gets its own nsIWebBrowserPersist instance; concurrent
  * downloads do not share state.  The returned handle's abort()
@@ -80,17 +80,39 @@ Cu.import("resource://gre/modules/Services.jsm");
 
 Cu.importGlobalProperties(["URL"]);
 
+// "name(1).ext" for a name that's taken, as the browser's own downloads
+// do.  createUnique() ("name-1.ext") when the module is missing.
+try {
+  Cu.import("resource://gre/modules/DownloadPaths.jsm");
+} catch (e) {
+  // DownloadPaths stays undefined; see uniqueTargetFile().
+}
+
 
 /**
  * Filename-extension policy.  GM_download uses a DENY-list only: known
  * dangerous, trivially-executable extensions are refused; everything else
  * is allowed.  Violentmonkey and Tampermonkey impose no allow-list, and the
  * former narrow whitelist here rejected common, safe types (.json, .pdf,
- * .csv, .js, .html, ...), so the allow-list was removed.
+ * .csv, .js, .html, ...), so the allow-list was removed.  The file goes
+ * straight to disk, past the browser's own download checks, so Windows
+ * types that run or change the system on a double-click are included.
  */
 const NAME_EXTENSION_BLACKLIST = [
-  "bat", "com", "crx", "exe", "scr", "sh",
+  "bat", "cmd", "com", "cpl", "crx", "exe", "hta", "lnk", "msi", "msp",
+  "pif", "ps1", "reg", "scr", "sh", "vbe", "vbs", "wsf",
 ];
+
+/**
+ * The address schemes GM_download fetches, as for GM_xmlhttpRequest.
+ * nsIWebBrowserPersist runs with chrome privileges, so a file:, chrome:
+ * or resource: address let a script copy any local file (the profile's
+ * logins.json, say) into Downloads.
+ */
+const DOWNLOAD_SCHEMES = ["blob", "data", "ftp", "http", "https"];
+
+/** Names Windows reserves for devices: such a file can't be created. */
+const RESERVED_NAME_REGEXP = /^(?:con|prn|aux|nul|com\d|lpt\d)(?:\.|$)/i;
 
 const NAME_EXTENSION_BLACKLIST_REGEXP = [
 ];
@@ -149,18 +171,71 @@ function getDownloadsDir() {
 }
 
 /**
- * Builds the destination nsIFile inside aDir with name aName.  Does not
- * collision-check; nsIWebBrowserPersist is configured with
- * PERSIST_FLAGS_REPLACE_EXISTING_FILES so an existing file is overwritten,
- * matching the polyfill's overwrite-on-save behaviour.
+ * Splits a script's file name into safe path parts.  "Gallery/001.jpg"
+ * saves into a Gallery folder, as in Violentmonkey and Tampermonkey (it
+ * used to throw, so onerror never ran).
+ *   - Empty, "." and ".." parts are dropped: nothing leaves the folder.
+ *   - Characters Windows doesn't allow in names (and control characters)
+ *     become "_".
+ *   - Trailing dots and spaces are removed: Windows drops them when it
+ *     creates the file, which let "setup.exe." past the extension check.
+ *   - A device name (CON, NUL, COM1...) gets a "_" in front.
  *
- * @param {nsIFile} aDir
- * @param {string}  aName
- * @returns {nsIFile}
+ * @param {string} aName - details.name.
+ * @returns {string[]} The parts, at least one.
  */
-function buildTargetFile(aDir, aName) {
+function fileNameParts(aName) {
+  let parts = String(aName || "").split(/[\\/]+/).map(function (aPart) {
+    let clean = aPart.split("").map(function (aChar) {
+      return ((aChar.charCodeAt(0) < 32) || ("<>:\"|?*".indexOf(aChar) > -1))
+          ? "_" : aChar;
+    }).join("").trim().replace(/[. ]+$/, "");
+    return RESERVED_NAME_REGEXP.test(clean) ? "_" + clean : clean;
+  }).filter(function (aPart) {
+    return aPart !== "";
+  });
+
+  return parts.length ? parts : [DEFAULT_FILENAME];
+}
+
+/**
+ * Builds the destination nsIFile in aDir from fileNameParts(), creating
+ * the subfolders it names.
+ *
+ * @param {nsIFile}  aDir
+ * @param {string[]} aParts
+ * @returns {nsIFile} Not created yet; see uniqueTargetFile().
+ * @throws When a subfolder can't be created (or is a file).
+ */
+function buildTargetFile(aDir, aParts) {
   let file = aDir.clone();
-  file.append(aName);
+  for (let i = 0; i < aParts.length - 1; i++) {
+    file.append(aParts[i]);
+    if (!file.exists()) {
+      file.create(Ci.nsIFile.DIRECTORY_TYPE, parseInt("755", 8));
+    } else if (!file.isDirectory()) {
+      throw new Error(file.path + " is not a folder");
+    }
+  }
+  file.append(aParts[aParts.length - 1]);
+  return file;
+}
+
+/**
+ * Creates the file a silent download writes to, under a name nothing
+ * else has: "report(1).pdf" when report.pdf exists.  A download used to
+ * replace a file of the same name in the user's Downloads folder, and
+ * two downloads of one name replaced each other.
+ *
+ * @param {nsIFile} aFile - The wanted file.
+ * @returns {nsIFile} The (empty) file created for the download.
+ */
+function uniqueTargetFile(aFile) {
+  if (typeof DownloadPaths != "undefined") {
+    return DownloadPaths.createNiceUniqueFile(aFile);
+  }
+  let file = aFile.clone();
+  file.createUnique(Ci.nsIFile.NORMAL_FILE_TYPE, parseInt("644", 8));
   return file;
 }
 
@@ -393,7 +468,45 @@ function createGMDownloadAPI(
     if (typeof aNameArg === "string" && aNameArg) {
       details.name = aNameArg;
     }
+    // A URL object as its text.
+    if (details.url && (typeof details.url === "object")) {
+      try {
+        details.url = String(details.url);
+      } catch (e) {
+        details.url = null;
+      }
+    }
     return details;
+  }
+
+  /**
+   * Resolves details.url against the page (a relative address, such as an
+   * <a>'s href attribute, used to fail as malformed) and checks its scheme.
+   *
+   * @param {string} aUrl
+   * @returns {{uri: ?nsIURI, error: ?string}}
+   */
+  function resolveDownloadUri(aUrl) {
+    let base = null;
+    try {
+      base = aPageUrl ? Services.io.newURI(aPageUrl, null, null) : null;
+    } catch (e) {
+      // No base: only absolute addresses.
+    }
+    let uri;
+    try {
+      uri = Services.io.newURI(aUrl, null, base);
+    } catch (e) {
+      return {"uri": null, "error": "GM_download: malformed URL: " + aUrl};
+    }
+    if (DOWNLOAD_SCHEMES.indexOf(uri.scheme) == -1) {
+      return {
+        "uri": null,
+        "error": "GM_download: " + uri.scheme
+            + ": addresses can't be downloaded.",
+      };
+    }
+    return {"uri": uri, "error": null};
   }
 
   /**
@@ -417,7 +530,19 @@ function createGMDownloadAPI(
       return false;
     }
 
-    let extError = checkExtension(details.name);
+    let resolved = resolveDownloadUri(details.url);
+    if (!resolved.uri) {
+      safeCall(details.onerror, {
+        "error":   ERROR.NOT_SUCCEEDED,
+        "details": resolved.error,
+      });
+      return false;
+    }
+    let sourceUri = resolved.uri;
+
+    let nameParts = fileNameParts(details.name);
+    let leafName = nameParts[nameParts.length - 1];
+    let extError = checkExtension(leafName);
     if (extError) {
       safeCall(details.onerror, { "error": extError });
       return false;
@@ -452,23 +577,35 @@ function createGMDownloadAPI(
      * Configures and kicks off the actual nsIWebBrowserPersist save.
      * Separated from downloadImpl so it can run either inline (when
      * not prompting) or after the file picker resolves.
+     *
+     * @param {nsIFile} aTargetFile
+     * @param {boolean} aOwnFile - aTargetFile was created empty for this
+     *   download (uniqueTargetFile): it is removed again if the download
+     *   doesn't finish, rather than left as an empty or partial file.
      */
-    function startPersist(aTargetFile) {
+    function startPersist(aTargetFile, aOwnFile) {
+      let ownFile = aOwnFile ? aTargetFile : null;
+      let dropOwnFile = function () {
+        if (!ownFile) {
+          return;
+        }
+        try {
+          if (ownFile.exists()) {
+            ownFile.remove(false);
+          }
+        } catch (e) {
+          // Locked, say; an empty or partial file is left.
+        }
+        ownFile = null;
+      };
+
       if (aborted) {
+        dropOwnFile();
         safeCall(details.onabort, {});
         return;
       }
 
-      let uri;
-      try {
-        uri = Services.io.newURI(details.url, null, null);
-      } catch (e) {
-        safeCall(details.onerror, {
-          "error":   ERROR.NOT_SUCCEEDED,
-          "details": "GM_download: malformed URL: " + e.toString(),
-        });
-        return;
-      }
+      let uri = sourceUri;
 
       let referrer = null;
       try {
@@ -482,6 +619,8 @@ function createGMDownloadAPI(
 
       persist = Cc["@mozilla.org/embedding/browser/nsWebBrowserPersist;1"]
           .createInstance(Ci.nsIWebBrowserPersist);
+      // Replacing is safe: the target is either the file the user picked
+      // (and agreed to replace) or the empty one made for this download.
       persist.persistFlags =
             Ci.nsIWebBrowserPersist.PERSIST_FLAGS_REPLACE_EXISTING_FILES
           | Ci.nsIWebBrowserPersist.PERSIST_FLAGS_BYPASS_CACHE
@@ -500,7 +639,7 @@ function createGMDownloadAPI(
       // below so the UI stays in sync.  Failure here is non-fatal:
       // the download still runs, just without a Downloads-window entry.
       let dmListener = registerWithDownloadManager(
-          uri, aTargetFile, details.name, persist, loadContext);
+          uri, aTargetFile, aTargetFile.leafName, persist, loadContext);
 
       // STATE_STOP fires once per layer that stops — for nsIWebBrowser-
       // Persist that can be both the request and the network (and on
@@ -571,14 +710,17 @@ function createGMDownloadAPI(
           }
           terminalFired = true;
           if (aborted) {
+            dropOwnFile();
             safeCall(details.onabort, {});
             return;
           }
           if (Components.isSuccessCode(aStatus)) {
+            ownFile = null;
             safeCall(details.onload, {
-              "finalUrl": details.url,
+              "finalUrl": uri.spec,
             });
           } else {
+            dropOwnFile();
             safeCall(details.onerror, {
               "error":   ERROR.NOT_SUCCEEDED,
               "details": "GM_download: nsresult=0x" + aStatus.toString(16),
@@ -687,6 +829,7 @@ function createGMDownloadAPI(
         // Surface to the browser console too, so a future regression
         // is visible even when the script supplies no onerror.
         Cu.reportError("GM_download.saveURI failed: " + lastErr);
+        dropOwnFile();
         safeCall(details.onerror, {
           "error":   ERROR.NOT_SUCCEEDED,
           "details": "GM_download.saveURI: " + lastErr.toString(),
@@ -704,14 +847,26 @@ function createGMDownloadAPI(
     // useDownloadDir to false) but not on Firefox.  Aligned to the
     // GM4 spec instead.
     if (details.saveAs === true) {
-      let picked = showFilePicker(chromeWin, details.name);
+      let picked = showFilePicker(chromeWin, leafName);
       if (!picked) {
         safeCall(details.onabort, {});
         return handle;
       }
-      startPersist(picked);
+      startPersist(picked, false);
     } else {
-      startPersist(buildTargetFile(getDownloadsDir(), details.name));
+      let target;
+      try {
+        target = uniqueTargetFile(
+            buildTargetFile(getDownloadsDir(), nameParts));
+      } catch (e) {
+        safeCall(details.onerror, {
+          "error":   ERROR.NOT_SUCCEEDED,
+          "details": "GM_download: can't save as " + nameParts.join("/")
+              + ": " + e,
+        });
+        return handle;
+      }
+      startPersist(target, true);
     }
 
     return handle;
