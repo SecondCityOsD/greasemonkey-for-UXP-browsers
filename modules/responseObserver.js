@@ -451,7 +451,27 @@ function _corsOverride(aCorsRules, aCorsHeader) {
 }
 
 /**
- * Applies CSP header override rules to a full CSP policy string.
+ * Applies the CSP overrides to a whole Content-Security-Policy header value.
+ *
+ * A site that sends the header twice has its values merged into one, joined
+ * with ","; each is a policy of its own, and all of them are enforced.  So
+ * each is rewritten on its own (only the first was: the next policy's first
+ * directive stuck to the previous one's last, and wasn't recognised).
+ *
+ * @param {string} aCspRules - The header value: one policy, or several
+ *   separated by ",".
+ * @returns {string} The rewritten value, the policies joined with ", ".
+ */
+function _cspOverride(aCspRules) {
+  return aCspRules.split(",").map(function (aPolicy) {
+    return _cspPolicyOverride(aPolicy);
+  }).filter(function (aPolicy) {
+    return aPolicy != "";
+  }).join(", ");
+}
+
+/**
+ * Applies CSP header override rules to one CSP policy.
  *
  * Splits the policy on ";" to get individual directives, then for each
  * directive that has an override enabled:
@@ -462,11 +482,10 @@ function _corsOverride(aCorsRules, aCorsHeader) {
  * The resulting directives are rejoined with ";" and empty directives are
  * filtered out.
  *
- * @param {string} aCspRules - The raw CSP header value (may contain multiple
- *   ";"-separated directives).
- * @returns {string} The rewritten CSP policy string.
+ * @param {string} aCspRules - One policy: ";"-separated directives.
+ * @returns {string} The rewritten policy ("" when nothing is left).
  */
-function _cspOverride(aCspRules) {
+function _cspPolicyOverride(aCspRules) {
   var rulesSeparator = ";";
   var rulesValuesSeparator = " ";
 
@@ -673,7 +692,7 @@ function _cspOverride(aCspRules) {
       ],
     },
     {
-      "name": "refferer",
+      "name": "referrer",
       "value": [
         {
           "name": gCorsCspOverrideAllAllow,

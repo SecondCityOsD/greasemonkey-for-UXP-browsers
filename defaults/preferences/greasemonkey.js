@@ -117,7 +117,7 @@ pref("extensions.greasemonkey.csp_override.object-src.[source-list].value", "blo
 pref("extensions.greasemonkey.csp_override.object-src.unsafe-eval", false);
 pref("extensions.greasemonkey.csp_override.object-src.unsafe-inline", false);
 pref("extensions.greasemonkey.csp_override.plugin-types.[all-allow]", false);
-pref("extensions.greasemonkey.csp_override.refferer.[all-allow]", false);
+pref("extensions.greasemonkey.csp_override.referrer.[all-allow]", false);
 pref("extensions.greasemonkey.csp_override.reflected-xss.[all-allow]", false);
 pref("extensions.greasemonkey.csp_override.report-uri.[all-allow]", true);
 pref("extensions.greasemonkey.csp_override.require-sri-for.[all-allow]", false);

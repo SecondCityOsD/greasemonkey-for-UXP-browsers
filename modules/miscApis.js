@@ -291,25 +291,21 @@ GM_Resources.prototype.getResourceText = function (
 };
 
 /**
- * Returns the greasemonkey-script:// URL for a named @resource.
- * The URL format is: greasemonkey-script:<uuid>/<name>
+ * Returns the greasemonkey-script: URL for a named @resource:
+ * greasemonkey-script:<uuid>/<encoded name>, as IPCScript makes it (the
+ * name was put in as it was, which a name past ASCII never matched).
  *
  * @param {Window}    aWrappedContentWin - Content window (for error attribution).
  * @param {Sandbox}   aSandbox           - Unused; kept for API symmetry.
  * @param {IPCScript} aScript            - The owning script (provides UUID).
  * @param {string}    aName              - The @resource name.
- * @returns {string} The greasemonkey-script:// URL string.
+ * @returns {string} The greasemonkey-script: URL string.
  * @throws {Error} If no resource with aName is found.
  */
 GM_Resources.prototype.getResourceURL = function (
     aWrappedContentWin, aSandbox, aScript, aName) {
-  // Verify the existence of the resource.
-  let dep = this._getDependency(aWrappedContentWin, aScript.fileURL, aName);
-  return [
-    GM_CONSTANTS.addonScriptProtocolScheme + ":",
-    aScript.uuid,
-    GM_CONSTANTS.addonScriptProtocolSeparator, aName
-  ].join("");
+  return this._getDependency(
+      aWrappedContentWin, aScript.fileURL, aName).gm_url;
 };
 
 /**

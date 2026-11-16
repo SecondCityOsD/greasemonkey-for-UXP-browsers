@@ -186,10 +186,14 @@ function IPCScript(aScript, aAddonVersion) {
       "name": aRes.name,
       "mimetype": aRes.mimetype,
       "file_url": GM_util.getUriFromFile(aRes.file).spec,
+      // The one place a resource's greasemonkey-script: address is made
+      // (GM_getResourceURL and GM_info hand it out).  The name is encoded:
+      // past ASCII, the address kept it %-encoded and never matched it.
       "gm_url": [
         GM_CONSTANTS.addonScriptProtocolScheme + ":",
         aScript.uuid,
-        GM_CONSTANTS.addonScriptProtocolSeparator, aRes.name
+        GM_CONSTANTS.addonScriptProtocolSeparator,
+        encodeURIComponent(aRes.name)
       ].join(""),
     };
   });

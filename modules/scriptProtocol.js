@@ -11,10 +11,14 @@
  * looks up the script by UUID via IPCScript.getByUuid(), finds the named
  * @resource, and returns a channel wrapping its local file:// URI.  The
  * channel's originalURI is set to the greasemonkey-script: URI so it can be
- * loaded by unprivileged content (bug #2326).
+ * loaded by unprivileged content (bug #2326).  The name is URI-encoded
+ * (IPCScript's gm_url, the one place the address is made), so names past
+ * ASCII, or with "#" or "?", work.
  *
- * DummyChannel is returned as a 404-equivalent whenever the URI is malformed
- * or the script/resource is not found.
+ * A URI that is malformed, or whose script or resource is gone (the script
+ * was updated or removed while a page kept the address), fails with
+ * NS_ERROR_FILE_NOT_FOUND, so the load's error handlers run.  A stand-in
+ * channel that never answered left fetch(), <img> and <script> waiting.
  *
  * Protocol flags:
  *   - URI_INHERITS_SECURITY_CONTEXT — content inherits caller's origin.
@@ -67,39 +71,28 @@ function initScriptProtocol() {
   ScriptProtocol.init();
 }
 
-////////////////////////////////////////////////////////////////////////////////
-
 /**
- * Stub nsIChannel returned when a greasemonkey-script: URI cannot be resolved.
- * asyncOpen() is a no-op; the channel reports HTTP status 404 in its fields.
+ * The @resource name in a greasemonkey-script: address.  Addresses made
+ * before 3.10 have the name as it is: one that isn't valid %-encoding is
+ * taken literally.
  *
- * @constructor
- * @param {nsIURI}  aUri    - The requested URI.
- * @param {Script}  [aScript] - Unused; kept for call-site symmetry.
+ * @param {string} aEncoded
+ * @returns {string}
  */
-function DummyChannel(aUri, aScript) {
-  // nsIRequest
-  this.loadFlags = 0;
-  this.loadGroup = null;
-  this.name = aUri.spec;
-  this.status = 404;
-  this.content = "";
-
-  // nsIChannel
-  this.contentCharset = GM_CONSTANTS.fileScriptCharset;
-  this.contentLength = this.content.length;
-  // The alternative MIME type:
-  // "text/plain;charset=" + GM_CONSTANTS.fileScriptCharset.toLowerCase()
-  this.contentType = "application/javascript";
-  this.notificationCallbacks = null;
-  this.originalURI = aUri;
-  this.owner = null;
-  this.securityInfo = null;
-  this.URI = aUri;
+function resourceName(aEncoded) {
+  try {
+    return decodeURIComponent(aEncoded);
+  } catch (e) {
+    return aEncoded;
+  }
 }
 
-// nsIChannel
-DummyChannel.prototype.asyncOpen = function (aListener, aContext) {};
+/** Fails a load: no such script or @resource. */
+function notFound(aUri) {
+  throw Components.Exception(
+      GM_CONSTANTS.addonScriptProtocolScheme + ": nothing at " + aUri.spec,
+      Cr.NS_ERROR_FILE_NOT_FOUND);
+}
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -160,23 +153,25 @@ var ScriptProtocol = {
 
   "newChannel": function (aUri) {
     let m = aUri.spec.match(ADDON_SCRIPT_PROTOCOL_REGEXP);
-    let dummy = new DummyChannel(aUri);
 
-    // Incomplete URI, send a 404.
+    // Incomplete URI.
     if (!m) {
-      return dummy;
+      return notFound(aUri);
     }
 
     let script = IPCScript.getByUuid(m[1]);
 
     // Fail fast if we couldn't find the script.
     if (!script) {
-      return dummy;
+      return notFound(aUri);
     }
 
+    // The URI keeps non-ASCII %-encoded (nsSimpleURI), so the raw text never
+    // matched a name in, say, Chinese.
+    let name = resourceName(m[2]);
     for (let i = 0, iLen = script.resources.length; i < iLen; i++) {
       let resource = script.resources[i];
-      if (resource.name == m[2]) {
+      if (resource.name == name) {
         let uri = GM_util.getUriFromUrl(resource.file_url);
 
         // See #2326.
@@ -190,8 +185,8 @@ var ScriptProtocol = {
       }
     }
 
-    // Default fall-through case, send a 404.
-    return dummy;
+    // No such resource (any more).
+    return notFound(aUri);
   },
 
 ////////////////////////////////// nsIFactory //////////////////////////////////
