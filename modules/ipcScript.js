@@ -45,6 +45,59 @@ Cu.import("chrome://greasemonkey-modules/content/abstractScript.js");
 Cu.import("chrome://greasemonkey-modules/content/util.js");
 
 
+/** Schemes GM_info may show a script; anything else (file:) is local. */
+const PUBLIC_URL_REGEXP = /^(?:https?|ftp|data):/i;
+
+/**
+ * @param {?string} aUrl - A script's download, update, icon or @require
+ *   address.
+ * @returns {?string} aUrl when it's a web (or data:) address, else null:
+ *   a script installed from a file would otherwise learn the local path
+ *   (the user's name is often in it).
+ */
+function publicUrl(aUrl) {
+  return (aUrl && PUBLIC_URL_REGEXP.test(aUrl)) ? String(aUrl) : null;
+}
+
+/**
+ * @param {Array<MatchPattern|string>} aPatterns - @match rules.
+ * @returns {string[]} The patterns as written.  A MatchPattern keeps its
+ *   text behind a getter, which neither structured clone nor JSON copies:
+ *   GM_info.script.matches used to hold its internals instead.
+ */
+function patternStrings(aPatterns) {
+  return (aPatterns || []).map(function (aPattern) {
+    return (typeof aPattern == "string") ? aPattern : aPattern.pattern;
+  });
+}
+
+/**
+ * GM_info.platform.os / .arch in the values Violentmonkey and Tampermonkey
+ * give (Chrome's runtime.getPlatformInfo): "win", "mac", "linux"...;
+ * "x86-64", "x86-32", "arm64"...  Gecko's own are "WINNT" and "x86_64".
+ */
+const PLATFORM_OS = (function () {
+  let os = Services.appinfo.OS || "";
+  let known = {
+    "Android": "android",
+    "Darwin": "mac",
+    "Linux": "linux",
+    "WINNT": "win",
+  };
+  return known[os] || os.toLowerCase();
+})();
+const PLATFORM_ARCH = (function () {
+  let arch = Services.appinfo.XPCOMABI
+      ? Services.appinfo.XPCOMABI.split("-")[0] : "";
+  let known = {
+    "aarch64": "arm64",
+    "x86": "x86-32",
+    "x86_64": "x86-64",
+  };
+  return known[arch] || arch.replace(/_/g, "-");
+})();
+
+
 /**
  * Constructs an IPC-safe, frozen snapshot of a Script object.
  * Converts complex types (MatchPattern objects, file references, etc.) to
@@ -74,6 +127,12 @@ function IPCScript(aScript, aAddonVersion) {
   this.id = aScript.id;
   this.injectInto = aScript.injectInto || "auto";
   this.supportURL = aScript._supportURL || null;
+  // GM_info's script.downloadURL / updateURL / icon: web addresses only,
+  // so a script installed from a file doesn't learn the local path.
+  this.downloadURL = publicUrl(aScript.downloadURL);
+  this.updateURL = publicUrl(aScript.updateURL);
+  this.iconURL = aScript.icon
+      ? publicUrl(aScript.icon._dataURI || aScript.icon.downloadURL) : null;
   this.includes = aScript.includes;
   this.lastUpdated = aScript.modifiedDate.getTime();
   this.localized = aScript.localized;
@@ -91,7 +150,13 @@ function IPCScript(aScript, aAddonVersion) {
   this.unwrap = aScript.unwrap || false;
   this.userExcludes = aScript.userExcludes;
   this.userIncludes = aScript.userIncludes;
+  // The Options window's own choices (null: the script's metadata), for
+  // GM_info.script.options.
+  this.userInjectInto = aScript._userInjectInto || null;
+  this.userNoframes = (typeof aScript._userNoframes == "boolean")
+      ? aScript._userNoframes : null;
   this.userOverride = aScript.userOverride;
+  this.userRunAt = aScript._userRunAt || null;
   this.uuid = aScript.uuid;
   this.version = aScript.version;
   this.willUpdate = aScript.isRemoteUpdateAllowed(false)
@@ -110,6 +175,8 @@ function IPCScript(aScript, aAddonVersion) {
 
   this.requires = aScript.requires.map(function (aReq) {
     return {
+      // GM_info.script.require (see downloadURL above).
+      "downloadURL": publicUrl(aReq.downloadURL),
       "fileURL": aReq.fileURL,
     };
   });
@@ -204,36 +271,62 @@ IPCScript.prototype.info = function () {
     };
   });
 
+  // The script's fields as Violentmonkey 2.50 and Tampermonkey give them:
+  // "runAt" next to the older "run-at", strings rather than null for
+  // name / namespace / description / version (scripts call .split() on
+  // them), @match rules as text, and a Tampermonkey-style "options" with
+  // the user's own settings from the Options window.
+  let userMatches = patternStrings(this.userMatches);
   return {
     "script": {
       "antifeatures": this.antifeatures,
       "author": this.author,
       "connects": this.connects,
       "copyright": this.copyright,
-      "description": this.description,
-      "excludeMatches": this.excludeMatches,
+      "description": this.description || "",
+      "downloadURL": this.downloadURL,
+      "excludeMatches": patternStrings(this.excludeMatches),
       "excludes": this.excludes,
       "grant": this.grants,
       "homepage": this.homepage,
       "homepageURL": this.homepage,
-      // "icon": ? source URL,
+      "icon": this.iconURL,
       "includes": this.includes,
       "lastUpdated": this.lastUpdated,
       "localizedDescription": this.localized.description,
       "localizedName": this.localized.name,
-      "matches": this.matches,
-      "name": this.name,
-      "namespace": this.namespace,
+      "matches": patternStrings(this.matches),
+      "name": this.name || "",
+      "namespace": this.namespace || "",
       "noframes": this.noframes,
-      // "requires": ? source URL,
+      "options": {
+        "check_for_updates": this.willUpdate,
+        "inject_into": this.userInjectInto,
+        "noframes": this.userNoframes,
+        // userOverride: the user's rules replace the script's own.
+        "override": {
+          "merge_excludes": !this.userOverride,
+          "merge_includes": !this.userOverride,
+          "merge_matches": !this.userOverride,
+          "use_excludes": this.userExcludes,
+          "use_includes": this.userIncludes,
+          "use_matches": userMatches,
+        },
+        "run_at": this.userRunAt,
+      },
+      "require": this.requires.map(function (aReq) {
+        return aReq.downloadURL;
+      }).filter(Boolean),
       "resources": resources,
       "run-at": this.runAt,
+      "runAt": this.runAt,
       "supportURL": this.supportURL,
-      "version": this.version,
+      "unwrap": this.unwrap,
+      "updateURL": this.updateURL,
+      "version": this.version || "",
     },
     "platform": {
-      "arch": Services.appinfo.XPCOMABI
-          ? Services.appinfo.XPCOMABI.split("-")[0] : "",
+      "arch": PLATFORM_ARCH,
       // browserName / browserVersion mirror VM's GM_info.platform
       // shape (gm-api-wrapper.js:92-109 in VM 2.35.1) so portable
       // userscripts that branch on
@@ -244,7 +337,8 @@ IPCScript.prototype.info = function () {
       // unavailable (extremely rare on UXP; defensive only).
       "browserName": (Services.appinfo.name || "").toLowerCase(),
       "browserVersion": Services.appinfo.version || "",
-      "os": Services.appinfo.OS || "",
+      "mobile": false,
+      "os": PLATFORM_OS,
     },
     // The resolved injection mode for THIS script ("page" / "content" /
     // "auto") — matches Tampermonkey / Violentmonkey's GM_info.injectInto

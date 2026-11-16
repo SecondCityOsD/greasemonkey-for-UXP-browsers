@@ -744,7 +744,10 @@ Object.defineProperty(Script.prototype, "noframes", {
     return (this._userNoframes === null) ? this._noframes : this._userNoframes;
   },
   "set": function Script_setNoframes(aVal) {
-    this._userNoframes = (!!aVal != this._noframes) ? !!aVal : null;
+    // null: follow the script's own @noframes again, as for runAt and
+    // injectInto.
+    this._userNoframes = ((aVal !== null) && (aVal !== undefined)
+        && (!!aVal != this._noframes)) ? !!aVal : null;
   },
   "enumerable": true,
 });
@@ -919,7 +922,13 @@ Object.defineProperty(Script.prototype, "userMatches", {
     let matches_MatchPattern = [];
 
     for (let i = 0, iLen = aMatches.length; i < iLen; i++) {
+      // Pattern text, a MatchPattern (what the getter returns), or the
+      // {"_pattern": ...} object older Sync records carry (it sent
+      // MatchPatterns as JSON, and every one used to be dropped here).
       let match = aMatches[i];
+      if (match && (typeof match == "object")) {
+        match = match.pattern || match._pattern;
+      }
       let match_MatchPattern;
       try {
         match_MatchPattern = new MatchPattern(match);

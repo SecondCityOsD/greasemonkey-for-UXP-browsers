@@ -13,15 +13,22 @@
  *   enabled      — whether the script is currently enabled.
  *   id           — the script's local ID (hashed to produce the sync ID).
  *   installed    — false means "this script was uninstalled, remove it".
- *   userExcludes, userIncludes, userMatches, userOverride — per-script overrides.
+ *   userExcludes, userIncludes, userMatches, userOverride — per-script
+ *                  rules (userMatches as pattern text).
+ *   userRunAt, userNoframes, userInjectInto, httpOnlyCookies — the Options
+ *                  window's choices (null: the script's own).  Records
+ *                  from older versions lack them; the local ones are kept.
  *   values       — GM_getValue storage (when sync.values pref is enabled).
  *   valuesTooBig — true if values exceeded sync.values.maxSizePerScript.
  *
- * Initialisation strategy (see bug #2335):
- *   The "weave:service:ready" observer is unreliable under e10s.  Instead,
- *   SyncServiceObserver.init() polls every 1 second until gWeave.Status.ready
- *   is true, then registers the ScriptEngine.  A guard flag (gSyncInitialized)
- *   prevents double-registration.
+ * Initialisation strategy:
+ *   Sync starts only when an account is set up, and then sets Status.ready
+ *   and sends "weave:service:ready".  SyncServiceObserver.init() registers
+ *   the ScriptEngine at once if Sync is ready, or on that notification.
+ *   (Bug #2335 found the notification unreliable under e10s and polled
+ *   every second instead, forever when Sync isn't set up; UXP is
+ *   single-process.)  A guard flag (gSyncInitialized) prevents
+ *   double-registration.
  *
  * The Sync service import is delayed until the engine is actually initialised
  * (see bug #1852) to avoid triggering the master password dialog at startup.
@@ -61,6 +68,7 @@ try {
   return undefined;
 }
 
+Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 
 Cu.import("resource://services-crypto/utils.js");
@@ -74,23 +82,33 @@ Cu.import("chrome://greasemonkey-modules/content/util.js");
 
 const FILE_PROTOCOL_SCHEME_REGEXP = new RegExp(GM_CONSTANTS.fileProtocolSchemeRegexp, "");
 
+/** The values a synced Run at / Inject into choice may have. */
+const RUN_AT_VALUES = [
+  "document-start", "document-body", "document-end", "document-idle"];
+const INJECT_INTO_VALUES = ["auto", "page", "content"];
+
+const SYNC_READY_TOPIC = "weave:service:ready";
+
 var gSyncInitialized = false;
 
 /**
- * Polls for Weave service readiness and registers the ScriptEngine once ready.
- * Uses a 1-second polling interval as a fallback for the unreliable
- * "weave:service:ready" observer (bug #2335).
+ * Registers the ScriptEngine once the Sync service is ready: at once, or
+ * when Sync sends SYNC_READY_TOPIC.  Without a Sync account that never
+ * happens, and nothing runs (this used to poll every second all session).
  */
 var SyncServiceObserver = {
   "init": function () {
     if (gWeave.Status.ready) {
       this.initEngine();
     } else {
-      // See #2335.
-      // The "weave:service:ready" observer has been identified
-      // as unreliable - Electrolysis (e10s)?
-      // Manually poll instead.
-      GM_util.timeout(SyncServiceObserver.init.bind(SyncServiceObserver), 1000);
+      Services.obs.addObserver(this, SYNC_READY_TOPIC, false);
+    }
+  },
+
+  "observe": function (aSubject, aTopic, aData) {
+    if (aTopic == SYNC_READY_TOPIC) {
+      Services.obs.removeObserver(this, SYNC_READY_TOPIC);
+      this.initEngine();
     }
   },
 
@@ -108,7 +126,8 @@ var SyncServiceObserver = {
     gWeave.Service.engineManager.register(ScriptEngine);
   },
 
-  "QueryInterface": XPCOMUtils.generateQI([Ci.nsISupportsWeakReference]),
+  "QueryInterface": XPCOMUtils.generateQI(
+      [Ci.nsIObserver, Ci.nsISupportsWeakReference]),
 };
 
 /**
@@ -133,12 +152,16 @@ gWeave.Utils.deferGetSet(
     [
       "downloadURL",
       "enabled",
+      "httpOnlyCookies",
       "id",
       "installed",
       "userExcludes",
       "userIncludes",
+      "userInjectInto",
       "userMatches",
+      "userNoframes",
       "userOverride",
+      "userRunAt",
       "values",
       "valuesTooBig",
     ]);
@@ -184,10 +207,7 @@ ScriptStore.prototype = {
         if (aSuccess && (aType == "dependencies")) {
           rs.install();
           rs.script.enabled = aRecord.cleartext.enabled;
-          rs.script.userExcludes = aRecord.cleartext.userExcludes;
-          rs.script.userMatches = aRecord.cleartext.userMatches;
-          rs.script.userIncludes = aRecord.cleartext.userIncludes;
-          rs.script.userOverride = aRecord.cleartext.userOverride;
+          applyUserSettings(rs.script, aRecord.cleartext);
           setScriptValuesFromSyncRecord(rs.script, aRecord);
         }
       }.bind(this));
@@ -213,9 +233,21 @@ ScriptStore.prototype = {
       record.cleartext.enabled = script.enabled;
       record.cleartext.installed = !script.needsUninstall;
       record.cleartext.userExcludes = script.userExcludes;
-      record.cleartext.userMatches = script.userMatches;
+      // As text: a MatchPattern went out as its internals, which the
+      // receiving device couldn't read, so every synced @match was lost.
+      record.cleartext.userMatches = script.userMatches.map(
+          function (aMatch) {
+            return aMatch.pattern;
+          });
       record.cleartext.userIncludes = script.userIncludes;
       record.cleartext.userOverride = script.userOverride;
+      // The Options window's choices; null follows the script's own.
+      record.cleartext.userRunAt = script._userRunAt || null;
+      record.cleartext.userNoframes =
+          (typeof script._userNoframes == "boolean")
+              ? script._userNoframes : null;
+      record.cleartext.userInjectInto = script._userInjectInto || null;
+      record.cleartext.httpOnlyCookies = !!script.httpOnlyCookies;
 
       if (GM_prefRoot.getValue("sync.values")) {
         // The shared Back, not a private one: no second connection (each
@@ -301,10 +333,7 @@ ScriptStore.prototype = {
       GM_util.getService().config.uninstall(script);
     } else {
       script.enabled = !!aRecord.cleartext.enabled;
-      script.userExcludes = aRecord.cleartext.userExcludes || [];
-      script.userMatches = aRecord.cleartext.userMatches || [];
-      script.userIncludes = aRecord.cleartext.userIncludes || [];
-      script.userOverride = !!aRecord.cleartext.userOverride;
+      applyUserSettings(script, aRecord.cleartext);
       setScriptValuesFromSyncRecord(script, aRecord);
     }
   },
@@ -403,6 +432,49 @@ function scriptForSyncId(aSyncId) {
  */
 function syncId(aScript) {
   return GM_util.hash(aScript.id);
+}
+
+/**
+ * Applies the user's own settings for a script from an incoming record:
+ * its include / exclude / match rules and the Options window's Run at, No
+ * frames, Inject into and HTTP-only cookies choices.  Then saves them and
+ * sends them to pages: setting these properties alone did neither, so a
+ * synced change was lost at the next restart.
+ *
+ * A record from an older version has no Options window fields; the local
+ * ones stay.  null (or a value this version doesn't know) means the
+ * script's own.  Old records also carry @match rules as {"_pattern": ...}
+ * objects, which the userMatches setter reads.
+ *
+ * @param {Script} aScript    - The local script.
+ * @param {object} aCleartext - The record's cleartext.
+ * @returns {void}
+ */
+function applyUserSettings(aScript, aCleartext) {
+  let list = function (aValue) {
+    return Array.isArray(aValue) ? aValue : [];
+  };
+  aScript.userExcludes = list(aCleartext.userExcludes);
+  aScript.userIncludes = list(aCleartext.userIncludes);
+  aScript.userMatches = list(aCleartext.userMatches);
+  aScript.userOverride = !!aCleartext.userOverride;
+  if ("userRunAt" in aCleartext) {
+    aScript.runAt = (RUN_AT_VALUES.indexOf(aCleartext.userRunAt) > -1)
+        ? aCleartext.userRunAt : null;
+  }
+  if ("userNoframes" in aCleartext) {
+    aScript.noframes = (typeof aCleartext.userNoframes == "boolean")
+        ? aCleartext.userNoframes : null;
+  }
+  if ("userInjectInto" in aCleartext) {
+    aScript.injectInto =
+        (INJECT_INTO_VALUES.indexOf(aCleartext.userInjectInto) > -1)
+            ? aCleartext.userInjectInto : null;
+  }
+  if ("httpOnlyCookies" in aCleartext) {
+    aScript.httpOnlyCookies = !!aCleartext.httpOnlyCookies;
+  }
+  aScript._changed("cludes", null);
 }
 
 /**
