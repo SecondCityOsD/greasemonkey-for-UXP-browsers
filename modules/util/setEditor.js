@@ -75,7 +75,9 @@ function setEditor(aScratchpad) {
           GM_CONSTANTS.localeStringBundle.createBundle(
               GM_CONSTANTS.localeGmBrowserProperties)
               .GetStringFromName("editor.pleasePickExecutable"));
-      return false;
+      // Back to the picker, as the loop is for (it gave up here, so
+      // openInEditor's fallback opened nothing).
+      continue;
     }
   }
 }

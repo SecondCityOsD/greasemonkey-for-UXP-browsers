@@ -59,7 +59,17 @@ Cu.import("chrome://greasemonkey-modules/content/util.js");
 // Layout constants.
 const MANIFEST_FILENAME = "greasemonkey";
 const VM_MANIFEST_FILENAME = "violentmonkey";
-const MANIFEST_FORMAT_VERSION = 2;
+// 3: a script's stored values are written as Tampermonkey writes them,
+// {"ts": <ms>, "data": {key: value}}, so Tampermonkey and Violentmonkey
+// can restore them; up to 2 they were the bare {key: value} map.  The
+// options sidecar also carries the Options window's Run at / No frames /
+// Inject into choices.
+const MANIFEST_FORMAT_VERSION = 3;
+
+/** The values a backup's Run at / Inject into choice may have. */
+const RUN_AT_VALUES = [
+  "document-start", "document-body", "document-end", "document-idle"];
+const INJECT_INTO_VALUES = ["auto", "page", "content"];
 const OPTIONS_SUFFIX = ".options.json";
 const STORAGE_SUFFIX = ".storage.json";
 const USER_JS_SUFFIX = GM_CONSTANTS.fileScriptExtension; // ".user.js"
@@ -383,18 +393,27 @@ function GM_BackupImport(aSrcFile, aOptions, aCallback) {
     return;
   }
 
-  // Durable safety snapshot BEFORE anything is installed — unlike an
-  // in-memory undo, a zip in <profile>/gm_backups/ survives restarts.
-  if (!opts.skipSnapshot) {
-    try {
-      result.snapshotPath = _writeSnapshot();
-    } catch (e) {
-      GM_util.logError("Backup import: snapshot failed: " + e, false);
-      result.errors.push("safety snapshot failed: " + e);
-    }
+  let start = function () {
+    _installNext(0, toInstall, scripts, depFiles, opts, result, finish);
+  };
+  if (opts.skipSnapshot) {
+    start();
+    return;
   }
-
-  _installNext(0, toInstall, scripts, depFiles, opts, result, finish);
+  // Durable safety snapshot BEFORE anything is installed — unlike an
+  // in-memory undo, a zip in <profile>/gm_backups/ survives restarts.  The
+  // installs wait until it is written: the export compresses on another
+  // thread, and starting at once let an overwrite replace script files the
+  // snapshot hadn't read yet.
+  _writeSnapshot(function (aError, aPath) {
+    if (aError) {
+      GM_util.logError("Backup import: snapshot failed: " + aError, false);
+      result.errors.push("safety snapshot failed: " + aError);
+    } else {
+      result.snapshotPath = aPath;
+    }
+    start();
+  });
 }
 
 /** Best-effort recursive removal of an import scratch directory. */
@@ -482,25 +501,118 @@ function _collectScripts(aEntries, aPayloads) {
     }
   }
 
+  // How each .storage.json is shaped: ours from format 3 and
+  // Tampermonkey's are {"ts", "data": {...}}, ours before that the bare
+  // map.  Without our manifest the archive is a foreign one: "auto" takes
+  // the "data" map when the file has that shape.  (Tampermonkey's were
+  // imported whole, as the two values "data" and "ts".)
+  let ourManifest = null;
+  try {
+    ourManifest = aPayloads[MANIFEST_FILENAME]
+        ? JSON.parse(aPayloads[MANIFEST_FILENAME]) : null;
+  } catch (e) {
+    ourManifest = null;
+  }
+  let shape = !ourManifest ? "auto"
+      : ((ourManifest.formatVersion >= 3) ? "wrapped" : "flat");
+  Object.keys(scripts).forEach(function (aKey) {
+    if (scripts[aKey].storage) {
+      scripts[aKey].storageShape = shape;
+    }
+  });
+
   // Third pass: if a VM manifest is present, fill in any missing options
-  // from its "scripts" map.  VM's manifest keys are the script name.
-  if (vmManifest && vmManifest.scripts) {
+  // from its "scripts" map (keyed by the file name's stem), and the
+  // stored values from its "values" map (keyed by Violentmonkey's name
+  // URI; they were all dropped).
+  if (vmManifest && (vmManifest.scripts || vmManifest.values)) {
     let keys = Object.keys(scripts);
     for (let i = 0; i < keys.length; i++) {
       let entry = scripts[keys[i]];
-      if (entry.options) continue;
       let stem = keys[i].slice(0, -USER_JS_SUFFIX.length);
-      if (vmManifest.scripts[stem]) {
+      if (!entry.options && vmManifest.scripts && vmManifest.scripts[stem]) {
         try {
           entry.options = JSON.stringify(vmManifest.scripts[stem]);
         } catch (e) {
           // Ignore — the script will install with GM defaults.
         }
       }
+      if (!entry.storage && entry.source && vmManifest.values) {
+        let values = vmManifest.values[_vmNameUri(entry.source)];
+        if (values && (typeof values === "object")) {
+          entry.storage = JSON.stringify(_decodeVmValues(values));
+          entry.storageShape = "flat";
+        }
+      }
     }
   }
 
   return { "scripts": scripts, "vmManifest": vmManifest };
+}
+
+/**
+ * Violentmonkey's name URI for a script, which its backup keys stored
+ * values by: encodeFilename(namespace + "\n" + name + "\n") with the
+ * script's own (unlocalised) @namespace and @name.
+ *
+ * @param {string} aSource - The script's source.
+ * @returns {string}
+ */
+function _vmNameUri(aSource) {
+  let block = /\/\/\s*==UserScript==([\s\S]*?)\/\/\s*==\/UserScript==/
+      .exec(String(aSource));
+  let meta = block ? block[1] : "";
+  let first = function (aKey) {
+    let m = new RegExp("^\\s*//\\s*@" + aKey + "[ \\t]+(.*?)\\s*$", "m")
+        .exec(meta);
+    return m ? m[1] : "";
+  };
+  return (first("namespace") + "\n" + first("name") + "\n")
+      .replace(/[-\\/:*?"<>|%\s]/g, function (aChar) {
+        let code = aChar.charCodeAt(0).toString(16);
+        return "-" + ((code.length < 2) ? "0" + code : code);
+      });
+}
+
+/**
+ * Decodes Violentmonkey's stored values: each is a string whose first
+ * letter gives its type ("s" string, "n" number, "b" boolean, "o" JSON).
+ * Anything else (an older format) is taken as it is.
+ *
+ * @param {object} aRaw - {key: raw value}.
+ * @returns {object} {key: value}.
+ */
+function _decodeVmValues(aRaw) {
+  let out = {};
+  Object.keys(aRaw).forEach(function (aKey) {
+    let raw = aRaw[aKey];
+    if ((typeof raw !== "string") || !raw) {
+      out[aKey] = raw;
+      return;
+    }
+    let rest = raw.slice(1);
+    switch (raw.charAt(0)) {
+      case "s":
+        out[aKey] = rest;
+        break;
+      case "n":
+        out[aKey] = Number(rest);
+        break;
+      case "b":
+        out[aKey] = (rest === "true");
+        break;
+      case "o":
+        try {
+          out[aKey] = JSON.parse(rest);
+        } catch (e) {
+          out[aKey] = rest;
+        }
+        break;
+      default:
+        out[aKey] = raw;
+    }
+  });
+  return out;
 }
 
 /**
@@ -650,6 +762,11 @@ function _buildOptionsJson(aScript, aDependencies) {
     "userMatches": aScript.userMatches.map(function (m) { return m.pattern; }),
     "userOverride": aScript._userOverride,
     "httpOnlyCookies": aScript.httpOnlyCookies,
+    // The Options window's choices; null follows the script's own.
+    "userRunAt": aScript._userRunAt || null,
+    "userNoframes": (typeof aScript._userNoframes == "boolean")
+        ? aScript._userNoframes : null,
+    "userInjectInto": aScript._userInjectInto || null,
     "dependencies": aDependencies || [],
   }, null, 2);
 }
@@ -763,7 +880,9 @@ function _exportDependencies(
 }
 
 /**
- * Dumps a script's GM_setValue store into a flat { key: value } JSON object.
+ * Dumps a script's GM_setValue store as Tampermonkey writes it,
+ * {"ts": <ms>, "data": {key: value}}, which Tampermonkey and Violentmonkey
+ * read (format 3; the bare map before couldn't be restored there).
  * Returns null (not "{}") when the script has no stored values, so the
  * empty sidecar file isn't added to the archive.
  */
@@ -790,7 +909,7 @@ function _buildStorageJson(aScript) {
         out[keys[i]] = raw;
       }
     }
-    return JSON.stringify(out, null, 2);
+    return JSON.stringify({"ts": Date.now(), "data": out}, null, 2);
   } catch (e) {
     GM_util.logError("Backup storage dump failed: " + e, false);
     return null;
@@ -967,6 +1086,11 @@ function _installNext(aIdx, aKeys, aScripts, aDepFiles, aOpts, aResult, aDone) {
   // Tampermonkey options/settings/meta) into our flat shape; our own
   // sidecars pass through unchanged.
   options = _normalizeImportedOptions(options);
+  if (options && Array.isArray(options.notes)) {
+    options.notes.forEach(function (aNote) {
+      aResult.errors.push(key + ": " + aNote);
+    });
+  }
 
   // Map each archived dependency (format v2) to its extracted temp file so
   // the install can pre-seed it: restore works offline and dead URLs keep
@@ -1102,7 +1226,7 @@ function _installNext(aIdx, aKeys, aScripts, aDepFiles, aOpts, aResult, aDone) {
     try {
       remoteScript.setScript(parsedScript, tempFile);
       if (typeof remoteScript.setSilent === "function") {
-        remoteScript.setSilent();
+        remoteScript.setSilent(true);
       }
       if (prefetch
           && (typeof remoteScript.setPrefetchedDependencies === "function")) {
@@ -1119,7 +1243,8 @@ function _installNext(aIdx, aKeys, aScripts, aDepFiles, aOpts, aResult, aDone) {
           remoteScript.install();
           _applyImportedOptions(parsedScript, options);
           if (entry.storage && !(aOpts && (aOpts.restoreValues === false))) {
-            _applyImportedStorage(parsedScript, entry.storage);
+            _applyImportedStorage(
+                parsedScript, entry.storage, entry.storageShape);
           }
           aResult.imported++;
         } catch (e) {
@@ -1142,14 +1267,15 @@ function _installNext(aIdx, aKeys, aScripts, aDepFiles, aOpts, aResult, aDone) {
  * Detection:
  *   - Violentmonkey: state nested under config ({enabled, shouldUpdate} as
  *     0/1 numbers) and custom ({include/match/exclude arrays, downloadURL,
- *     origInclude/origMatch/origExclude merge flags}).
- *   - Tampermonkey: {options: {override: {use_* / merge_* lists},
- *     check_for_updates}, settings: {enabled, position}, meta: {file_url}}.
+ *     lastInstallURL, origInclude/origMatch/origExclude, runAt, noframes,
+ *     injectInto}).
+ *   - Tampermonkey: {options: {override: {use_* lists, merge_* booleans,
+ *     noframes}, check_for_updates, run_at}, settings: {enabled,
+ *     position}, meta: {file_url}}.
  *   - Anything else (our own exports) passes through unchanged.
  *
- * Mapping notes: VM/TM keep replace-vs-merge per clude list; we have one
- * userOverride flag for all of them — any "replace" wins.  TM use_* lists
- * take precedence over merge_* lists when both are present.
+ * The result may carry `notes`: what this import couldn't keep, for the
+ * import result.
  */
 function _normalizeImportedOptions(aRaw) {
   if (!aRaw || typeof aRaw !== "object") {
@@ -1160,7 +1286,7 @@ function _normalizeImportedOptions(aRaw) {
   if (aRaw.config || aRaw.custom) {
     let config = aRaw.config || {};
     let custom = aRaw.custom || {};
-    let out = {};
+    let out = {"notes": []};
     if (config.enabled != null) {
       out.enabled = !!+config.enabled;
     }
@@ -1171,30 +1297,20 @@ function _normalizeImportedOptions(aRaw) {
     if (config.httpOnly != null) {
       out.httpOnlyCookies = !!+config.httpOnly;
     }
+    // A user-set download URL, else the address it was installed from
+    // (without it a script with no @downloadURL couldn't update).
     if (custom.downloadURL) {
       out.downloadURL = "" + custom.downloadURL;
+    } else if (custom.lastInstallURL) {
+      out.downloadURL = "" + custom.lastInstallURL;
     }
     if (custom.homepageURL) {
       out.homepageURL = "" + custom.homepageURL;
     }
-    if (Array.isArray(custom.include)) {
-      out.userIncludes = custom.include;
-    }
-    if (Array.isArray(custom.exclude)) {
-      out.userExcludes = custom.exclude;
-    }
-    if (Array.isArray(custom.match)) {
-      out.userMatches = custom.match;
-    }
-    // VM's origInclude/origMatch/origExclude default to true (= merge the
-    // custom lists with the script's own); an explicit false means
-    // "replace" — our userOverride.
-    if ((custom.origInclude === false) || (custom.origMatch === false)
-        || (custom.origExclude === false)) {
-      out.userOverride = true;
-    } else if (out.userIncludes || out.userExcludes || out.userMatches) {
-      out.userOverride = false;
-    }
+    _importUserRules(out, custom.include, custom.match, custom.exclude,
+        custom.origInclude !== false, custom.origMatch !== false,
+        custom.origExclude !== false, "Violentmonkey");
+    _importUserSettings(out, custom.runAt, custom.noframes, custom.injectInto);
     return out;
   }
 
@@ -1205,7 +1321,7 @@ function _normalizeImportedOptions(aRaw) {
     let override = tmOptions.override || {};
     let settings = aRaw.settings || {};
     let meta = aRaw.meta || {};
-    let out = {};
+    let out = {"notes": []};
     if (typeof settings.enabled === "boolean") {
       out.enabled = settings.enabled;
     }
@@ -1215,32 +1331,95 @@ function _normalizeImportedOptions(aRaw) {
     if (meta.file_url) {
       out.downloadURL = "" + meta.file_url;
     }
-    let pick = function (aList) {
-      return (Array.isArray(aList) && aList.length) ? aList : null;
-    };
-    let useIncludes = pick(override.use_includes);
-    let useMatches = pick(override.use_matches);
-    let useExcludes = pick(override.use_excludes);
-    if (useIncludes || useMatches || useExcludes) {
-      if (useIncludes) { out.userIncludes = useIncludes; }
-      if (useMatches) { out.userMatches = useMatches; }
-      if (useExcludes) { out.userExcludes = useExcludes; }
-      out.userOverride = true;
-    } else {
-      let mergeIncludes = pick(override.merge_includes);
-      let mergeMatches = pick(override.merge_matches);
-      let mergeExcludes = pick(override.merge_excludes);
-      if (mergeIncludes) { out.userIncludes = mergeIncludes; }
-      if (mergeMatches) { out.userMatches = mergeMatches; }
-      if (mergeExcludes) { out.userExcludes = mergeExcludes; }
-      if (mergeIncludes || mergeMatches || mergeExcludes) {
-        out.userOverride = false;
-      }
-    }
+    // use_* are the user's own lists; merge_* (booleans, true when
+    // absent) say whether the script's own still count.
+    _importUserRules(out, override.use_includes, override.use_matches,
+        override.use_excludes, override.merge_includes !== false,
+        override.merge_matches !== false, override.merge_excludes !== false,
+        "Tampermonkey");
+    _importUserSettings(out, tmOptions.run_at, override.noframes, null);
     return out;
   }
 
   return aRaw;
+}
+
+/**
+ * Maps another manager's user rules to ours.  They choose per list whether
+ * the script's own @include, @match and @exclude still count (Tampermonkey
+ * merge_*, Violentmonkey origInclude / origMatch / origExclude); we have
+ * one switch, userOverride, which drops all three.
+ *   - The user's lists are imported as they are.
+ *   - userOverride only when the script's own includes or matches were off
+ *     AND the user has includes or matches of their own.  With none,
+ *     userOverride means "run on every site": importing a single user
+ *     exclude used to turn that on.
+ *   - With userOverride, script @exclude rules the other manager kept are
+ *     copied into the user excludes (keepScriptExcludes).
+ *   - What can't be expressed keeps the script's own rules, with a note.
+ *
+ * @param {object}  aOut          - The normalised options being built.
+ * @param {Array}   aIncludes     - The user's @include rules.
+ * @param {Array}   aMatches      - The user's @match rules.
+ * @param {Array}   aExcludes     - The user's @exclude rules.
+ * @param {boolean} aKeepIncludes - The script's own @include still count.
+ * @param {boolean} aKeepMatches  - The script's own @match still count.
+ * @param {boolean} aKeepExcludes - The script's own @exclude still count.
+ * @param {string}  aFrom         - The other manager's name, for notes.
+ */
+function _importUserRules(aOut, aIncludes, aMatches, aExcludes,
+    aKeepIncludes, aKeepMatches, aKeepExcludes, aFrom) {
+  let list = function (aList) {
+    return Array.isArray(aList) ? aList.filter(function (aRule) {
+      return (typeof aRule === "string") && (aRule !== "");
+    }) : [];
+  };
+  let includes = list(aIncludes);
+  let matches = list(aMatches);
+  let excludes = list(aExcludes);
+  aOut.userIncludes = includes;
+  aOut.userMatches = matches;
+  aOut.userExcludes = excludes;
+
+  let replace = !aKeepIncludes || !aKeepMatches;
+  if (replace && (includes.length || matches.length)) {
+    aOut.userOverride = true;
+    if (aKeepExcludes) {
+      aOut.keepScriptExcludes = true;
+    }
+    return undefined;
+  }
+  aOut.userOverride = false;
+  if (replace) {
+    aOut.notes.push(aFrom + " had the script's own @include / @match rules"
+        + " off, with none of the user's own instead; they stay on.");
+  }
+  if (!aKeepExcludes) {
+    aOut.notes.push(aFrom + " had the script's own @exclude rules off;"
+        + " they stay on.");
+  }
+  return undefined;
+}
+
+/**
+ * Maps another manager's Run at / No frames / Inject into choices to the
+ * Options window's.  Unknown values are left out.
+ *
+ * @param {object}         aOut       - The normalised options being built.
+ * @param {string}         aRunAt     - e.g. "document-start".
+ * @param {number|boolean} aNoframes  - 0 / 1 (Violentmonkey) or a boolean.
+ * @param {string}         aInjectInto - "auto", "page" or "content".
+ */
+function _importUserSettings(aOut, aRunAt, aNoframes, aInjectInto) {
+  if (RUN_AT_VALUES.indexOf(aRunAt) > -1) {
+    aOut.userRunAt = aRunAt;
+  }
+  if ((aNoframes !== null) && (aNoframes !== undefined) && (aNoframes !== "")) {
+    aOut.userNoframes = !!+aNoframes;
+  }
+  if (INJECT_INTO_VALUES.indexOf(aInjectInto) > -1) {
+    aOut.userInjectInto = aInjectInto;
+  }
 }
 
 /**
@@ -1296,6 +1475,32 @@ function _applyImportedOptions(aScript, aOptions) {
     if (Array.isArray(aOptions.userExcludes)) {
       aScript.userExcludes = aOptions.userExcludes;
     }
+    if (aOptions.keepScriptExcludes) {
+      // userOverride drops the script's own @exclude rules, which the
+      // other manager kept: they become user excludes.
+      let excludes = aScript.userExcludes;
+      aScript.excludes.forEach(function (aExclude) {
+        if (excludes.indexOf(aExclude) == -1) {
+          excludes.push(aExclude);
+        }
+      });
+      aScript.userExcludes = excludes;
+    }
+    // The Options window's choices (our own backups from format 3, and
+    // Violentmonkey's / Tampermonkey's).  null follows the script's own.
+    if ("userRunAt" in aOptions) {
+      aScript.runAt = (RUN_AT_VALUES.indexOf(aOptions.userRunAt) > -1)
+          ? aOptions.userRunAt : null;
+    }
+    if ("userNoframes" in aOptions) {
+      aScript.noframes = (typeof aOptions.userNoframes === "boolean")
+          ? aOptions.userNoframes : null;
+    }
+    if ("userInjectInto" in aOptions) {
+      aScript.injectInto =
+          (INJECT_INTO_VALUES.indexOf(aOptions.userInjectInto) > -1)
+              ? aOptions.userInjectInto : null;
+    }
     if (Array.isArray(aOptions.userMatches)) {
       aScript.userMatches = aOptions.userMatches;
     }
@@ -1324,10 +1529,30 @@ function _applyImportedOptions(aScript, aOptions) {
 }
 
 /**
- * Writes imported GM values into the script's SQLite store.  Missing values
- * are ignored; existing keys (from a prior install) are overwritten.
+ * @param {*} aParsed - A parsed .storage.json.
+ * @returns {boolean} Whether it has Tampermonkey's shape, {"data": {...}}
+ *   with at most a "ts" besides.
  */
-function _applyImportedStorage(aScript, aStorageJson) {
+function _isWrappedStorage(aParsed) {
+  return !!aParsed && (typeof aParsed.data === "object")
+      && (aParsed.data !== null) && !Array.isArray(aParsed.data)
+      && Object.keys(aParsed).every(function (aKey) {
+        return (aKey === "data") || (aKey === "ts");
+      });
+}
+
+/**
+ * Writes imported GM values into the script's SQLite store, in one
+ * transaction.  Existing keys (from a prior install) are overwritten.
+ *
+ * @param {Script} aScript
+ * @param {string} aStorageJson - The .storage.json.
+ * @param {string} [aShape]     - "wrapped" ({"ts", "data"}: ours from
+ *   format 3, Tampermonkey's), "flat" (the bare map: ours before, and
+ *   Violentmonkey's decoded values) or "auto" (wrapped when it has that
+ *   shape).  See _collectScripts.
+ */
+function _applyImportedStorage(aScript, aStorageJson, aShape) {
   let data;
   try {
     data = JSON.parse(aStorageJson);
@@ -1336,21 +1561,17 @@ function _applyImportedStorage(aScript, aStorageJson) {
     return;
   }
   if (!data || typeof data !== "object") return;
+  if ((aShape === "wrapped")
+      || ((aShape !== "flat") && _isWrappedStorage(data))) {
+    data = _isWrappedStorage(data) ? data.data : null;
+    if (!data) return;
+  }
   try {
     // Module registry, not a private Back: shared with the live script and
     // closed at shutdown instead of leaking an open SQLite connection.
-    let storage = getStorageBackForScript(aScript);
-    let keys = Object.keys(data);
-    for (let i = 0; i < keys.length; i++) {
-      try {
-        storage.setValue(keys[i], data[keys[i]]);
-      } catch (e) {
-        GM_util.logError(
-            "Backup import: setValue(" + keys[i] + "): " + e, false);
-      }
-    }
+    getStorageBackForScript(aScript).setValuesBatch(data);
   } catch (e) {
-    GM_util.logError("Backup import: storage open failed: " + e, false);
+    GM_util.logError("Backup import: storage write failed: " + e, false);
   }
 }
 
@@ -1427,16 +1648,25 @@ function _applyImportedSettings(aSettings, aResult) {
 /**
  * Writes a full pre-import safety snapshot (scripts + values + settings)
  * to <profile>/gm_backups/pre-import-<timestamp>.zip and prunes old ones.
- * GM_BackupExport runs synchronously, so on return the file either exists
- * or this throws.
+ * The export usually finishes on another thread, so this reports through
+ * aCallback once the file is complete (it said so before any byte was
+ * written, and a failed compression went unreported).
  *
- * @returns {string} The snapshot file's full path.
+ * @param {function} aCallback - (error, path): error a string when the
+ *   snapshot couldn't be written, else path its full path.
  */
-function _writeSnapshot() {
-  let dir = GM_util.scriptDir().parent;
-  dir.append("gm_backups");
-  if (!dir.exists()) {
-    dir.create(Ci.nsIFile.DIRECTORY_TYPE, GM_CONSTANTS.directoryMask);
+function _writeSnapshot(aCallback) {
+  let dir;
+  let file;
+  try {
+    dir = GM_util.scriptDir().parent;
+    dir.append("gm_backups");
+    if (!dir.exists()) {
+      dir.create(Ci.nsIFile.DIRECTORY_TYPE, GM_CONSTANTS.directoryMask);
+    }
+  } catch (e) {
+    aCallback("" + e, null);
+    return;
   }
 
   // ISO timestamp, filesystem-safe and lexically chronological:
@@ -1445,16 +1675,22 @@ function _writeSnapshot() {
       .replace(/[:.]/g, "-")
       .replace("T", "_")
       .slice(0, 19);
-  let file = dir.clone();
+  file = dir.clone();
   file.append("pre-import-" + stamp + ".zip");
 
-  GM_BackupExport(file, /* includeValues */ true, function () {});
-  if (!file.exists()) {
-    throw new Error("snapshot was not written: " + file.path);
-  }
-
-  _pruneSnapshots(dir);
-  return file.path;
+  GM_BackupExport(file, /* includeValues */ true,
+      function (aSuccess, aCount, aError) {
+        if (!aSuccess) {
+          aCallback(aError || "the snapshot was not written", null);
+          return;
+        }
+        try {
+          _pruneSnapshots(dir);
+        } catch (e) {
+          // Old snapshots stay; this one is written.
+        }
+        aCallback(null, file.path);
+      });
 }
 
 /** Keeps only the newest SNAPSHOTS_TO_KEEP pre-import snapshots. */
