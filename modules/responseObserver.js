@@ -194,7 +194,6 @@ function _corsCspTestUrl(aUrl) {
   }
 
   if (!GM_util.isGreasemonkeyable(aUrl)) {
-    // dump(gCorsCspOverrideDumpPrefix + " - testUrl (" + aUrl + ") - isGreasemonkeyable: false" + "\n");
     return false;
   }
 
@@ -203,7 +202,6 @@ function _corsCspTestUrl(aUrl) {
           .join("").trim() != "")
       && values[_internalSeparator + gCorsCspOverrideExcludes]
           .some(testClude));
-  // dump(gCorsCspOverrideDumpPrefix + " - testUrl (" + aUrl + ") - " + gCorsCspOverrideExcludes + ": " + values[gCorsCspOverrideExcludes] + " => " + values[gCorsCspOverrideExcludes + _internalSeparator].toString() + "\n");
 
   if (values[gCorsCspOverrideExcludes + _internalSeparator]) {
     return false;
@@ -214,14 +212,12 @@ function _corsCspTestUrl(aUrl) {
           .join("").trim() != "")
       && values[_internalSeparator + gCorsCspOverrideIncludes]
           .some(testClude));
-  // dump(gCorsCspOverrideDumpPrefix + " - testUrl (" + aUrl + ") - " + gCorsCspOverrideIncludes + ": " + values[gCorsCspOverrideIncludes] + " => " + values[gCorsCspOverrideIncludes + _internalSeparator].toString() + "\n");
 
   values[gCorsCspOverrideMatches + _internalSeparator] = (
       (values[_internalSeparator + gCorsCspOverrideMatches]
           .join("").trim() != "")
       && values[_internalSeparator + gCorsCspOverrideMatches]
           .some(testMatch));
-  // dump(gCorsCspOverrideDumpPrefix + " - testUrl (" + aUrl + ") - " + gCorsCspOverrideMatches + ": " + values[gCorsCspOverrideMatches] + " => " + values[gCorsCspOverrideMatches + _internalSeparator].toString() + "\n");
 
   var _return = values[gCorsCspOverrideIncludes + _internalSeparator]
       || values[gCorsCspOverrideMatches + _internalSeparator];
@@ -435,7 +431,6 @@ function _corsOverride(aCorsRules, aCorsHeader) {
     "value": JSON.parse(JSON.stringify(rulesMyDefault)),
   };
 
-  // dump(gCorsCspOverrideDumpPrefix + " - cors - rules - my (" + aCorsHeader.value + ") - preset - before: " + JSON.stringify(rulesMy) + "\n");
   var _pref = "";
   if (rulesMyDefault.override) {
     rulesMy.value.override = true;
@@ -446,15 +441,11 @@ function _corsOverride(aCorsRules, aCorsHeader) {
       rulesMy.value.override = GM_prefRoot.getValue(_pref);
     }
   }
-  // dump(gCorsCspOverrideDumpPrefix + " - cors - rules - my (" + aCorsHeader.value + ") - preset - after: " + JSON.stringify(rulesMy) + "\n");
 
-  // dump(gCorsCspOverrideDumpPrefix + " - cors - rules - my (" + aCorsHeader.value + ") - before: " + rules + "\n");
   if (rulesMy.value.override
       && (rules != rulesMy.value.value[aCorsHeader.rewrite])) {
-    // dump(gCorsCspOverrideDumpPrefix + " - cors - rules - my (" + aCorsHeader.value + ") - rewrite: " + rulesMy.value.value[aCorsHeader.rewrite] + "\n");
     rules = rulesMy.value.value[aCorsHeader.rewrite];
   }
-  // dump(gCorsCspOverrideDumpPrefix + " - cors - rules - my (" + aCorsHeader.value + ") - after: " + rules + "\n");
 
   return rules;
 }
@@ -790,7 +781,6 @@ function _cspOverride(aCspRules) {
     }
   }
 
-  // dump(gCorsCspOverrideDumpPrefix + " - csp - rules - my - preset - before: " + JSON.stringify(rulesMy) + "\n");
   var _pref = "";
   for (var i = 0, iLen = rulesMy.length; i < iLen; i++) {
     labelCspOverride1:
@@ -817,7 +807,6 @@ function _cspOverride(aCspRules) {
       }
     }
   }
-  // dump(gCorsCspOverrideDumpPrefix + " - csp - rules - my - preset - after: " + JSON.stringify(rulesMy) + "\n");
 
   // http://www.w3.org/TR/CSP2/#directive-script-src
   // http://www.w3.org/TR/CSP2/#source-list-syntax
@@ -862,12 +851,10 @@ function _cspOverride(aCspRules) {
   var ruleSourceListValue = "";
   var ruleSourceListValues = [];
   var ruleSourceListRewriteValue = "";
-    for (var i = 0, iLen = rules.length; i < iLen; i++) {
+  for (var i = 0, iLen = rules.length; i < iLen; i++) {
     if (rules[i].trim() != "") {
-      // dump(gCorsCspOverrideDumpPrefix + " - csp - rules: " + rules[i].trim() + "\n");
       for (var j = 0, jLen = rulesMy.length; j < jLen; j++) {
         if (rules[i].toLowerCase().trim().indexOf(rulesMy[j].name) == 0) {
-          // dump(gCorsCspOverrideDumpPrefix + " - csp - rules - my (" + rulesMy[j].name + ") - before: " + rules[i] + "\n");
           ruleRewriteHash = false;
           ruleRewriteNonce = false;
           ruleRewriteNone = false;
@@ -879,7 +866,6 @@ function _cspOverride(aCspRules) {
           for (var k = 0, kLen = rulesMy[j].value.length; k < kLen; k++) {
             if (rulesMy[j].value[k].override) {
               if (rulesMy[j].value[k].name == gCorsCspOverrideAllAllow) {
-                // dump(gCorsCspOverrideDumpPrefix + " - csp - rules - my (" + rulesMy[j].name + ") - rewrite (" + rulesMy[j].value[k].name + "): " + rulesMy[j].value[k].value + "\n");
                 ruleValue = rulesMy[j].value[k].value;
                 ruleValues = ruleValue.split(rulesValuesSeparator);
               } else {
@@ -897,7 +883,6 @@ function _cspOverride(aCspRules) {
                         m < mLen; m++) {
                       if (ruleValues[m].toLowerCase().trim()
                           == ruleSourceListValues[l]) {
-                        // dump(gCorsCspOverrideDumpPrefix + " - csp - rules - my (" + rulesMy[j].name + ") - rewrite (" + rulesMy[j].value[k].name + ") - they are identical: " + ruleValues[m].toLowerCase().trim() + " / " + ruleSourceListValues[l] + "\n");
                         ruleSourceListRewriteValue = "";
                         break;
                       }
@@ -924,13 +909,11 @@ function _cspOverride(aCspRules) {
                       l < lLen; l++) {
                     if (ruleValues[l].toLowerCase().trim()
                         == rulesMy[j].value[k].value) {
-                      // dump(gCorsCspOverrideDumpPrefix + " - csp - rules - my (" + rulesMy[j].name + ") - rewrite (" + rulesMy[j].value[k].name + ") - they are identical: " + ruleValues[l].toLowerCase().trim() + " / " + rulesMy[j].value[k].value + "\n");
                       ruleRewriteValue = "";
                       break;
                     }
                   }
                 }
-                // dump(gCorsCspOverrideDumpPrefix + " - csp - rules - my (" + rulesMy[j].name + ") - rewrite (" + rulesMy[j].value[k].name + "): " + ruleRewriteValue + "\n");
                 ruleValue = (ruleValue + rulesValuesSeparator
                     + ruleRewriteValue).trim();
                 ruleValues = ruleValue.split(rulesValuesSeparator);
@@ -946,25 +929,21 @@ function _cspOverride(aCspRules) {
           if (ruleRewriteHash) {
             if (rulesDeleteHashRegex.override
                 && rulesDeleteHashRegex.value.test(rules[i])) {
-              // dump(gCorsCspOverrideDumpPrefix + " - csp - rules - my (" + rulesMy[j].name + ") - delete (hash)" + "\n");
               rules[i] = rules[i].replace(rulesDeleteHashRegex.value, "");
             }
           }
           if (ruleRewriteNonce) {
             if (rulesDeleteNonceRegex.override
                 && rulesDeleteNonceRegex.value.test(rules[i])) {
-              // dump(gCorsCspOverrideDumpPrefix + " - csp - rules - my (" + rulesMy[j].name + ") - delete (nonce)" + "\n");
               rules[i] = rules[i].replace(rulesDeleteNonceRegex.value, "");
             }
           }
           if (ruleRewriteNone) {
             if (rulesDeleteNoneRegex.override
                 && rulesDeleteNoneRegex.value.test(rules[i])) {
-              // dump(gCorsCspOverrideDumpPrefix + " - csp - rules - my (" + rulesMy[j].name + ") - delete (none)" + "\n");
               rules[i] = rules[i].replace(rulesDeleteNoneRegex.value, "");
             }
           }
-          // dump(gCorsCspOverrideDumpPrefix + " - csp - rules - my (" + rulesMy[j].name + ") - after: " + rules[i] + "\n");
           break;
         }
       }
