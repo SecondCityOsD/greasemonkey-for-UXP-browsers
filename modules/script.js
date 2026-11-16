@@ -19,7 +19,6 @@
  *   - Manage remote update checks (checkForRemoteUpdate / checkRemoteVersion).
  *   - Manage file lifecycle: setFilename, fixTimestampsOnInstall, allFiles,
  *     allFilesExistResult, uninstall.
- *   - Produce the GM_info object (Script.info()) injected into sandboxes.
  *   - Apply updates from a newly-downloaded script (updateFromNewScript).
  *
  * Change events dispatched via _changed():
@@ -49,7 +48,6 @@ Cu.import("chrome://greasemonkey-modules/content/constants.js");
 Cu.import("resource://gre/modules/PrivateBrowsingUtils.jsm");
 
 Cu.import("chrome://greasemonkey-modules/content/abstractScript.js");
-Cu.import("chrome://greasemonkey-modules/content/extractMeta.js");
 Cu.import("chrome://greasemonkey-modules/content/GM_notification.js");
 Cu.import("chrome://greasemonkey-modules/content/ipcScript.js");
 Cu.import("chrome://greasemonkey-modules/content/parseScript.js");
@@ -1471,56 +1469,6 @@ Script.prototype.toConfigNode = function (aDoc) {
 /** @returns {string} Human-readable description of this Script. */
 Script.prototype.toString = function () {
   return "[Greasemonkey Script " + this.id + "; " + this.version + "]";
-};
-
-/**
- * Builds the GM_info object that is injected into every script sandbox.
- * Contains script metadata, the Greasemonkey version, and the raw meta block.
- *
- * @returns {object} The GM_info payload object.
- */
-Script.prototype.info = function () {
-  let matches = [];
-  for (let i = 0, iLen = this.matches.length; i < iLen; i++) {
-    let match = this.matches[i];
-    matches.push(match.pattern);
-  }
-  let resources = this.resources.map(function (aRes) {
-    return {
-      "name": aRes.name,
-      "mimetype": aRes.mimetype,
-    };
-  });
-
-  return {
-    "script": {
-      "author": this.author,
-      "copyright": this.copyright,
-      "description": this.description,
-      "excludes": this.excludes,
-      "homepage": this.homepageURL,
-      // "icon": ? source URL,
-      "includes": this.includes,
-      "lastUpdated": this.lastUpdated,
-      "localizedDescription": this.localized.description,
-      "localizedName": this.localized.name,
-      "matches": matches,
-      "name": this.name,
-      "namespace": this.namespace,
-      "noframes": this.noframes,
-      // "requires": ? source URL,
-      "resources": resources,
-      "run-at": this.runAt,
-      "version": this.version,
-    },
-    "scriptHandler": GM_CONSTANTS.info.scriptHandler,
-    "scriptMetaStr": extractMeta(this.textContent),
-    "scriptSource": this.textContent,
-    "scriptWillUpdate": this.isRemoteUpdateAllowed(false)
-        && this.shouldAutoUpdate(),
-    "uuid": this.uuid,
-    "version": gGreasemonkeyVersion,
-  };
 };
 
 /**
