@@ -141,6 +141,13 @@ SvScrollbar.prototype._onMouseDown = function (aEvent) {
   if (aEvent.target == this._thumb) {
     this._drag = {"pos": this._pos, "start": this._coordinate(aEvent)};
     this._thumb.setAttribute("dragging", "true");
+    // The mouse button can come up outside the page (over the tab strip,
+    // say), where the window's listeners never heard it.  Captured, the
+    // release still comes here.  (preventDefault() above stops Gecko
+    // capturing for us.)
+    if (this._thumb.setCapture) {
+      this._thumb.setCapture();
+    }
     window.addEventListener("mousemove", this, true);
     window.addEventListener("mouseup", this, true);
     return;
@@ -158,6 +165,12 @@ SvScrollbar.prototype._onMouseMove = function (aEvent) {
   if (!this._drag || (travel <= 0)) {
     return;
   }
+  if ((typeof aEvent.buttons == "number") && !(aEvent.buttons & 1)) {
+    // The release went unheard all the same: the drag is over, rather
+    // than the code following a mouse with no button held.
+    this._endDrag();
+    return;
+  }
   aEvent.preventDefault();
   let moved = this._coordinate(aEvent) - this._drag.start;
   this._scrollTo(this._drag.pos + (moved * this._range / travel));
@@ -169,6 +182,9 @@ SvScrollbar.prototype._endDrag = function () {
   }
   this._drag = null;
   this._thumb.removeAttribute("dragging");
+  if (document.releaseCapture) {
+    document.releaseCapture();
+  }
   window.removeEventListener("mousemove", this, true);
   window.removeEventListener("mouseup", this, true);
 };

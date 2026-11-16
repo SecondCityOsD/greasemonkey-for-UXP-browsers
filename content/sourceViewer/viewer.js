@@ -613,30 +613,42 @@ function jumpToLine(aLine) {
 /**
  * True iff aPath is inside the user-scripts directory or the OS temp area —
  * the only places our chrome code legitimately points the viewer (an
- * installed script's file, or a freshly-downloaded temp file).  Compared as
- * path prefixes with the platform separator so "/foo" can't match "/foobar".
+ * installed script's file, or a freshly-downloaded temp file).
+ *
+ * The path is resolved first (nsIFile.normalize(), which on Linux and macOS
+ * also follows links) and then checked with nsIFile.contains().  A path
+ * with a ".." in it is refused outright: compared as text, as it was,
+ * "<temp folder>/../anything" passed, and the system then read "anything".
  * @param {string} aPath
  * @returns {boolean}
  */
 function isAllowedPath(aPath) {
-  let sep = "/";
+  if (/(^|[\\\/])\.\.([\\\/]|$)/.test(aPath)) {
+    return false;
+  }
+  let file;
   try {
-    if (GM_util.getEnvironment().osWindows) {
-      sep = "\\";
-    }
-  } catch (e) { /* default to "/" */ }
+    file = Components.classes["@mozilla.org/file/local;1"]
+        .createInstance(Ci.nsIFile);
+    file.initWithPath(aPath);
+    file.normalize();
+  } catch (e) {
+    // Not an absolute path; or, where normalize() follows links, no file.
+    return false;
+  }
 
   let roots = [];
-  try { roots.push(GM_util.scriptDir().path); } catch (e) { /* ignore */ }
+  try { roots.push(GM_util.scriptDir().clone()); } catch (e) { /* ignore */ }
   try {
-    roots.push(Services.dirsvc.get("TmpD", Ci.nsIFile).path);
+    roots.push(Services.dirsvc.get("TmpD", Ci.nsIFile));
   } catch (e) { /* ignore */ }
 
-  for (let i = 0, iLen = roots.length; i < iLen; i++) {
-    let root = roots[i];
-    if (root && (aPath === root || aPath.lastIndexOf(root + sep, 0) === 0)) {
-      return true;
+  return roots.some(function (aRoot) {
+    try {
+      aRoot.normalize();
+      return aRoot.equals(file) || aRoot.contains(file);
+    } catch (e) {
+      return false;
     }
-  }
-  return false;
+  });
 }
