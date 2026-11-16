@@ -81,16 +81,18 @@ function installScriptFromSource(aSource, aCallback, aOptions) {
           "persistence": -1,
           "persistWhileVisible": true,
         };
-        GM_notification(
-            GM_CONSTANTS.localeStringBundle.createBundle(
-                GM_CONSTANTS.localeGreasemonkeyProperties)
-                .GetStringFromName("error.couldNotDownloadDependencies")
-                .replace("%1", remoteScript.errorMessage),
-            "greasemonkey-dependency-download-failed", notificationOptions);
+        // The callers show the same words (the editor's alert, Recover
+        // Orphans' summary).
+        let message = GM_CONSTANTS.localeStringBundle.createBundle(
+            GM_CONSTANTS.localeGreasemonkeyProperties)
+            .GetStringFromName("error.couldNotDownloadDependencies")
+            .replace("%1", function () {
+              return remoteScript.errorMessage || "";
+            });
+        GM_notification(message, "greasemonkey-dependency-download-failed",
+            notificationOptions);
         if (aCallback) {
-          aCallback(new Error(
-              "Could not download dependencies: "
-              + (remoteScript.errorMessage || "")));
+          aCallback(new Error(message));
         }
         return undefined;
       }

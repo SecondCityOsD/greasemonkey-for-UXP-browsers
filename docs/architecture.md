@@ -498,8 +498,19 @@ Basilisk built-in Scratchpad**, via `content/scratchpadOverlay.{js,xul}`
 which hides the Run/Inspect/Eval menu items on user-script files (so the
 editor isn't a code-execution trap).
 
+The overlay also routes Scratchpad's saves through `modules/editorSave.js`.
+A new script opens as a draft (its template in a per-draft folder under
+`<TmpD>/gm-temp-new-scripts/`, not installed); its first good save installs
+it and the window carries on with the installed file.  A save that would
+give a script another installed script's `@name` + `@namespace` (or a draft
+that doesn't parse) is refused with an alert and the window stays open,
+unsaved.  A saved edit is read at once (`updateModifiedScripts`).
+
 `extensions.greasemonkey.editor` can be set to any external executable;
-`util/setEditor.js` provides the file picker.
+`util/setEditor.js` provides the file picker.  An external editor writes
+the file itself, so a new script is installed from its template first, and
+`Script.updateFromNewScript` handles a clashing name after the save (keeps
+the old name and switches the script off).
 
 ### 6.7 Backup / restore
 

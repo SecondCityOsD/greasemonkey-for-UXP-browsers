@@ -1,19 +1,11 @@
+// Scratchpad as Greasemonkey's built-in script editor.  Scratchpad's own
+// scratchpad.js defines Cc / Ci / Cu and Services in this window.
 window.addEventListener("load", function () {
-  if (typeof Cc === "undefined") {
-    let Cc = Components.classes;
-  }
-  if (typeof Ci === "undefined") {
-    let Ci = Components.interfaces;
-  }
-  if (typeof Cu === "undefined") {
-    let Cu = Components.utils;
-  }
-
   Cu.import("chrome://greasemonkey-modules/content/constants.js");
 
 
   const FILE_SCRIPT_EXTENSION_REGEXP = new RegExp(
-      GM_CONSTANTS.fileScriptExtensionRegexp + "$", ""); 
+      GM_CONSTANTS.fileScriptExtensionRegexp + "$", "");
 
   let args = window.arguments;
   if (!args) {
@@ -34,7 +26,14 @@ window.addEventListener("load", function () {
     return undefined;
   }
 
+  Cu.import("chrome://greasemonkey-modules/content/editorSave.js");
   Cu.import("chrome://greasemonkey-modules/content/util.js");
+
+  GM_guardScratchpadSaves(Scratchpad);
+  // A new script closed without saving leaves no draft behind.
+  window.addEventListener("unload", function () {
+    GM_editorSave.removeDraft(Scratchpad.filename);
+  }, false);
 
   // If we're opening a user script:
   // Put the cursor at the top.
@@ -178,3 +177,76 @@ window.addEventListener("load", function () {
     }
   }
 }, true);
+
+/**
+ * Routes Scratchpad's saves through GM_editorSave first.  Ctrl+S, the
+ * File menu's Save and the save offered on closing all call
+ * Scratchpad.saveFile, and Scratchpad keeps a window open when its save
+ * reports a failure.
+ *
+ * - A refused save (a duplicate @name and @namespace, or a draft that
+ *   doesn't parse) shows why and writes nothing.
+ * - A new script's draft is installed by its first good save; the editor
+ *   then edits the installed file.
+ * - An installed script's save is written, then read at once, instead of
+ *   at the next page load.
+ *
+ * @param {object} aScratchpad - This window's Scratchpad object.
+ * @returns {void}
+ */
+function GM_guardScratchpadSaves(aScratchpad) {
+  let scratchpadSave = aScratchpad.saveFile;
+  let installing = false;
+
+  function refuse(aMessage) {
+    Services.prompt.alert(window, GM_CONSTANTS.info.scriptHandler, aMessage);
+  }
+
+  aScratchpad.saveFile = function (aCallback) {
+    let done = function (aStatus) {
+      if (aCallback) {
+        aCallback(aStatus);
+      }
+    };
+    if (installing) {
+      // The previous save is still installing the draft.
+      done(Components.results.NS_ERROR_FAILURE);
+      return undefined;
+    }
+
+    let text = this.getText();
+    let result = GM_editorSave.check(this.filename, text);
+    if (result.problem) {
+      refuse(result.problem);
+      done(Components.results.NS_ERROR_FAILURE);
+      return undefined;
+    }
+
+    if (result.draft) {
+      installing = true;
+      let draftPath = this.filename;
+      GM_util.installScriptFromSource(text, (aErr, aScript) => {
+        installing = false;
+        if (aErr || !aScript) {
+          refuse(GM_editorSave.notSaved(
+              aErr ? (aErr.message || String(aErr)) : ""));
+          done(Components.results.NS_ERROR_FAILURE);
+          return undefined;
+        }
+        GM_editorSave.removeDraft(draftPath);
+        // Save again, now as the installed script's file: the text may
+        // have changed while its @require files downloaded.
+        this.setFilename(aScript.file.path);
+        this.saveFile(aCallback);
+      }, {"skipEditor": true});
+      return undefined;
+    }
+
+    scratchpadSave.call(this, function (aStatus) {
+      if (result.script && Components.isSuccessCode(aStatus)) {
+        GM_util.getService().config.updateModifiedScripts();
+      }
+      done(aStatus);
+    });
+  };
+}

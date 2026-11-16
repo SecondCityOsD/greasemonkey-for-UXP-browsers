@@ -18,6 +18,7 @@ if (typeof Cu === "undefined") {
   var Cu = Components.utils;
 }
 
+Cu.import("chrome://greasemonkey-modules/content/editorSave.js");
 Cu.import("chrome://greasemonkey-modules/content/parseScript.js");
 Cu.import("chrome://greasemonkey-modules/content/prefManager.js");
 Cu.import("chrome://greasemonkey-modules/content/util.js");
@@ -28,8 +29,9 @@ Cu.import("chrome://greasemonkey-modules/content/util.js");
  *
  * The script gets a unique placeholder name ("New User Script N", N from a
  * persisted counter) and a constant "Greasemonkey" namespace, pre-scoped to
- * the active tab's URL; then installScriptFromSource() installs it and opens
- * it in the configured editor (or Scratchpad).  The user renames it by
+ * the active tab's URL.  In Scratchpad it opens as a draft that its first
+ * save installs (GM_editorSave); with an external editor
+ * installScriptFromSource() installs it first.  The user renames it by
  * editing @name in the editor — safe, because the on-disk folder + uuid are
  * the stable identity and GM_setValue data is keyed by folder (not name), so
  * a later rename keeps stored values.
@@ -85,20 +87,25 @@ function createUserScript(aWin) {
   // classic dialog so the menu item still does something useful.
   try {
     let n = GM_prefRoot.getValue("newScript.counter", 0);
+    let name;
     let source;
     let guard = 0;
     do {
       n++;
       guard++;
-      source = buildSource("New User Script " + n, "Greasemonkey", include);
+      name = "New User Script " + n;
+      source = buildSource(name, "Greasemonkey", include);
     } while (config.installIsUpdate(parse(source)) && (guard < 1000));
     GM_prefRoot.setValue("newScript.counter", n);
 
-    // installScriptFromSource writes the file, runs the install pipeline,
-    // and opens the new script in the editor as its final step.
-    // Silent: an empty template isn't "installed successfully", and that
-    // message contradicted a duplicate-name warning on the first save
-    // (issue #25).
+    // The built-in editor gets a draft: nothing is installed until its
+    // first save, which is refused if the name is taken (issue #25).
+    if (GM_editorSave.openDraft(source, name)) {
+      return undefined;
+    }
+    // An external editor saves the file itself, so the template is
+    // installed now and opened in it.  Silent: an empty template isn't
+    // "installed successfully".
     GM_util.installScriptFromSource(source, null, {"silent": true});
   } catch (e) {
     Cu.reportError(

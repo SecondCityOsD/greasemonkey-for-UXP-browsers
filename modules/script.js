@@ -1735,8 +1735,9 @@ Script.prototype.updateFromNewScript = function (
       // metadata isn't applied.  The file's code would then run under this
       // script's old rules (issue #25: a new script pasted over with an
       // installed one's source), so it's switched off until a save with a
-      // unique name switches it back on.  Violentmonkey refuses such a
-      // save; an external editor has already written it.
+      // unique name switches it back on.  Scratchpad refuses such a save
+      // (editorSave.js); this catches the file an external editor or the
+      // user has already written.
       if (this._enabled) {
         this._disabledForConflict = true;
         this.enabled = false;
