@@ -1846,10 +1846,11 @@ Script.prototype.updateFromNewScript = function (
       this._dependencyDownload = null;
       if (!aSuccess) {
         // Nothing to wait for any more: the script runs again (with its
-        // old @require files), and as _dependhash is unchanged, the next
-        // edit tries the download again.  Left as it was, pendingExec
-        // kept the script off every page and grew with each page load.
-        this.pendingExec = [];
+        // old @require files), on the pages that waited too, and as
+        // _dependhash is unchanged, the next edit tries the download
+        // again.  Left as it was, pendingExec kept the script off every
+        // page and grew with each page load.
+        this._runPendingExec(false);
         this._changed("modified", this.id);
         let notificationOptions = {
           "persistence": -1,
@@ -1910,38 +1911,7 @@ Script.prototype.updateFromNewScript = function (
       // Install the downloaded files.
       rs.install(this, true);
 
-      // Inject the script in all windows that have been waiting.
-      var pendingExec;
-      var pendingExecAry = this.pendingExec;
-      this.pendingExec = [];
-      while ((pendingExec = pendingExecAry.shift())) {
-        if (pendingExec == PENDING_EXEC_DOCUMENT_START) {
-          GM_util.logError(
-              '"' + this.localized.name + '" - ID: ' + this.id
-              + "\n" + "...script update complete "
-              + "(will run at next document-start time).",
-              true);
-          continue;
-        }
-        if ((typeof pendingExec != "object") || !pendingExec.windowId) {
-          // A marker, or no page to run in.
-          continue;
-        }
-
-        let shouldRun = GM_util.scriptMatchesUrlAndRuns(
-            this, pendingExec.url, this.runAt);
-
-        if (shouldRun) {
-          // Direct in-process call into the chrome-side injector.
-          // IPCScript.scriptsForUrl + inject runs in the same JS realm
-          // as this caller because UXP is single-process.
-          injectDelayedScript(
-              new IPCScript(this, gGreasemonkeyVersion),
-              this.runAt,
-              pendingExec.windowId,
-              pendingExec.browser);
-        }
-      }
+      this._runPendingExec(true);
 
       // Part 2/2 (remoteScript.js - Part 1/2).
       // The fix update "aAddon._script.filename" (that != null) in:
@@ -1953,6 +1923,44 @@ Script.prototype.updateFromNewScript = function (
       this._changed("modified", this.id);
     }.bind(this));
   }
+};
+
+/**
+ * Runs the script in the pages that waited for a local edit's @require
+ * files (pendingExec, see updateFromNewScript) and empties the list.
+ *
+ * @param {boolean} aUpdated - Whether the new files were installed (else
+ *   the script runs with its old ones).
+ */
+Script.prototype._runPendingExec = function (aUpdated) {
+  let waiting = this.pendingExec;
+  this.pendingExec = [];
+  waiting.forEach(function (aEntry) {
+    if (aEntry == PENDING_EXEC_DOCUMENT_START) {
+      if (aUpdated) {
+        GM_util.logError(
+            '"' + this.localized.name + '" - ID: ' + this.id
+            + "\n" + "...script update complete "
+            + "(will run at next document-start time).",
+            true);
+      }
+      return undefined;
+    }
+    if ((typeof aEntry != "object") || !aEntry.windowId) {
+      // A marker, or no page to run in.
+      return undefined;
+    }
+    if (GM_util.scriptMatchesUrlAndRuns(this, aEntry.url, this.runAt)) {
+      // Direct in-process call into the chrome-side injector.
+      // IPCScript.scriptsForUrl + inject runs in the same JS realm
+      // as this caller because UXP is single-process.
+      injectDelayedScript(
+          new IPCScript(this, gGreasemonkeyVersion),
+          this.runAt,
+          aEntry.windowId,
+          aEntry.browser);
+    }
+  }, this);
 };
 
 /**
