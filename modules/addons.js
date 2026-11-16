@@ -270,37 +270,61 @@ Object.defineProperty(ScriptAddon.prototype, "applyBackgroundUpdates", {
     return this._script.checkRemoteUpdates;
   },
   "set": function ScriptAddon_setApplyBackgroundUpdates(aVal) {
-    let oldVal = this._script.checkRemoteUpdates;
-    let reenablingWhileEdited =
-        (oldVal == AddonManager.AUTOUPDATE_DISABLE)
-        && (aVal != AddonManager.AUTOUPDATE_DISABLE)
-        && (this._script._modifiedTime > this._script._installTime);
-    // If the user flips the radio from Off to On / Default while the
-    // script still has local edits, warn them that the next update will
-    // overwrite those edits.  Cancelling snaps the radio back to Off.
-    if (reenablingWhileEdited) {
-      let bundle = GM_CONSTANTS.localeStringBundle.createBundle(
-          GM_CONSTANTS.localeGmAddonsProperties);
-      let confirmed = Services.prompt.confirm(
-          null,
-          "Greasemonkey",
-          bundle.GetStringFromName("confirmEnableAutoUpdate"));
-      if (!confirmed) {
-        // No mutation — but fire onPropertyChanged so the AOM re-reads the
-        // getter and the radio visually reverts to the old value.
-        AddonManagerPrivate.callAddonListeners(
-            "onPropertyChanged", this, ["applyBackgroundUpdates"]);
-        return;
-      }
-    }
-    this._script.checkRemoteUpdates = aVal;
-    this._script._changed("modified", null);
-    AddonManagerPrivate.callAddonListeners(
-        "onPropertyChanged", this, ["applyBackgroundUpdates"]);
+    this.setAutoUpdate(aVal, false);
   },
   "configurable": true,
   "enumerable": true,
 });
+
+/**
+ * @param {number} aVal - The AddonManager.AUTOUPDATE_* value to switch to.
+ * @returns {boolean} Whether it switches Automatic Updates from Off back
+ *   on while the script has local edits, which the next update would
+ *   overwrite.
+ */
+ScriptAddon.prototype.autoUpdateOverwritesEdits = function (aVal) {
+  return (this._script.checkRemoteUpdates == AddonManager.AUTOUPDATE_DISABLE)
+      && (aVal != AddonManager.AUTOUPDATE_DISABLE)
+      && (this._script._modifiedTime > this._script._installTime);
+};
+
+/**
+ * Asks before autoUpdateOverwritesEdits(aVal).  Shared by the Add-ons
+ * Manager's radio and the Options window's.
+ *
+ * @param {number} aVal - The AddonManager.AUTOUPDATE_* value to switch to.
+ * @returns {boolean} true when nothing needs asking or the user agreed.
+ */
+ScriptAddon.prototype.confirmAutoUpdate = function (aVal) {
+  if (!this.autoUpdateOverwritesEdits(aVal)) {
+    return true;
+  }
+  let bundle = GM_CONSTANTS.localeStringBundle.createBundle(
+      GM_CONSTANTS.localeGmAddonsProperties);
+  return Services.prompt.confirm(null, "Greasemonkey",
+      bundle.GetStringFromName("confirmEnableAutoUpdate"));
+};
+
+/**
+ * Sets the script's Automatic Updates and tells the Add-ons Manager, after
+ * confirmAutoUpdate() unless the caller already asked.  When the user says
+ * no, the AOM still re-reads the value, so its radio goes back.
+ *
+ * @param {number}  aVal       - An AddonManager.AUTOUPDATE_* value.
+ * @param {boolean} aConfirmed - The user already agreed to this change.
+ * @returns {boolean} Whether the value was set.
+ */
+ScriptAddon.prototype.setAutoUpdate = function (aVal, aConfirmed) {
+  let set = aConfirmed || this.confirmAutoUpdate(aVal);
+  if (set) {
+    this._script.checkRemoteUpdates = aVal;
+    this._script._changed("modified", null);
+  }
+  AddonManagerPrivate.callAddonListeners(
+      "onPropertyChanged", this, ["applyBackgroundUpdates"]);
+
+  return set;
+};
 
 Object.defineProperty(ScriptAddon.prototype, "executionIndex", {
   "get": function ScriptAddon_getExecutionIndex() {

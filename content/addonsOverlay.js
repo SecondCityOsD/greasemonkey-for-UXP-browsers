@@ -98,12 +98,13 @@ var observer = {
     };
     let _eventsAlsoDetail = [
       events["edit-enabled"],
+      events["modified"],
     ];
     let type = 0;
     if (isScriptView()) {
       type = 1;
     }
-    if (isScriptDetailView() && _eventsAlsoDetail.includes(aEvent)) {
+    if (isScriptDetailView(aScript) && _eventsAlsoDetail.includes(aEvent)) {
       type = 2;
     }
     if (type == 0) {
@@ -141,10 +142,12 @@ var observer = {
           // Ignore this case.
           break;
         }
-        item.userDisabled = !aData;
-
         if (type == 2) {
+          // The same add-on (isScriptDetailView), so this only refreshes
+          // the pane.
           item._updateView(addon, !addon.isCompatible);
+        } else {
+          item.userDisabled = !aData;
         }
         callback.call(item);
 
@@ -186,6 +189,17 @@ var observer = {
         break;
       case events["modified"]:
         if (!aData) {
+          // Settings changed elsewhere: the Options window's OK, or a
+          // local edit that switched Automatic Updates off.  The detail
+          // pane re-reads its Automatic Updates radio.
+          if (type == 2) {
+            gDetailView.onPropertyChanged(["applyBackgroundUpdates"]);
+          }
+          break;
+        }
+        if (type == 2) {
+          // A new id (renamed in an edit or update): the list replaces
+          // the row; the detail pane stays as it is.
           break;
         }
         var oldAddon = ScriptAddonFactoryByScript({
@@ -239,9 +253,15 @@ function isScriptView() {
   return gViewController.currentViewId == GM_CONSTANTS.scriptViewID;
 }
 
-function isScriptDetailView() {
-  // return SCRIPT_DETAIL_VIEW_REGEXP.test(gViewController.currentViewId);
-  return gDetailView._addon !== null;
+/**
+ * @param {Script} aScript - A script an event is about.
+ * @returns {boolean} Whether the detail pane shows that script.  It shows
+ *   one add-on at a time, and updating it for another script switched the
+ *   pane to that one (its buttons then acted on it).
+ */
+function isScriptDetailView(aScript) {
+  return !!gDetailView._addon && !!aScript
+      && (gDetailView._addon.id == aScript.id + GM_CONSTANTS.scriptIDSuffix);
 }
 
 function addonExecutesRichlistitem(aAddon) {
@@ -683,24 +703,26 @@ function onPopupShowing(aEvent) {
 
   // Flip the first context-menu item between Enable and Disable based on
   // the right-clicked script's state, pointing it at the matching AOM
-  // command.  Best-effort: if the selected addon can't be read, the item
-  // keeps its default (Disable) and the AOM command's own isEnabled guard
-  // still applies.
-  try {
-    let toggle = document.getElementById("gm-context-toggle");
-    let list = document.getElementById("addon-list");
-    let item = list ? list.selectedItem : null;
-    let addon = item ? item.mAddon : null;
-    if (toggle && addon) {
-      let disabled = addon.userDisabled;
-      toggle.setAttribute("label",
-          toggle.getAttribute(disabled ? "enablelabel" : "disablelabel"));
-      toggle.setAttribute("command",
-          disabled ? "cmd_enableItem" : "cmd_disableItem");
-    }
-  } catch (e) {
-    // Non-fatal — leave the default label/command.
+  // command.  The add-on comes from the current view, as the Add-ons
+  // Manager's own menu takes it: the list, search results or the detail
+  // pane (addon-list's selection is stale outside the list).  With none,
+  // the item goes back to its default (Disable), and the AOM command's own
+  // isEnabled guard still applies.
+  let toggle = document.getElementById("gm-context-toggle");
+  if (!toggle) {
+    return undefined;
   }
+  let addon = null;
+  try {
+    addon = gViewController.currentViewObj.getSelectedAddon();
+  } catch (e) {
+    // No view yet.
+  }
+  let disabled = !!addon && !!addon.userDisabled;
+  toggle.setAttribute("label",
+      toggle.getAttribute(disabled ? "enablelabel" : "disablelabel"));
+  toggle.setAttribute("command",
+      disabled ? "cmd_enableItem" : "cmd_disableItem");
 };
 
 function setEmptyWarningVisible() {

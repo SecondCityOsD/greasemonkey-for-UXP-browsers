@@ -44,6 +44,10 @@ Cu.import("chrome://greasemonkey-modules/content/constants.js");
 // AddonManager constants for the Auto-update radio mapping.
 Cu.import("resource://gre/modules/AddonManager.jsm");
 
+// The script's add-on: Automatic Updates are set through it, so the
+// Add-ons Manager hears about the change.
+Cu.import("chrome://greasemonkey-modules/content/addons.js");
+
 // Storage back-end for the Values tab.
 Cu.import("chrome://greasemonkey-modules/content/storageBack.js");
 
@@ -65,9 +69,19 @@ var gScript = GM_util.getService().config.getMatchingScripts(
       return aScript && (aScript.id == gScriptId);
     })[0];
 
-/** Initial position (0-based) at dialog open; used to compute the
- *  reorder delta on OK without doing redundant work when unchanged. */
+/** The position (0-based) the dropdown shows as the script's own.  OK
+ *  moves the script only when the user picked another one. */
 var gInitialPosition = -1;
+
+/** The Automatic Updates value (AddonManager.AUTOUPDATE_*) the radio shows
+ *  as the script's own.  OK writes the radio only when the user changed
+ *  it: a local edit can switch updates off while this window is open, and
+ *  writing the untouched radio back used to switch them on again. */
+var gShownAutoUpdate = null;
+
+/** The value the user agreed to switch updates back on to, in the prompt
+ *  for a script with local edits, so OK doesn't ask a second time. */
+var gConfirmedAutoUpdate = null;
 
 /** True once the Values tab could read the script's values; Add / Edit /
  *  Delete need it. */
@@ -91,15 +105,34 @@ function valuesStorage() {
 var gValuesData = [];
 
 /**
- * Closes the window once its script is uninstalled, which is also how an
- * update or a reinstall replaces it: the new version is a new Script
- * object, so everything shown here would be stale, and OK would save into
- * a script that is no longer installed.
+ * Keeps the window in step with changes made elsewhere while it is open
+ * (about:addons, the toolbar menu, a local edit, Sync).  It watches every
+ * script, because moving or installing another one changes this one's
+ * position.
+ *
+ * Its script uninstalled closes the window, which is also how an update
+ * or a reinstall replaces it: the new version is a new Script object, so
+ * everything shown here would be stale, and OK would save into a script
+ * that is no longer installed.
  */
 var gScriptObserver = {
   "notifyEvent": function (aScript, aEvent, aData) {
-    if (aEvent == "uninstall") {
-      window.close();
+    if (aScript === gScript) {
+      switch (aEvent) {
+        case "uninstall":
+          window.close();
+          return undefined;
+        case "edit-enabled":
+          syncToggleEnabledButton();
+          break;
+        case "modified":
+          refreshAutoUpdateRadio();
+          break;
+      }
+    }
+    if ((aEvent == "move") || (aEvent == "install")
+        || (aEvent == "uninstall")) {
+      refreshPositionDropdown();
     }
   },
 };
@@ -135,7 +168,7 @@ window.addEventListener("load", function () {
   syncToggleEnabledButton();
   installReadonlyListTooltips();
   installScrollBubbling();
-  GM_util.getService().config.addObserver(gScriptObserver, gScript);
+  GM_util.getService().config.addObserver(gScriptObserver);
 
   // ── 3.7.0 feedback #4: every script opens at the same size ───────
   // Restore the user's last-chosen size from a GLOBAL pref, NOT from
@@ -177,7 +210,7 @@ window.addEventListener("unload", function () {
 }, false);
 
 window.addEventListener("unload", function () {
-  GM_util.getService().config.removeObserver(gScriptObserver, gScript);
+  GM_util.getService().config.removeObserver(gScriptObserver);
 }, false);
 
 
@@ -459,13 +492,8 @@ function populateBehaviourSection() {
   // Auto-update — Script.checkRemoteUpdates is one of
   // AddonManager.AUTOUPDATE_DEFAULT | _ENABLE | _DISABLE.
   let autoRadio = document.getElementById("behave-autoupdate");
-  let autoVal;
-  switch (gScript.checkRemoteUpdates) {
-    case AddonManager.AUTOUPDATE_ENABLE:  autoVal = "enable";  break;
-    case AddonManager.AUTOUPDATE_DISABLE: autoVal = "disable"; break;
-    default:                              autoVal = "default"; break;
-  }
-  autoRadio.value = autoVal;
+  autoRadio.value = autoUpdateRadioValue(gScript.checkRemoteUpdates);
+  gShownAutoUpdate = autoUpdateFromRadio(autoRadio.value);
 
   // A script that can never update has nothing to choose here: say why
   // instead, as the Add-ons Manager hides its own Automatic Updates control
@@ -491,38 +519,66 @@ function populateBehaviourSection() {
 }
 
 /**
+ * @param {number} aAutoUpdate - An AddonManager.AUTOUPDATE_* value.
+ * @returns {string} The Automatic Updates radio's value for it.
+ */
+function autoUpdateRadioValue(aAutoUpdate) {
+  switch (aAutoUpdate) {
+    case AddonManager.AUTOUPDATE_ENABLE:  return "enable";
+    case AddonManager.AUTOUPDATE_DISABLE: return "disable";
+    default:                              return "default";
+  }
+}
+
+/**
+ * @param {string} aValue - The Automatic Updates radio's value.
+ * @returns {number} The AddonManager.AUTOUPDATE_* value it stands for.
+ */
+function autoUpdateFromRadio(aValue) {
+  switch (aValue) {
+    case "enable":  return AddonManager.AUTOUPDATE_ENABLE;
+    case "disable": return AddonManager.AUTOUPDATE_DISABLE;
+    default:        return AddonManager.AUTOUPDATE_DEFAULT;
+  }
+}
+
+/**
+ * Shows the script's current Automatic Updates when they change elsewhere
+ * (a local edit switches them off; about:addons), unless the user has
+ * already picked another value here.
+ */
+function refreshAutoUpdateRadio() {
+  let autoRadio = document.getElementById("behave-autoupdate");
+  if (!autoRadio || (gShownAutoUpdate === null)
+      || (autoUpdateFromRadio(autoRadio.value) !== gShownAutoUpdate)) {
+    return undefined;
+  }
+  autoRadio.value = autoUpdateRadioValue(gScript.checkRemoteUpdates);
+  gShownAutoUpdate = autoUpdateFromRadio(autoRadio.value);
+}
+
+/**
  * Fires the moment the Automatic-updates radio changes.  If the user
  * flips it from Off to On / Default while the script still has local
  * edits, warn that the next update will overwrite those edits, and snap
- * the radio back to Off if they decline.  Mirrors the Add-ons Manager
- * radio (ScriptAddon.applyBackgroundUpdates in modules/addons.js); the OK
- * commit then just persists whatever the radio settled on.
+ * the radio back to Off if they decline, as the Add-ons Manager's radio
+ * does (ScriptAddon.confirmAutoUpdate in modules/addons.js).  OK doesn't
+ * ask again for the value agreed to here.
  */
 function onAutoUpdateChange() {
   let autoRadio = document.getElementById("behave-autoupdate");
   if (!autoRadio || !autoRadio.value) {
     return;
   }
-  let next;
-  switch (autoRadio.value) {
-    case "enable":  next = AddonManager.AUTOUPDATE_ENABLE;  break;
-    case "disable": next = AddonManager.AUTOUPDATE_DISABLE; break;
-    default:        next = AddonManager.AUTOUPDATE_DEFAULT; break;
-  }
-  let reenablingWhileEdited =
-      (gScript.checkRemoteUpdates == AddonManager.AUTOUPDATE_DISABLE)
-      && (next != AddonManager.AUTOUPDATE_DISABLE)
-      && (gScript._modifiedTime > gScript._installTime);
-  if (!reenablingWhileEdited) {
+  let next = autoUpdateFromRadio(autoRadio.value);
+  let addon = ScriptAddonFactoryByScript(gScript);
+  gConfirmedAutoUpdate = null;
+  if (!addon.autoUpdateOverwritesEdits(next)) {
     return;
   }
-  let bundle = GM_CONSTANTS.localeStringBundle.createBundle(
-      GM_CONSTANTS.localeGmAddonsProperties);
-  let confirmed = Services.prompt.confirm(
-      null,
-      "Greasemonkey",
-      bundle.GetStringFromName("confirmEnableAutoUpdate"));
-  if (!confirmed) {
+  if (addon.confirmAutoUpdate(next)) {
+    gConfirmedAutoUpdate = next;
+  } else {
     // Snap back to Off.  A programmatic .value assignment doesn't re-fire
     // oncommand, and even if it did, "disable" can't satisfy the
     // re-enabling condition above — so there's no recursion risk.
@@ -547,11 +603,24 @@ function selectMenuByValue(aMenuList, aValue) {
 }
 
 /**
+ * Rebuilds the position list when scripts are moved, installed or removed
+ * elsewhere, unless the user has already picked a position here (OK then
+ * moves the script there from wherever it is by then).
+ */
+function refreshPositionDropdown() {
+  let menu = document.getElementById("behave-position");
+  if (menu && menu.selectedItem && (parseInt(
+      menu.selectedItem.getAttribute("value"), 10) !== gInitialPosition)) {
+    return undefined;
+  }
+  populatePositionDropdown();
+}
+
+/**
  * Builds the execution-position menulist with "1 of N", "2 of N", …
  * entries and selects the position matching the script's current index
- * in config.scripts.  Stores the initial position in gInitialPosition
- * so onDialogAccept can compute a delta and call config.move() the
- * minimum number of times.
+ * in config.scripts.  Stores it in gInitialPosition, so OK moves the
+ * script only when the user picked another position.
  */
 function populatePositionDropdown() {
   let scripts = GM_util.getService().config.scripts || [];
@@ -913,15 +982,17 @@ function snapBackToPersistedSize() {
 /**
  * Writes the current outerWidth/outerHeight to the global GM_prefRoot
  * keys.  Used by both the debounced resize handler and the unload
- * handler.  Skips while the window is maximised (windowState == 2)
- * so we don't persist screen-size as the "preferred" size.
+ * handler.  Only in the normal window state: maximized or full screen is
+ * the screen's size, not a preferred one, and minimized has none.
  */
 function savePersistedSize() {
   try {
-    // STATE_MAXIMIZED == 2, STATE_FULLSCREEN == 4, STATE_MINIMIZED == 3.
-    // Only persist when in the normal (1) or unset (0) state.
-    let s = window.windowState;
-    if (s == 2 || s == 3 || s == 4) return;
+    // nsIDOMChromeWindow: STATE_MAXIMIZED 1, STATE_MINIMIZED 2,
+    // STATE_NORMAL 3, STATE_FULLSCREEN 4.  The old check had 1-3 mixed
+    // up, so it saved only when maximized.
+    if (window.windowState != (window.STATE_NORMAL || 3)) {
+      return;
+    }
   } catch (e) {}
   let w = Math.floor(window.outerWidth  || DEFAULT_WIN_W);
   let h = Math.floor(window.outerHeight || DEFAULT_WIN_H);
@@ -1039,46 +1110,41 @@ function onDialogAccept() {
     gScript.httpOnlyCookies = httpOnlyBox.checked;
   }
 
-  // Auto-update radio → checkRemoteUpdates int
+  // Automatic Updates: only a value the user picked here is written (see
+  // gShownAutoUpdate), through the add-on, which asks first when it would
+  // switch updates back on over local edits (unless the user already
+  // agreed to this value) and updates an open Add-ons Manager.
   let autoRadio = document.getElementById("behave-autoupdate");
   if (autoRadio && autoRadio.value) {
-    let next;
-    switch (autoRadio.value) {
-      case "enable":  next = AddonManager.AUTOUPDATE_ENABLE;  break;
-      case "disable": next = AddonManager.AUTOUPDATE_DISABLE; break;
-      default:        next = AddonManager.AUTOUPDATE_DEFAULT; break;
-    }
-    if (next !== gScript.checkRemoteUpdates) {
-      // The re-enable-while-edited disclaimer fires immediately when the
-      // radio is flipped (onAutoUpdateChange below), so by commit time the
-      // radio already reflects a confirmed choice — just persist it.
-      gScript.checkRemoteUpdates = next;
+    let next = autoUpdateFromRadio(autoRadio.value);
+    if ((next !== gShownAutoUpdate) && (next !== gScript.checkRemoteUpdates)) {
+      ScriptAddonFactoryByScript(gScript).setAutoUpdate(
+          next, next === gConfirmedAutoUpdate);
     }
   }
 
-  // Position — apply delta-by-delta via config.move() so the existing
-  // notification path runs.  No-op when unchanged.
+  // Position: config.move() takes an offset, so it is counted from where
+  // the script is now (another script may have moved meanwhile).
   let posMenu = document.getElementById("behave-position");
   if (posMenu && posMenu.selectedItem) {
     let target = parseInt(posMenu.selectedItem.getAttribute("value"), 10);
-    if (!isNaN(target) && target !== gInitialPosition) {
-      let delta = target - gInitialPosition;
-      let config = GM_util.getService().config;
-      if (config && typeof config.move == "function") {
-        try {
-          config.move(gScript, delta);
-        } catch (e) {
-          // Don't block the dialog close on an internal config error;
-          // the rest of the user's edits are still applied.
-          Services.console.logStringMessage(
-              "Greasemonkey scriptPrefs: position move failed: " + e);
-        }
+    let config = GM_util.getService().config;
+    let current = config.scripts.indexOf(gScript);
+    if (!isNaN(target) && (target !== gInitialPosition) && (current > -1)
+        && (target !== current)) {
+      try {
+        config.move(gScript, target - current);
+      } catch (e) {
+        // Don't block the dialog close on an internal config error;
+        // the rest of the user's edits are still applied.
+        Services.console.logStringMessage(
+            "Greasemonkey scriptPrefs: position move failed: " + e);
       }
     }
   }
 
-  // Notify any open Add-ons Manager so the row reflects new run-at,
-  // auto-update, and execution-position values without a restart.
+  // Saves config.xml and tells the content processes about the new
+  // settings (run at, frames, cludes).
   GM_util.getService().config._changed(gScript, "modified", null);
 
   return true;
