@@ -41,9 +41,29 @@ Cu.import("chrome://greasemonkey-modules/content/prefManager.js");
 Cu.import("chrome://greasemonkey-modules/content/util.js");
 
 
-/** Pre-compiled RegExp matching URLs that end with ".user.js". */
+/** Pre-compiled RegExp matching paths that end with ".user.js". */
 const FILE_SCRIPT_EXTENSION_REGEXP = new RegExp(
     GM_CONSTANTS.fileScriptExtensionRegexp + "$", "");
+
+/**
+ * Whether a navigation is to a user script: its path ends in ".user.js",
+ * whatever query or fragment follows (GitLab's "?inline=false", a "#v2").
+ * Tested on the whole address, as it was, those were shown as text instead
+ * of offered for install, and a search such as "?q=foo.user.js" was taken
+ * for a script.
+ *
+ * @param {nsIURI} aUri
+ * @returns {boolean}
+ */
+function isUserScriptUri(aUri) {
+  let path;
+  try {
+    path = aUri.QueryInterface(Ci.nsIURL).filePath;
+  } catch (e) {
+    path = aUri.spec.replace(/[?#].*$/, "");
+  }
+  return FILE_SCRIPT_EXTENSION_REGEXP.test(path);
+}
 
 /**
  * URL schemes that must never trigger a script install, even if the URL
@@ -150,7 +170,7 @@ function installObserver(aSubject, aTopic, aData) {
     // Ignore completely, e.g. file:// URIs.
   }
 
-  if (!FILE_SCRIPT_EXTENSION_REGEXP.test(channel.URI.spec)) {
+  if (!isUserScriptUri(channel.URI)) {
     return undefined;
   }
 

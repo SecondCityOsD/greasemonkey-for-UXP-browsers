@@ -150,7 +150,11 @@ function createScriptSource() {
     if (aOptional && !replaceVal) {
       removeMetaLine(aMetaName);
     } else {
-      source = source.replace(replaceKey, replaceVal);
+      // A function, so "$&", "$'" and the like in what was typed are taken
+      // literally (as text, they pulled parts of the template in).
+      source = source.replace(replaceKey, function () {
+        return replaceVal;
+      });
     }
     return true;
   }
@@ -167,7 +171,10 @@ function createScriptSource() {
     } else {
       let re2 = new RegExp("(.+)" + replaceKey);
       let match = source.match(re2);
-      source = source.replace(replaceKey, replaceVal.join("\n" + match[1]));
+      let lines = replaceVal.join("\n" + match[1]);
+      source = source.replace(replaceKey, function () {
+        return lines;
+      });
     }
   }
 

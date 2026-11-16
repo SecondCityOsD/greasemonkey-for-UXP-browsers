@@ -257,11 +257,13 @@ function parse(aSource, aUri, aFailWhenMissing) {
   var resourceNames = {};
   // Set when a @match line is ignored; see setDefaults().
   let ignoredMatch = false;
-  let _re = new RegExp("\\s+$", "");
   for (let i = 0, metaLine = ""; metaLine = meta[i]; i++) {
     var data;
     try {
-      data = GM_util.parseMetaLine(metaLine.replace(_re, ""));
+      // trimRight(), not replace(/\s+$/): that regex takes quadratic time
+      // on a long run of spaces with text after it (30,000 spaces: most of
+      // a second per line).
+      data = GM_util.parseMetaLine(metaLine.trimRight());
     } catch (e) {
       // Ignore invalid/unsupported meta lines.
       continue;

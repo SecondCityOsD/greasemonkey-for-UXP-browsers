@@ -139,12 +139,15 @@ var SvMeta = {
       if (/^\s*\/\/\s*==\/UserScript==/.test(lines[i])) {
         return found;
       }
-      let meta = /^\s*\/\/\s*@(\S+)(?:\s+(.*?))?\s*$/.exec(lines[i]);
+      // The value runs to the end of the line and is trimmed after: a lazy
+      // value followed by \s*$ took quadratic time on a long run of spaces
+      // inside it (30,000 spaces: most of a second).
+      let meta = /^\s*\/\/\s*@(\S+)(?:\s+(.*))?$/.exec(lines[i]);
       if (meta) {
         found.push({
           "keyword": meta[1].toLowerCase(),
           "line": i,
-          "value": meta[2] || "",
+          "value": (meta[2] || "").trimRight(),
         });
       }
     }
