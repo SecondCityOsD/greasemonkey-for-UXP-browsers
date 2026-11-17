@@ -277,6 +277,25 @@ function localDependencyCopies(aScript, aDir) {
 ////////////////////////// Private Download Listener ///////////////////////////
 
 /**
+ * The message for a failed download: aDetail, preceded for a fatal one
+ * (anything but an @icon) by the address it came from.
+ *
+ * @param {nsIURI}  aUri            - The address that failed.
+ * @param {string}  aDetail         - What went wrong, e.g. "Unknown error.".
+ * @param {boolean} aErrorsAreFatal - Whether the failure stops the install.
+ * @returns {string}
+ */
+function downloadFailedMessage(aUri, aDetail, aErrorsAreFatal) {
+  if (!aErrorsAreFatal) {
+    return aDetail;
+  }
+  return GM_CONSTANTS.localeStringBundle.createBundle(
+      GM_CONSTANTS.localeGreasemonkeyProperties)
+      .GetStringFromName("error.downloadingUrl")
+      + "\n" + aUri.spec + "\n\n" + aDetail;
+}
+
+/**
  * XPCOM stream listener that writes an HTTP (or file) download to disk.
  *
  * Implements nsIStreamListener, nsIProgressEventSink, and nsIInterfaceRequestor
@@ -463,11 +482,9 @@ DownloadListener.prototype = {
       // whether it worked.
     }
 
-    if (error && this._errorsAreFatal) {
-      errorMessage = GM_CONSTANTS.localeStringBundle.createBundle(
-          GM_CONSTANTS.localeGreasemonkeyProperties)
-          .GetStringFromName("error.downloadingUrl")
-          + "\n" + this._uri.spec + "\n\n" + errorMessage;
+    if (error) {
+      errorMessage = downloadFailedMessage(
+          this._uri, errorMessage, this._errorsAreFatal);
     }
 
     this._progressCallback(aRequest, 1);
@@ -1430,6 +1447,78 @@ RemoteScript.prototype._downloadFile = function (
     }
   }
 
+  let channel = null;
+  let dsl = null;
+  try {
+    channel = this._newDownloadChannel(aUri);
+    this._channels.push(channel);
+    dsl = new DownloadListener(
+        aProgressSlot == 0, // aTryToParse.
+        this._downloadFileProgress.bind(this, aProgressSlot),
+        aCompletionCallback,
+        aFile,
+        aUri,
+        this,
+        aErrorsAreFatal);
+    channel.notificationCallbacks = dsl;
+    channel.asyncOpen(dsl, this);
+  } catch (e) {
+    this._downloadNotStarted(e, aUri, channel, dsl, aCompletionCallback,
+        aErrorsAreFatal, aProgressSlot);
+  }
+};
+
+/**
+ * Reports a download that couldn't even start: asyncOpen refuses a blocked
+ * port (e.g. :1 or :25) at once, a scheme may have no handler, the temp
+ * file may not open.  Nothing would ever call back, so the install, the
+ * editor's save or Recover Orphans waiting on it hung.  It now fails like
+ * any other download, after _downloadFile returns, with the reason in the
+ * Browser Console.
+ *
+ * @param {Error}             aError              - What was thrown.
+ * @param {nsIURI}            aUri                - The address.
+ * @param {?nsIChannel}       aChannel            - The channel, if made.
+ * @param {?DownloadListener} aListener           - The listener, if made.
+ * @param {function}          aCompletionCallback - As for _downloadFile.
+ * @param {boolean}           aErrorsAreFatal     - As for _downloadFile.
+ * @param {number}            aProgressSlot       - As for _downloadFile.
+ */
+RemoteScript.prototype._downloadNotStarted = function (
+    aError, aUri, aChannel, aListener, aCompletionCallback, aErrorsAreFatal,
+    aProgressSlot) {
+  GM_util.logError("RemoteScript: couldn't start downloading "
+      + aUri.spec + ": " + aError, false);
+  if (aListener) {
+    // Closing the binary stream closes the file stream under it.
+    try {
+      aListener._binOutputStream.close();
+    } catch (e) {
+      // Already closed.
+    }
+  }
+  let index = this._channels.indexOf(aChannel);
+  if (index > -1) {
+    this._channels.splice(index, 1);
+  }
+  let message = downloadFailedMessage(aUri,
+      GM_CONSTANTS.localeStringBundle.createBundle(
+          GM_CONSTANTS.localeGreasemonkeyProperties)
+          .GetStringFromName("error.unknown"),
+      aErrorsAreFatal);
+  GM_util.timeout(function () {
+    this._downloadFileProgress(aProgressSlot, aChannel, 1);
+    aCompletionCallback(aChannel, false, message, -1, {});
+  }.bind(this), 0);
+};
+
+/**
+ * Makes _downloadFile's channel.
+ *
+ * @param {nsIURI} aUri - The address to download.
+ * @returns {nsIChannel}
+ */
+RemoteScript.prototype._newDownloadChannel = function (aUri) {
   // Construct a channel with a policy type
   // that the HTTP observer is designed to ignore,
   // so it won't intercept this network call.
@@ -1467,17 +1556,8 @@ RemoteScript.prototype._downloadFile = function (
   if (privateMode && (channel instanceof Ci.nsIPrivateBrowsingChannel)) {
     channel.QueryInterface(Ci.nsIPrivateBrowsingChannel).setPrivate(true);
   }
-  this._channels.push(channel);
-  let dsl = new DownloadListener(
-      aProgressSlot == 0, // aTryToParse.
-      this._downloadFileProgress.bind(this, aProgressSlot),
-      aCompletionCallback,
-      aFile,
-      aUri,
-      this,
-      aErrorsAreFatal);
-  channel.notificationCallbacks = dsl;
-  channel.asyncOpen(dsl, this);
+
+  return channel;
 };
 
 /**
