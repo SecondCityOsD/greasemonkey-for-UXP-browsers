@@ -142,15 +142,26 @@ const GM_API_MAPPING = (function () {
  * rejects with the onerror / ontimeout / onabort one; the script's own
  * callbacks still run, and the Promise carries .abort().
  *
- * Injected into the sandbox by source (see MenuCommandSandbox), never run
- * in chrome: the callbacks it hands the request then belong to the script,
- * so the request's same-principal check accepts them, and the Promise is
- * the script's own.  It must not use anything outside its own body.
+ * Injected into the sandbox by source, never run in chrome: the callbacks
+ * it hands the request then belong to the script, so the request's
+ * same-principal check accepts them, and the Promise is the script's own.
+ * It must not use anything outside its own body.
  *
- * @param {object}   aGM      - The sandbox's GM object.
- * @param {string}   aName    - The GM.* name to define ("xmlHttpRequest").
- * @param {function} aRequest - The sandbox's GM_* function.
+ * IMPORTANT: held as a template-literal string, NOT a function, like
+ * MenuCommandSandbox (menuCommand.js; issue #13).  UXP compiles a module as
+ * Latin-1 but reads its source back as UTF-8 for Function.prototype.
+ * toString(), so a function's text comes out shifted by the extra bytes of
+ * any non-ASCII character above it.  As a function, this came out starting
+ * mid-body, didn't compile, and every script granting GM.xmlHttpRequest or
+ * GM.download stopped (found on device, 3.10).  Keep the text ASCII, with
+ * no backslash, backtick or "${": it is a template literal.
+ *
+ * Arguments of the function it defines:
+ *   aGM      - The sandbox's GM object.
+ *   aName    - The GM.* name to define ("xmlHttpRequest").
+ *   aRequest - The sandbox's GM_* function.
  */
+var GMRequestPromiseSandbox = `
 function GMRequestPromiseSandbox(aGM, aName, aRequest) {
   let assign = Object.assign;
   let SandboxPromise = Promise;
@@ -191,6 +202,7 @@ function GMRequestPromiseSandbox(aGM, aName, aRequest) {
     return promise;
   };
 }
+`;
 
 /**
  * Creates and returns the JavaScript sandbox for a userscript.
@@ -506,11 +518,9 @@ function createSandbox(aContentWin, aUrl, aScript, aRunAt) {
     // listener hit "XrayWrapper denied access to property N (reason:
     // value is callable)" and menu clicks silently did nothing).
     //
-    // Concatenating the function with "" coerces it via toString(), which
-    // is the standard ES method and is NOT affected by the Pale Moon
-    // Function.prototype.toSource() decompiler bug that caused the
-    // original "MenuCommandSandbox.toSource() crash" we set out to fix
-    // in the first place.  Best of both worlds.
+    // MenuCommandSandbox is the function's source held as a string (see
+    // menuCommand.js): a module function's own toString() can't be trusted
+    // in UXP, as GMRequestPromiseSandbox above explains.
     Cu.evalInSandbox(
         "this._MenuCommandSandbox = " + MenuCommandSandbox, sandbox);
     sandbox._MenuCommandSandbox(
@@ -906,7 +916,7 @@ function runScriptInSandbox(aSandbox, aScript) {
 
         if (REQUEST_PROMISE_GM_APIS.has(legacyName)) {
           if (!defineRequestPromise) {
-            // toString, not toSource: see MenuCommandSandbox in createSandbox.
+            // The source is a string: see GMRequestPromiseSandbox.
             defineRequestPromise = Cu.evalInSandbox(
                 "(" + GMRequestPromiseSandbox + ")", aSandbox);
           }
@@ -1001,10 +1011,12 @@ function runScriptInSandbox(aSandbox, aScript) {
             JAVASCRIPT_VERSION_MAX, aScript.fileURL, 1);
       }
     } catch (e) {
+      // The error itself goes along: the message alone ("async functions
+      // are probably not available") hid what actually went wrong.
       GM_util.logError(
           GM_CONSTANTS.localeStringBundle.createBundle(
               GM_CONSTANTS.localeGreasemonkeyProperties)
-              .GetStringFromName("error.api.object.polyfill"),
+              .GetStringFromName("error.api.object.polyfill") + "\n" + e,
           false, e.fileName || aScript.fileURL, e.lineNumber || 0);
       return false;
     }
