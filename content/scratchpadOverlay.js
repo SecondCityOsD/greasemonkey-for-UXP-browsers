@@ -1,5 +1,6 @@
 // Scratchpad as Greasemonkey's built-in script editor.  Scratchpad's own
-// scratchpad.js defines Cc / Ci / Cu and Services in this window.
+// scratchpad.js defines Cc / Ci / Cu in this window, but not Services:
+// that is imported below with the other modules.
 window.addEventListener("load", function () {
   Cu.import("chrome://greasemonkey-modules/content/constants.js");
 
@@ -25,6 +26,8 @@ window.addEventListener("load", function () {
   if (!FILE_SCRIPT_EXTENSION_REGEXP.test(args.filename)) {
     return undefined;
   }
+
+  Cu.import("resource://gre/modules/Services.jsm");
 
   Cu.import("chrome://greasemonkey-modules/content/editorSave.js");
   Cu.import("chrome://greasemonkey-modules/content/util.js");
