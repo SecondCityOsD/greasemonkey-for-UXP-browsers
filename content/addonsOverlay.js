@@ -144,8 +144,10 @@ var observer = {
         }
         if (type == 2) {
           // The same add-on (isScriptDetailView), so this only refreshes
-          // the pane.
-          item._updateView(addon, !addon.isCompatible);
+          // the pane.  An installed add-on is never "remote" (the second
+          // argument), as in the platform's own calls: true hid the
+          // Automatic Updates row of an edited script once it was toggled.
+          item._updateView(addon, false);
         } else {
           item.userDisabled = !aData;
         }
