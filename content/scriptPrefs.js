@@ -691,19 +691,123 @@ function populatePermissionsSection() {
   setMultilineDesc("perms-connects",     connects.join(", "));
   setMultilineDesc("perms-antifeatures", antifeatures.join(", "));
 
-  // @require list: each entry is a ScriptRequire with downloadURL.
-  let reqUrls = (gScript.requires || []).map(function (r) {
-    return r && r.downloadURL ? r.downloadURL : "";
-  }).filter(function (s) { return !!s; });
-  setMultilineDesc("perms-requires", reqUrls.join("\n"));
+  // @require: a ScriptRequire per line; @resource: name and address.
+  fillDependencyRows("perms-requires", (gScript.requires || []).map(
+      function (r) {
+        return (r && r.downloadURL) ? { "address": r.downloadURL } : null;
+      }));
+  fillDependencyRows("perms-resources", (gScript.resources || []).map(
+      function (r) {
+        if (!r || !(r.name || r.downloadURL)) return null;
+        return { "name": r.name || "", "address": r.downloadURL || "" };
+      }));
+}
 
-  // @resource list: each entry is a ScriptResource with name + downloadURL.
-  let resLines = (gScript.resources || []).map(function (r) {
-    if (!r) return "";
-    if (r.name && r.downloadURL) return r.name + "  →  " + r.downloadURL;
-    return r.name || r.downloadURL || "";
-  }).filter(function (s) { return !!s; });
-  setMultilineDesc("perms-resources", resLines.join("\n"));
+/** A pinned hash in a dependency address's #fragment (Tampermonkey's set). */
+const PINNED_HASH_REGEXP = /^(md5|sha1|sha256|sha384|sha512)[=:\-]\S+$/i;
+
+/**
+ * Splits a dependency address into what the row shows and its pinned
+ * hashes ("…/lib.js#sha256-…", "#sha256=…,sha512=…").  Only a fragment
+ * made of hashes alone is taken off; any other fragment stays in the
+ * address.
+ *
+ * @param {string} aAddress - A @require / @resource address, as written.
+ * @returns {{address: string, hashes: string[]}}
+ */
+function splitPinnedHashes(aAddress) {
+  let at = aAddress.indexOf("#");
+  if (at < 0) {
+    return { "address": aAddress, "hashes": [] };
+  }
+  let fragment = aAddress.slice(at + 1);
+  try {
+    // A space-separated list arrives as "%20".
+    fragment = decodeURIComponent(fragment);
+  } catch (e) {
+    // A stray "%": read the fragment as it is.
+  }
+  let hashes = fragment.split(/[,;\s]+/).filter(function (aPart) {
+    return aPart != "";
+  });
+  if (!hashes.length || !hashes.every(function (aPart) {
+    return PINNED_HASH_REGEXP.test(aPart);
+  })) {
+    return { "address": aAddress, "hashes": [] };
+  }
+  return { "address": aAddress.slice(0, at), "hashes": hashes };
+}
+
+/**
+ * Fills a Permissions row with one line per dependency.  A pinned hash
+ * would crowd the line, so it stays hidden behind a small "SHA" link after
+ * the address, which shows it (and hides it again) on the line below.
+ *
+ * @param {string} aId - The row's <vbox>.
+ * @param {Array<?{name: (string|undefined), address: string}>} aEntries
+ *   One per dependency; null entries are skipped.
+ */
+function fillDependencyRows(aId, aEntries) {
+  let box = document.getElementById(aId);
+  if (!box) {
+    return undefined;
+  }
+  while (box.firstChild) {
+    box.removeChild(box.firstChild);
+  }
+  let entries = aEntries.filter(function (aEntry) {
+    return !!aEntry;
+  });
+  if (!entries.length) {
+    // An empty value shows "—" (scriptPrefs.css).
+    box.appendChild(permsValue(""));
+    return undefined;
+  }
+  entries.forEach(function (aEntry) {
+    let split = splitPinnedHashes(aEntry.address);
+    let line = document.createElement("hbox");
+    line.setAttribute("align", "start");
+    let value = permsValue((aEntry.name && split.address)
+        ? aEntry.name + "  →  " + split.address
+        : (aEntry.name || split.address));
+    value.setAttribute("flex", "1");
+    line.appendChild(value);
+    box.appendChild(line);
+    if (!split.hashes.length) {
+      return undefined;
+    }
+    let hash = permsValue(split.hashes.join("\n"));
+    hash.classList.add("prefs-sha-value");
+    hash.hidden = true;
+    let toggle = document.createElement("label");
+    toggle.className = "text-link prefs-sha-toggle";
+    toggle.setAttribute("value",
+        localizedString("scriptPrefs.sha.label", "SHA"));
+    toggle.setAttribute("tooltiptext", localizedString(
+        "scriptPrefs.sha.tooltip",
+        "The hash this file is pinned to.  Click to show or hide it."));
+    toggle.addEventListener("click", function () {
+      hash.hidden = !hash.hidden;
+    }, false);
+    line.appendChild(toggle);
+    box.appendChild(hash);
+    return undefined;
+  });
+  return undefined;
+}
+
+/**
+ * @param {string} aText
+ * @returns {Element} A selectable Permissions value with the Copy menu.
+ */
+function permsValue(aText) {
+  let el = document.createElement("description");
+  el.className = "prefs-meta-value";
+  el.setAttribute("context", "meta-context-menu");
+  if (aText) {
+    el.appendChild(document.createTextNode(aText));
+  }
+  return el;
 }
 
 function setMultilineDesc(aId, aText) {

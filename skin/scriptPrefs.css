@@ -205,6 +205,30 @@ cludes {
 #grp-permissions description.prefs-meta-value:empty::before {
   content: "—";
 }
+/* @require / @resource lines (scriptPrefs.js fillDependencyRows): the same
+   1px trick as .prefs-meta-value keeps a long address inside the column,
+   and it may break anywhere rather than spill out. */
+.prefs-deps {
+  min-width: 1px;
+}
+.prefs-deps description.prefs-meta-value {
+  word-wrap: break-word;
+}
+/* The "SHA" link after an address with a pinned hash, and the hash it
+   shows on the line below. */
+.prefs-sha-toggle {
+  margin: 1px 0;
+  -moz-margin-start: 8px;
+  font-size: 0.9em;
+}
+.prefs-sha-toggle:hover {
+  text-decoration: underline;
+}
+.prefs-deps description.prefs-sha-value {
+  -moz-margin-start: 12px;
+  word-break: break-all;
+  opacity: 0.8;
+}
 
 /* ─── Values tab ──────────────────────────────────────────────────────── */
 

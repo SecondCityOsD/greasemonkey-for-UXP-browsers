@@ -322,13 +322,11 @@
               </row>
               <row align="start">
                 <label class="prefs-meta-key" value="&scriptPrefs.label.requires;"/>
-                <description id="perms-requires" class="prefs-meta-value"
-                  flex="1"/>
+                <vbox id="perms-requires" class="prefs-deps" flex="1"/>
               </row>
               <row align="start">
                 <label class="prefs-meta-key" value="&scriptPrefs.label.resources;"/>
-                <description id="perms-resources" class="prefs-meta-value"
-                  flex="1"/>
+                <vbox id="perms-resources" class="prefs-deps" flex="1"/>
               </row>
               <row align="start">
                 <label class="prefs-meta-key" value="&scriptPrefs.label.antifeatures;"/>
