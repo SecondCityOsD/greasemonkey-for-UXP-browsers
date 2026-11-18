@@ -289,10 +289,25 @@ function downloadFailedMessage(aUri, aDetail, aErrorsAreFatal) {
   if (!aErrorsAreFatal) {
     return aDetail;
   }
-  return GM_CONSTANTS.localeStringBundle.createBundle(
-      GM_CONSTANTS.localeGreasemonkeyProperties)
-      .GetStringFromName("error.downloadingUrl")
+  return localizedString("error.downloadingUrl", "Error downloading URL:")
       + "\n" + aUri.spec + "\n\n" + aDetail;
+}
+
+/**
+ * A string from greasemonkey.properties, or aFallback (English) where this
+ * locale doesn't have the key yet.
+ *
+ * @param {string} aKey
+ * @param {string} aFallback
+ * @returns {string}
+ */
+function localizedString(aKey, aFallback) {
+  try {
+    return GM_CONSTANTS.localeStringBundle.createBundle(
+        GM_CONSTANTS.localeGreasemonkeyProperties).GetStringFromName(aKey);
+  } catch (e) {
+    return aFallback;
+  }
 }
 
 /**
@@ -545,6 +560,10 @@ function RemoteScript(aUrl) {
   this._scriptMetaCallbacks = [];
   this._silent = false;
   this._tempDir = GM_util.getTempDir();
+  // Time limits for dependency downloads (setDownloadTimeouts), and the
+  // timers enforcing them.
+  this._timeouts = null;
+  this._timers = [];
   this._uri = GM_util.getUriFromUrl(aUrl);
   this._url = aUrl;
 
@@ -560,6 +579,9 @@ Object.defineProperty(RemoteScript.prototype, "url", {
   },
   "enumerable": true,
 });
+
+/** How many of one script's dependencies download at once (backup.js). */
+RemoteScript.DEPENDENCY_DOWNLOADS_AT_ONCE = DEPENDENCY_DOWNLOADS_AT_ONCE;
 
 /** Cancels all in-progress channel requests and removes temp files. */
 RemoteScript.prototype.cancel = function () {
@@ -581,6 +603,10 @@ RemoteScript.prototype.cleanup = function (aErrorMessage) {
   }
   this.done = true;
 
+  this._timers.forEach(function (aTimer) {
+    aTimer.cancel();
+  });
+  this._timers = [];
   this._channels.forEach(function (aChannel) {
     try {
       aChannel.QueryInterface(Ci.nsIRequest);
@@ -1016,6 +1042,21 @@ RemoteScript.prototype.setScript = function (aScript, aTempFile) {
 };
 
 /**
+ * Puts a time limit on each @require / @resource download and each @icon
+ * download (backup import).  A @require or @resource that runs over fails
+ * the install, saying so; an @icon that does is skipped, and the script
+ * shows the default icon.  Without limits (the default) a download waits
+ * as long as the network lets it, up to the browser's own timeouts.
+ *
+ * @param {number} aDependencyMs - Limit for @require / @resource, in ms.
+ * @param {number} aIconMs       - Limit for @icon, in ms.
+ */
+RemoteScript.prototype.setDownloadTimeouts = function (
+    aDependencyMs, aIconMs) {
+  this._timeouts = { "dependency": aDependencyMs, "icon": aIconMs };
+};
+
+/**
  * Suppresses the install/update notification toast.
  * Used by the Sync engine when installing scripts silently in the background.
  *
@@ -1364,17 +1405,10 @@ RemoteScript.prototype._downloadDependency = function (
             + aDependency.downloadURL + " (expected "
             + aDependency._integrity.algo + "=" + aDependency._integrity.hex
             + ").", false);
-        let message;
-        try {
-          message = GM_CONSTANTS.localeStringBundle.createBundle(
-              GM_CONSTANTS.localeGreasemonkeyProperties)
-              .GetStringFromName("error.remoteScript.integrityMismatch");
-        } catch (e) {
-          message = "%1 doesn't match the %2 hash that the script pinned for"
-              + " it, so nothing was installed.  The file may have changed"
-              + " on its server; the script's author needs to update the"
-              + " pin.";
-        }
+        let message = localizedString("error.remoteScript.integrityMismatch",
+            "%1 doesn't match the %2 hash that the script pinned for it, so"
+            + " nothing was installed.  The file may have changed on its"
+            + " server; the script's author needs to update the pin.");
         aDone(message
             .replace("%2", aDependency._integrity.algo)
             .replace("%1", aDependency.downloadURL));
@@ -1386,7 +1420,9 @@ RemoteScript.prototype._downloadDependency = function (
   }.bind(this);
 
   report("downloading");
-  this._downloadFile(uri, file, downloadComplete, !isIcon, aSlot);
+  let limit = this._timeouts
+      ? (isIcon ? this._timeouts.icon : this._timeouts.dependency) : 0;
+  this._downloadFile(uri, file, downloadComplete, !isIcon, aSlot, limit);
   if (this.done) {
     // _downloadFile refused the URL (unsafe scheme) and cleaned up without
     // starting a download, so no callback will report back.
@@ -1420,14 +1456,41 @@ RemoteScript.prototype._reportDependency = function (aReport) {
  * @param {boolean}  aErrorsAreFatal     - Passed through to the DownloadListener.
  * @param {number}   aProgressSlot       - Its slot in this._progress: 0 for
  *   the script itself, which is also parsed as it arrives.
+ * @param {number}   [aTimeoutMs]        - Give up after this long (0 or
+ *   absent: no limit of our own); the download then fails, saying so.
  */
 RemoteScript.prototype._downloadFile = function (
-    aUri, aFile, aCompletionCallback, aErrorsAreFatal, aProgressSlot) {
+    aUri, aFile, aCompletionCallback, aErrorsAreFatal, aProgressSlot,
+    aTimeoutMs) {
   aUri = aUri.QueryInterface(Ci.nsIURI);
   aFile = aFile.QueryInterface(Ci.nsIFile);
   aCompletionCallback = aCompletionCallback || function () {};
   assertIsFunction(aCompletionCallback,
       "RemoteScript._downloadFile: Completion " + CALLBACK_IS_NOT_FUNCTION);
+  let timer = null;
+  let timedOut = false;
+  if (aTimeoutMs > 0) {
+    let completion = aCompletionCallback;
+    aCompletionCallback = function (
+        aChannel, aSuccess, aErrorMessage, aStatus, aHeaders) {
+      if (timer) {
+        timer.cancel();
+        let index = this._timers.indexOf(timer);
+        if (index > -1) {
+          this._timers.splice(index, 1);
+        }
+        timer = null;
+      }
+      if (timedOut) {
+        aSuccess = false;
+        aErrorMessage = downloadFailedMessage(aUri, localizedString(
+            "error.downloadTimedOut", "No answer within %1 seconds.")
+            .replace("%1", String(Math.round(aTimeoutMs / 1000))),
+            aErrorsAreFatal);
+      }
+      completion(aChannel, aSuccess, aErrorMessage, aStatus, aHeaders);
+    }.bind(this);
+  }
 
   // If we have a URI (locally installed scripts, when updating, won't)...
   if (this._uri) {
@@ -1465,7 +1528,27 @@ RemoteScript.prototype._downloadFile = function (
   } catch (e) {
     this._downloadNotStarted(e, aUri, channel, dsl, aCompletionCallback,
         aErrorsAreFatal, aProgressSlot);
+    return undefined;
   }
+  if (aTimeoutMs > 0) {
+    // Cancelling makes the channel report back (onStopRequest) as failed;
+    // the callback above then names the time limit.  this._timers keeps
+    // the timer alive until then (an unreferenced one can be collected
+    // before it fires) and lets cleanup() stop it.
+    timer = Cc["@mozilla.org/timer;1"].createInstance(Ci.nsITimer);
+    this._timers.push(timer);
+    timer.initWithCallback({
+      "notify": function () {
+        timedOut = true;
+        try {
+          channel.cancel(Cr.NS_ERROR_NET_TIMEOUT);
+        } catch (e) {
+          // Already finished.
+        }
+      },
+    }, aTimeoutMs, Ci.nsITimer.TYPE_ONE_SHOT);
+  }
+  return undefined;
 };
 
 /**

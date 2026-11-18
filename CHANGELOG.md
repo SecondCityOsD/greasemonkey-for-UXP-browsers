@@ -45,6 +45,7 @@
 - Link Homepage to the script's page (GreasyFork, OpenUserJS, GitHub…) and the author's name to their site
 - Read `@contributionURL` for the Contribute button
 - Show Homepage, Script page and Contribute in separate rows
+- Keep pinned hashes out of the `@require` / `@resource` lines: a small "SHA" link shows them
 - Explain why a script can't update instead of offering Automatic updates
 - Open Options for disabled scripts
 - Close Options when its script is updated or removed
@@ -62,6 +63,7 @@
 - Back up only the settings you changed (a 3.9 backup restores `installDelay` 5)
 - Keep the first-install date and the HTTP-only cookie choice in backups; import Violentmonkey's
 - Don't turn a 3.9 backup's guessed homepage into a declared one
+- Import much faster: several scripts' files download at once (still installed one by one, in order), and a site that doesn't answer gives up after 15 s per file, 2 s per icon
 
 **Other**
 - Declare Pale Moon 35 compatibility

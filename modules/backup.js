@@ -101,6 +101,19 @@ const SETTINGS_PREFS = [
 // <profile>/gm_backups/ before pruning the oldest.
 const SNAPSHOTS_TO_KEEP = 10;
 
+// Import: scripts install one at a time, in the archive's order, while the
+// @require / @resource / @icon files of the scripts after them download.
+// Violentmonkey and Tampermonkey backups carry none of those files, and
+// waiting for each script's downloads in turn made such an import take a
+// minute or more.  At most IMPORT_FILES_AT_ONCE files (the browser's
+// per-site connection limit) and IMPORT_SCRIPTS_AT_ONCE scripts download
+// at once, and each file has a time limit, so a dead site can't hold the
+// import up.
+const IMPORT_FILES_AT_ONCE = 6;
+const IMPORT_SCRIPTS_AT_ONCE = 8;
+const IMPORT_DEPENDENCY_TIMEOUT_MS = 15000;
+const IMPORT_ICON_TIMEOUT_MS = 2000;
+
 // nsIZipWriter open flags (PR_* constants, unavailable on the JS side).
 const PR_WRONLY = 0x02;
 const PR_CREATE_FILE = 0x08;
@@ -273,7 +286,9 @@ function GM_BackupExport(aDestFile, aIncludeValues, aCallback) {
 
 /**
  * Imports user scripts from a ZIP archive produced by GM_BackupExport,
- * Violentmonkey, or Tampermonkey.  Installs each unique script sequentially.
+ * Violentmonkey, or Tampermonkey.  Installs each unique script, one at a
+ * time and in the archive's order, while later scripts' files download
+ * (_installAll).
  *
  * By default a script whose (name, namespace) already matches an installed
  * script is skipped; aOptions.overwrite turns that into an in-place update
@@ -394,7 +409,7 @@ function GM_BackupImport(aSrcFile, aOptions, aCallback) {
   }
 
   let start = function () {
-    _installNext(0, toInstall, scripts, depFiles, opts, result, finish);
+    _installAll(toInstall, scripts, depFiles, opts, result, finish);
   };
   if (opts.skipSnapshot) {
     start();
@@ -1052,31 +1067,113 @@ function _readEntryAsString(aZipReader, aEntryName) {
 }
 
 /**
- * Sequential installer.  We chain callbacks rather than install in parallel
- * so that the scripts directory is written to one entry at a time and we
- * don't race on config.xml persistence.  aOpts carries the import options
+ * Installs the archive's scripts.  Each is prepared first (sidecar,
+ * archived dependencies, parse, "already installed" check), then its
+ * @require / @resource / @icon files download, several scripts at once
+ * (IMPORT_FILES_AT_ONCE / IMPORT_SCRIPTS_AT_ONCE), while the installs
+ * happen strictly one at a time and in the archive's order, so the scripts
+ * directory and config.xml are written one entry at a time and the
+ * execution order is the archive's.  aOpts carries the import options
  * (overwrite / restoreValues / onProgress) documented on GM_BackupImport.
+ *
+ * @param {string[]} aKeys      - Archive keys to install, in order.
+ * @param {object}   aScripts   - Archive entries by key (_collectScripts).
+ * @param {object}   aDepFiles  - Extracted archived dependency files.
+ * @param {object}   aOpts
+ * @param {object}   aResult    - {imported, skipped, errors}, filled in.
+ * @param {function} aDone      - Called once, after the last install.
  */
-function _installNext(aIdx, aKeys, aScripts, aDepFiles, aOpts, aResult, aDone) {
-  if (aIdx >= aKeys.length) {
-    aDone();
-    return;
-  }
+function _installAll(aKeys, aScripts, aDepFiles, aOpts, aResult, aDone) {
+  let jobs = aKeys.map(function (aKey, aIndex) {
+    let job = _prepareImport(aKey, aScripts[aKey], aDepFiles, aOpts);
+    job.index = aIndex;
+    job.total = aKeys.length;
+    return job;
+  });
 
-  let key = aKeys[aIdx];
-  if (aOpts && (typeof aOpts.onProgress === "function")) {
-    try {
-      aOpts.onProgress(aIdx, aKeys.length, key);
-    } catch (e) {
-      // Progress UI must never break the import.
+  let nextToStart = 0;
+  let nextToInstall = 0;
+  let filesInFlight = 0;
+  let scriptsInFlight = 0;
+  let finished = false;
+
+  let installReady = function () {
+    while ((nextToInstall < jobs.length)
+        && (jobs[nextToInstall].state != "waiting")
+        && (jobs[nextToInstall].state != "downloading")) {
+      _commitImport(jobs[nextToInstall], aOpts, aResult);
+      nextToInstall++;
     }
-  }
-  let entry = aScripts[key];
-  let source = entry.source;
+    if ((nextToInstall >= jobs.length) && !finished) {
+      finished = true;
+      aDone();
+    }
+  };
+
+  let startDownloads = function () {
+    while (nextToStart < jobs.length) {
+      let job = jobs[nextToStart];
+      if (job.state != "waiting") {
+        nextToStart++;
+        continue;
+      }
+      if (scriptsInFlight >= IMPORT_SCRIPTS_AT_ONCE) {
+        break;
+      }
+      // One script is always let through, however many files it has.
+      if ((scriptsInFlight > 0)
+          && (filesInFlight + job.cost > IMPORT_FILES_AT_ONCE)) {
+        break;
+      }
+      nextToStart++;
+      scriptsInFlight++;
+      filesInFlight += job.cost;
+      _downloadForImport(job, function () {
+        scriptsInFlight--;
+        filesInFlight -= job.cost;
+        installReady();
+        startDownloads();
+      });
+    }
+  };
+
+  startDownloads();
+  installReady();
+}
+
+/**
+ * Everything about one archive entry that needs no download: its sidecar
+ * (translated from Violentmonkey / Tampermonkey), its archived dependency
+ * files, the parsed script, and whether it is installed already.
+ *
+ * @returns {object} The job: {key, entry, source, options, prefetch,
+ *   parsedScript, cost, state, error, remoteScript}.  state is "waiting"
+ *   (to download) or "skipped" (error says why).
+ */
+function _prepareImport(aKey, aEntry, aDepFiles, aOpts) {
+  let job = {
+    "cost": 0,
+    "entry": aEntry,
+    "error": null,
+    "key": aKey,
+    "notes": [],
+    "options": null,
+    "parsedScript": null,
+    "prefetch": null,
+    "remoteScript": null,
+    "source": aEntry.source,
+    "state": "waiting",
+  };
+  let skip = function (aWhy) {
+    job.state = "skipped";
+    job.error = aWhy;
+    return job;
+  };
+
   let options = null;
-  if (entry.options) {
+  if (aEntry.options) {
     try {
-      options = JSON.parse(entry.options);
+      options = JSON.parse(aEntry.options);
     } catch (e) {
       // Bad sidecar — install the script with defaults.
       options = null;
@@ -1087,10 +1184,9 @@ function _installNext(aIdx, aKeys, aScripts, aDepFiles, aOpts, aResult, aDone) {
   // sidecars pass through unchanged.
   options = _normalizeImportedOptions(options);
   if (options && Array.isArray(options.notes)) {
-    options.notes.forEach(function (aNote) {
-      aResult.errors.push(key + ": " + aNote);
-    });
+    job.notes = options.notes.slice();
   }
+  job.options = options;
 
   // Map each archived dependency (format v2) to its extracted temp file so
   // the install can pre-seed it: restore works offline and dead URLs keep
@@ -1116,8 +1212,7 @@ function _installNext(aIdx, aKeys, aScripts, aDepFiles, aOpts, aResult, aDone) {
           actual = null;
         }
         if (actual !== dep.sha256) {
-          aResult.errors.push(
-              key + ": dependency " + (dep.name || dep.url)
+          job.notes.push("dependency " + (dep.name || dep.url)
               + " failed integrity check; re-downloading");
           continue;
         }
@@ -1130,10 +1225,7 @@ function _installNext(aIdx, aKeys, aScripts, aDepFiles, aOpts, aResult, aDone) {
       };
     }
   }
-
-  let next = function () {
-    _installNext(aIdx + 1, aKeys, aScripts, aDepFiles, aOpts, aResult, aDone);
-  };
+  job.prefetch = prefetch;
 
   // Synthesise an install URI from the sidecar's downloadURL so that
   // parseScript.js populates script._namespace (from aUri.host) and
@@ -1155,110 +1247,163 @@ function _installNext(aIdx, aKeys, aScripts, aDepFiles, aOpts, aResult, aDone) {
 
   let parsedScript;
   try {
-    parsedScript = parse(source, installUri);
+    parsedScript = parse(job.source, installUri);
   } catch (e) {
-    aResult.skipped++;
-    aResult.errors.push(key + ": parse failed - " + e);
-    next();
-    return;
+    return skip("parse failed - " + e);
   }
   if (!parsedScript || !parsedScript._name) {
-    aResult.skipped++;
-    aResult.errors.push(key + ": parse produced no usable script");
-    next();
-    return;
+    return skip("parse produced no usable script");
   }
-
   // The normal install pipeline refuses scripts with recoverable parse
   // problems (invalid @match, bad @require/@resource URLs — see
   // remoteScript.js); installing them here would silently drop those
   // directives and ship a script that malfunctions at runtime.  Match the
   // pipeline: report and skip.
   if (parsedScript.parseErrors && parsedScript.parseErrors.length) {
-    aResult.skipped++;
-    aResult.errors.push(
-        key + ": parse errors - " + parsedScript.parseErrors.join("; "));
-    next();
-    return;
+    return skip("parse errors - " + parsedScript.parseErrors.join("; "));
+  }
+  job.parsedScript = parsedScript;
+
+  // Skipped early so it isn't downloaded for nothing; checked again at
+  // install time, when an earlier entry of this archive may have
+  // installed the same script.
+  if (_importClashes(parsedScript, aOpts)) {
+    return skip("already installed");
   }
 
-  // A script matching an installed (name, namespace) is skipped by
-  // default.  With aOpts.overwrite the install proceeds as an in-place
-  // update instead: config.install() auto-resolves the existing script,
-  // preserves its list position, and the stored-values .db carries over
-  // via basedir-name reuse; the sidecar's options/values then apply on
-  // top below.
-  let config = GM_util.getService().config;
-  if (config.installIsUpdate(parsedScript)
-      && !(aOpts && aOpts.overwrite)) {
-    aResult.skipped++;
-    aResult.errors.push(key + ": already installed (overwrite is off)");
-    next();
-    return;
-  }
+  job.cost = _importDownloadCount(parsedScript, prefetch);
+  return job;
+}
 
-  // Install via the standard RemoteScript pipeline, minus the editor popup.
+/**
+ * @returns {boolean} Whether aScript's (name, namespace) is installed and
+ *   the import doesn't overwrite.  With aOpts.overwrite the install is an
+ *   in-place update instead: config.install() resolves the existing script,
+ *   keeps its list position, and its stored values carry over via
+ *   basedir-name reuse; the sidecar's options/values then apply on top.
+ */
+function _importClashes(aScript, aOpts) {
+  return GM_util.getService().config.installIsUpdate(aScript)
+      && !(aOpts && aOpts.overwrite);
+}
+
+/**
+ * @returns {number} How many files aScript downloads at once: those of its
+ *   dependencies that aren't archived (aPrefetch) or data: addresses, up to
+ *   RemoteScript's per-script limit.
+ */
+function _importDownloadCount(aScript, aPrefetch) {
+  let count = 0;
+  let deps = aScript.dependencies;
+  for (let i = 0; i < deps.length; i++) {
+    let url = deps[i].downloadURL;
+    if (url && !/^data:/i.test(url) && !(aPrefetch && (url in aPrefetch))) {
+      count++;
+    }
+  }
+  return Math.min(count, RemoteScript.DEPENDENCY_DOWNLOADS_AT_ONCE);
+}
+
+/**
+ * Downloads one job's dependency files into a RemoteScript's temp folder,
+ * with time limits.  Sets aJob.state to "ready" or "failed" (aJob.error),
+ * then calls aDone once.
+ */
+function _downloadForImport(aJob, aDone) {
+  let fail = function (aWhy) {
+    aJob.state = "failed";
+    aJob.error = aWhy;
+    aDone();
+  };
   let remoteScript;
   let tempFile;
   try {
     remoteScript = new RemoteScript();
-    let tempFileName = cleanFilename(
-        parsedScript.name, GM_CONSTANTS.fileScriptName)
-        + GM_CONSTANTS.fileScriptExtension;
-    tempFile = GM_util.getTempFile(remoteScript._tempDir, tempFileName);
+    tempFile = GM_util.getTempFile(remoteScript._tempDir,
+        cleanFilename(aJob.parsedScript.name, GM_CONSTANTS.fileScriptName)
+        + GM_CONSTANTS.fileScriptExtension);
   } catch (e) {
-    aResult.skipped++;
-    aResult.errors.push(key + ": setup failed - " + e);
-    next();
-    return;
+    fail("setup failed - " + e);
+    return undefined;
   }
+  aJob.remoteScript = remoteScript;
+  aJob.state = "downloading";
 
-  GM_util.writeToFile(source, tempFile, function (aWriteErr) {
+  GM_util.writeToFile(aJob.source, tempFile, function (aWriteErr) {
     if (aWriteErr) {
-      // Without this branch a failed temp write used to stall the whole
-      // sequential chain: next() never ran and the completion callback
-      // never fired (silent partial import).
-      aResult.skipped++;
-      aResult.errors.push(key + ": temp write failed - " + aWriteErr);
-      next();
+      fail("temp write failed - " + aWriteErr);
       return undefined;
     }
     try {
-      remoteScript.setScript(parsedScript, tempFile);
-      if (typeof remoteScript.setSilent === "function") {
-        remoteScript.setSilent(true);
+      remoteScript.setScript(aJob.parsedScript, tempFile);
+      remoteScript.setSilent(true);
+      if (aJob.prefetch) {
+        remoteScript.setPrefetchedDependencies(aJob.prefetch);
       }
-      if (prefetch
-          && (typeof remoteScript.setPrefetchedDependencies === "function")) {
-        remoteScript.setPrefetchedDependencies(prefetch);
-      }
+      remoteScript.setDownloadTimeouts(
+          IMPORT_DEPENDENCY_TIMEOUT_MS, IMPORT_ICON_TIMEOUT_MS);
       remoteScript.download(function (aSuccess) {
-        if (!aSuccess) {
-          aResult.skipped++;
-          aResult.errors.push(key + ": dependency download failed");
-          next();
-          return;
+        if (aSuccess) {
+          aJob.state = "ready";
+          aDone();
+        } else {
+          fail("dependency download failed"
+              + (remoteScript.errorMessage
+                  ? " - " + remoteScript.errorMessage : ""));
         }
-        try {
-          remoteScript.install();
-          _applyImportedOptions(parsedScript, options);
-          if (entry.storage && !(aOpts && (aOpts.restoreValues === false))) {
-            _applyImportedStorage(
-                parsedScript, entry.storage, entry.storageShape);
-          }
-          aResult.imported++;
-        } catch (e) {
-          aResult.skipped++;
-          aResult.errors.push(key + ": install failed - " + e);
-        }
-        next();
       });
     } catch (e) {
-      aResult.skipped++;
-      aResult.errors.push(key + ": download setup failed - " + e);
-      next();
+      fail("download setup failed - " + e);
     }
+    return undefined;
   });
+  return undefined;
+}
+
+/**
+ * Installs one prepared, downloaded job, or records why it wasn't, then
+ * applies its sidecar options and stored values.
+ */
+function _commitImport(aJob, aOpts, aResult) {
+  if (aOpts && (typeof aOpts.onProgress === "function")) {
+    try {
+      aOpts.onProgress(aJob.index, aJob.total, aJob.key);
+    } catch (e) {
+      // Progress UI must never break the import.
+    }
+  }
+  aJob.notes.forEach(function (aNote) {
+    aResult.errors.push(aJob.key + ": " + aNote);
+  });
+  let notInstalled = function (aWhy) {
+    aResult.skipped++;
+    aResult.errors.push(aJob.key + ": " + aWhy);
+    if (aJob.remoteScript) {
+      // Its temp folder goes.
+      aJob.remoteScript.cleanup();
+    }
+  };
+  if (aJob.state != "ready") {
+    notInstalled(aJob.error);
+    return undefined;
+  }
+  if (_importClashes(aJob.parsedScript, aOpts)) {
+    notInstalled("already installed");
+    return undefined;
+  }
+  try {
+    aJob.remoteScript.install();
+    _applyImportedOptions(aJob.parsedScript, aJob.options);
+    if (aJob.entry.storage && !(aOpts && (aOpts.restoreValues === false))) {
+      _applyImportedStorage(
+          aJob.parsedScript, aJob.entry.storage, aJob.entry.storageShape);
+    }
+    aResult.imported++;
+  } catch (e) {
+    aResult.skipped++;
+    aResult.errors.push(aJob.key + ": install failed - " + e);
+  }
+  return undefined;
 }
 
 /**
