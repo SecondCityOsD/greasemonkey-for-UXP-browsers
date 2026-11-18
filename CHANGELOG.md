@@ -2,73 +2,40 @@
 
 #### 3.10
 
-**Script updates**
-- Never install an update without consent: Greasemonkey's own checks follow each script's Automatic Updates setting (corrects the 3.9 note below)
-- Ask before Update Now overwrites a script you edited
-- Notice edits made in an external editor straight away
-- Skip scheduled checks while `extensions.update.enabled` is off
-- Treat `@downloadURL none` (old versions on GreasyFork) as not updatable
-- Stop saving "null" as an update URL; clean up stored ones
+**New**
+- Install window: shows the icon, source, `@require` / `@resource`, `@antifeature`, warnings and a "not encrypted" tag for `http://` addresses; dependencies download 4 at a time; countdown is 0.8 s
+- Source viewer: dark theme that follows the browser (Auto / Light / Dark), a metadata header, better find (highlight every match, match case, whole word, regex, F3), Ctrl+G to go to a line, and a status bar
+- Toolbar: the icon shows how many scripts ran on the tab; each script's commands can be folded
+- Preferences: open as a normal window; new **Advanced** tab (update notifications, badge type and color, HTTP-only cookies)
+- Script Options: editor for stored values (text or JSON); separate Homepage, Script page and Contribute rows; `@contributionURL`; pinned hashes behind a "SHA" link
+- Pinned hashes in base64 (SRI) format are checked: sha256, sha384, sha512
+- Backups keep dependency files, the first-install date and the HTTP-only cookie choice, and these are imported from Violentmonkey too
+- Imports are much faster (files download in parallel) and no longer freeze the browser
+- `GM_info`, `GM_cookie` and `GM_download` work as they do in Violentmonkey
+- Compatible with Pale Moon 35; new text translated into 20 languages
 
-**Script injection**
-- Don't run scripts again when Back/Forward restores a page from the cache
-
-**Install window**
-- Show the script's `@icon`, where it comes from, its `@require` / `@resource` files, `@antifeature`, `@exclude-match`, a non-default `@run-at` and ignored metadata
-- Mark `http://` addresses as not encrypted
-- Shorten the Install countdown to 0.8 s; restart it when the window loses focus (`installDelay`, steps of 0.4 s)
-- Allow clicking Install while dependencies are still downloading
-- Download dependencies four at a time
-- Ignore an unusable `@match`, `@exclude-match` or `@icon` instead of refusing the script
-- Run a script whose every `@match` was ignored nowhere, not everywhere
-- Fix the retry when Windows briefly locks a new script's folder
-- Fix garbled `%2`-like text in messages about ignored metadata
-
-**Source viewer**
-- Add a dark theme that follows the browser, with Auto / Light / Dark buttons and matching scrollbars
-- Show the script's icon, name, version and source instead of a temporary file path
-- Add a metadata header above the code, with tags on permissions that reach past the page
-- Find: highlight every match; match case, whole word and regex; F3; Ctrl+G to go to a line
-- Add a status bar: cursor position, size, line endings, BOM, minified
-
-**Toolbar button**
-- Fold a script's commands in User Script Commands
-- Show how many scripts ran on the tab, in the corner of the icon
-
-**Greasemonkey Preferences**
-- Open as a normal window instead of blocking the browser
-- Add an **Advanced** tab: **Notify script updates**, the toolbar button's **Badge** (unique running scripts, running scripts or none) and **Color**, and **Allow GM_cookie to access HTTP-only cookies**
-
-**Script Options and the Add-ons Manager**
-- Edit stored values in a resizable editor, as text or JSON, with Format / Compact
-- Keep the Installed date across updates
-- Link Homepage to the script's page (GreasyFork, OpenUserJS, GitHub…) and the author's name to their site
-- Read `@contributionURL` for the Contribute button
-- Show Homepage, Script page and Contribute in separate rows
-- Keep pinned hashes out of the `@require` / `@resource` lines: a small "SHA" link shows them
-- Explain why a script can't update instead of offering Automatic updates
-- Open Options for disabled scripts
-- Close Options when its script is updated or removed
-- Fix unreadable labels with dark themes
-
-**Script APIs**
-- Give `GM_cookie` HTTP-only cookies only when both Preferences and the script's Options allow it (3.9 gave them to every script)
-- Fix `GM_xmlhttpRequest` upload callbacks; add `upload.onloadstart`
-- Return `GM_xmlhttpRequest`'s `context` as the object passed in
-- Fill `GM_info.script.homepage` in Violentmonkey's order
-
-**Dependencies and backups**
-- Keep `@require` / `@resource` / `@icon` addresses and hashes, so backups include dependency files after a restart
-- Check base64 (SRI) pinned hashes: sha256, sha384, sha512
-- Back up only the settings you changed (a 3.9 backup restores `installDelay` 5)
-- Keep the first-install date and the HTTP-only cookie choice in backups; import Violentmonkey's
-- Don't turn a 3.9 backup's guessed homepage into a declared one
-- Import much faster: several scripts' files download at once (still installed one by one, in order), and a site that doesn't answer gives up after 15 s per file, 2 s per icon
-- Import without freezing the browser: the list of scripts that pages use is rebuilt once after a burst of changes instead of after every change, and the import works in small steps (a 213-script backup: 30 s instead of 82 s, no pause longer than 0.3 s)
-
-**Other**
-- Declare Pale Moon 35 compatibility
-- Translate the new text, and some older text that stayed English, into 20 languages
+**Fixed**
+- Updates never install without consent, and Update Now asks before overwriting your edits
+- Updating a script never loses the installed copy, its stored values or its settings
+- Scripts no longer run again when Back/Forward restores a page
+- An unusable `@match` is now ignored instead of the whole script being refused
+- `@downloadURL none` means not updatable; "null" is no longer saved as an update URL
+- `GM_cookie` gives HTTP-only cookies only when both Preferences and the script's Options allow it
+- `GM_xmlhttpRequest`: `@connect` is enforced on redirects; upload callbacks and `context` fixed
+- `GM.xmlHttpRequest` / `GM.download` promises; `GM_openInTab` is safer
+- Menu commands work from frames
+- CSP override with merged policies; nonces; early styles; `onurlchange`
+- Edits made in an external editor are noticed straight away; a failed `@require` download no longer blocks pages that are waiting on it
+- Saving a new script with an installed script's name/namespace is refused, and the editor stays open (#25)
+- Install from URL handles "/" (#27); Recover Orphans is safer and its errors readable (#28)
+- `.user.js` links with a query string are recognized
+- Downloads that can't start now fail instead of hanging
+- Add-ons Manager updates: failures, cancel and progress are shown
+- Script Options and the Add-ons Manager keep up with changes made elsewhere
+- Options open for disabled scripts and close when their script is updated or removed
+- Labels are readable with dark themes
+- Scratchpad shows its "not saved" alert again
+- Back/Forward, imports and Sync keep user rules, values and settings correctly
 
 #### 3.9
 
