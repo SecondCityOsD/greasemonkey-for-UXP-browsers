@@ -181,7 +181,8 @@ everything else is invoked through it.
      e. service.broadcastScriptUpdates()  → ipcScripts to content
                                                                 [Phase 4: direct]
      f. AddonManager.getAddonByID → cache version, re-broadcast
-     g. config.addObserver(broadcaster)   ← cludes/install/etc
+     g. config.addObserver(…)  ← cludes/install/etc: IPCScript.invalidate()
+                                 (the list is rebuilt on its next read)
      h. Cu.import requestObserver.js, responseObserver.js
      i. Services.obs.addObserver(service, "quit-application")
      j. Cu.import util/enqueueRemove.js  ← drains pending file deletes
@@ -256,9 +257,10 @@ about:addons row appears (via addonsOverlay observer
    subscribed to config events; see §6.2)
             │
             ▼
-service.broadcastScriptUpdates() refreshes the live IPCScript
-   list so subsequent navigations match against the new script
-   [Phase 4: this becomes a single in-process fan-out]
+IPCScript.invalidate() marks the live IPCScript list out of date;
+   the next navigation's scriptsForUrl() (or 250 ms without a further
+   change) rebuilds it once, so a burst of changes — an import, a
+   Sync — costs one rebuild, not one per change
 ```
 
 ### 5.2 Page-navigation script injection

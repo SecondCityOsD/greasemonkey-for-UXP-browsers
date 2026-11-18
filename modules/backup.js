@@ -1076,6 +1076,11 @@ function _readEntryAsString(aZipReader, aEntryName) {
  * execution order is the archive's.  aOpts carries the import options
  * (overwrite / restoreValues / onProgress) documented on GM_BackupImport.
  *
+ * Each turn of the event loop does one piece of the work: install one
+ * script, or prepare one and start its downloads.  Doing them back to
+ * back (every prepare up front, every finished download's install at
+ * once) froze the browser for seconds at a time on a 200-script backup.
+ *
  * @param {string[]} aKeys      - Archive keys to install, in order.
  * @param {object}   aScripts   - Archive entries by key (_collectScripts).
  * @param {object}   aDepFiles  - Extracted archived dependency files.
@@ -1084,61 +1089,86 @@ function _readEntryAsString(aZipReader, aEntryName) {
  * @param {function} aDone      - Called once, after the last install.
  */
 function _installAll(aKeys, aScripts, aDepFiles, aOpts, aResult, aDone) {
-  let jobs = aKeys.map(function (aKey, aIndex) {
-    let job = _prepareImport(aKey, aScripts[aKey], aDepFiles, aOpts);
-    job.index = aIndex;
-    job.total = aKeys.length;
-    return job;
-  });
-
+  // Filled in as each is prepared; emptied again once installed.
+  let jobs = [];
   let nextToStart = 0;
   let nextToInstall = 0;
   let filesInFlight = 0;
   let scriptsInFlight = 0;
+  let scheduled = false;
   let finished = false;
 
-  let installReady = function () {
-    while ((nextToInstall < jobs.length)
-        && (jobs[nextToInstall].state != "waiting")
-        && (jobs[nextToInstall].state != "downloading")) {
-      _commitImport(jobs[nextToInstall], aOpts, aResult);
-      nextToInstall++;
+  let schedule = function () {
+    if (!scheduled) {
+      scheduled = true;
+      GM_util.timeout(step, 0);
     }
-    if ((nextToInstall >= jobs.length) && !finished) {
+  };
+
+  let hasRoom = function (aJob) {
+    if (scriptsInFlight >= IMPORT_SCRIPTS_AT_ONCE) {
+      return false;
+    }
+    // One script is always let through, however many files it has.
+    return (scriptsInFlight == 0)
+        || (filesInFlight + aJob.cost <= IMPORT_FILES_AT_ONCE);
+  };
+
+  // Prepares the next script and starts its downloads if there is room.
+  // When there is none, a download's end brings the next step.
+  let startNext = function () {
+    let job = jobs[nextToStart];
+    if (!job) {
+      job = _prepareImport(
+          aKeys[nextToStart], aScripts[aKeys[nextToStart]], aDepFiles, aOpts);
+      job.index = nextToStart;
+      job.total = aKeys.length;
+      jobs[nextToStart] = job;
+    }
+    if (job.state != "waiting") {
+      // Skipped: nothing to download.
+      nextToStart++;
+      schedule();
+      return undefined;
+    }
+    if (!hasRoom(job)) {
+      return undefined;
+    }
+    nextToStart++;
+    scriptsInFlight++;
+    filesInFlight += job.cost;
+    _downloadForImport(job, function () {
+      scriptsInFlight--;
+      filesInFlight -= job.cost;
+      schedule();
+    });
+    schedule();
+  };
+
+  let step = function () {
+    scheduled = false;
+    if (finished) {
+      return undefined;
+    }
+    if (nextToInstall >= aKeys.length) {
       finished = true;
       aDone();
+      return undefined;
+    }
+    let head = jobs[nextToInstall];
+    if (head && (head.state != "waiting") && (head.state != "downloading")) {
+      _commitImport(head, aOpts, aResult);
+      jobs[nextToInstall] = null;
+      nextToInstall++;
+      schedule();
+      return undefined;
+    }
+    if (nextToStart < aKeys.length) {
+      startNext();
     }
   };
 
-  let startDownloads = function () {
-    while (nextToStart < jobs.length) {
-      let job = jobs[nextToStart];
-      if (job.state != "waiting") {
-        nextToStart++;
-        continue;
-      }
-      if (scriptsInFlight >= IMPORT_SCRIPTS_AT_ONCE) {
-        break;
-      }
-      // One script is always let through, however many files it has.
-      if ((scriptsInFlight > 0)
-          && (filesInFlight + job.cost > IMPORT_FILES_AT_ONCE)) {
-        break;
-      }
-      nextToStart++;
-      scriptsInFlight++;
-      filesInFlight += job.cost;
-      _downloadForImport(job, function () {
-        scriptsInFlight--;
-        filesInFlight -= job.cost;
-        installReady();
-        startDownloads();
-      });
-    }
-  };
-
-  startDownloads();
-  installReady();
+  schedule();
 }
 
 /**

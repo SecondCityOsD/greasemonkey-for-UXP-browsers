@@ -87,6 +87,9 @@ function startup(aService) {
   initScriptProtocol();
 
   // Beam down initial set of scripts.
+  IPCScript.setSource(function () {
+    return aService.scriptUpdateData();
+  });
   aService.broadcastScriptUpdates();
 
   // Notification is async; send the scripts again once we have our version.
@@ -95,23 +98,14 @@ function startup(aService) {
     aService.broadcastScriptUpdates();
   });
 
-  // Beam down on updates.
+  // On updates, mark the scripts' snapshot out of date: it is built again
+  // when next needed, once per burst of changes (see IPCScript.invalidate).
   aService.config.addObserver({
     "notifyEvent": function (aScript, aEvent, aData) {
-      if ([
-        "cludes",
-        "edit-enabled",
-        "install",
-        // "missing-removed",
-        "modified",
-        "move",
-        "uninstall",
-      ].some(function (e) {
-        return e == aEvent;
-      })) {
-        aService.broadcastScriptUpdates();
+      if (SNAPSHOT_EVENTS.indexOf(aEvent) != -1) {
+        IPCScript.invalidate();
       }
-    }
+    },
   });
 
   Cu.import("chrome://greasemonkey-modules/content/requestObserver.js", {});
@@ -127,6 +121,17 @@ function startup(aService) {
   // Import this once, early, so that enqueued deletes can happen.
   Cu.import("chrome://greasemonkey-modules/content/util/enqueueRemove.js");
 }
+
+// Config events that make the scripts' snapshot out of date.
+const SNAPSHOT_EVENTS = [
+  "cludes",
+  "edit-enabled",
+  "install",
+  // "missing-removed",
+  "modified",
+  "move",
+  "uninstall",
+];
 
 /////////////////////////////////// Service ////////////////////////////////////
 

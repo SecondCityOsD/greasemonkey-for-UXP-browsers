@@ -23,6 +23,8 @@
  *   The service calls IPCScript.update(data) directly with the result of
  *   GreasemonkeyService.scriptUpdateData() — no IPC.  UXP is single-process,
  *   so a Services.cpmm broadcast would be a self-loop with no benefit.
+ *   After a script changes, the service only calls IPCScript.invalidate();
+ *   the list is built again when it is next read (see refreshIfStale).
  */
 
 const EXPORTED_SYMBOLS = ["IPCScript"];
@@ -225,6 +227,8 @@ IPCScript.scriptsForUrl = function (aUrl, aWhen, aWindowId /* ignore */) {
     return [];
   }
 
+  refreshIfStale();
+
   // Per-(url, when) memo — see gScriptsForUrlCache comment.  Saves the
   // gScripts.filter scan when the same URL is queried again, which
   // happens 3-5 times per page-load (one per @run-at phase) plus
@@ -356,8 +360,8 @@ IPCScript.prototype.info = function () {
 };
 
 /**
- * The current list of all installed userscripts for this content process.
- * Replaced entirely on each "greasemonkey:scripts-update" IPC message.
+ * The current list of all installed userscripts.  Replaced entirely by
+ * IPCScript.update(), or by the next read after IPCScript.invalidate().
  *
  * @type {IPCScript[]}
  */
@@ -379,6 +383,49 @@ var gScripts = [];
  */
 const SCRIPTS_FOR_URL_CACHE_SIZE = 256;
 var gScriptsForUrlCache = new Map();
+
+/**
+ * Builds a fresh snapshot ({ globalExcludes, scripts }); the service's
+ * scriptUpdateData(), given at startup through IPCScript.setSource().
+ *
+ * @type {?function}
+ */
+var gSource = null;
+/**
+ * Set when a script changed after gScripts was built; the next read
+ * builds it again.  A snapshot reads every installed script (files, dates,
+ * addresses), and an import or a Sync makes hundreds of changes in a row:
+ * building one per change froze the browser for a minute while 200
+ * scripts were imported.
+ *
+ * @type {boolean}
+ */
+var gStale = false;
+/** A quiet moment after the last change rebuilds it ahead of a page. */
+const REFRESH_AFTER_MS = 250;
+var gRefreshTimer = null;
+const gRefreshNotify = {
+  "notify": function () {
+    refreshIfStale();
+  },
+};
+
+/**
+ * Rebuilds gScripts if a change has made it out of date.  On failure the
+ * previous list stays in use (and the next read tries again).
+ */
+function refreshIfStale() {
+  if (!gStale || !gSource) {
+    return undefined;
+  }
+  gStale = false;
+  try {
+    updateData(gSource());
+  } catch (e) {
+    gStale = true;
+    GM_util.logError(e, false, e.fileName, e.lineNumber);
+  }
+}
 
 /**
  * Promotes a plain deserialized object to an IPCScript prototype chain so
@@ -406,6 +453,7 @@ function objectToScript(aObj) {
  * @returns {IPCScript|undefined} The matching script, or undefined if not found.
  */
 IPCScript.getByUuid = function (aId) {
+  refreshIfStale();
   return gScripts.find(function (e) {
     return e.uuid == aId;
   });
@@ -453,4 +501,33 @@ function updateData(aData) {
  * @param {object|null} aData - { globalExcludes, scripts } from
  *   GreasemonkeyService.scriptUpdateData(), or null/undefined for "clear".
  */
-IPCScript.update = updateData;
+IPCScript.update = function (aData) {
+  gStale = false;
+  updateData(aData);
+};
+
+/**
+ * Sets where a fresh snapshot comes from, for invalidate().
+ *
+ * @param {function} aSource - Returns { globalExcludes, scripts }.
+ */
+IPCScript.setSource = function (aSource) {
+  gSource = aSource;
+};
+
+/**
+ * Marks the list out of date after a script changed.  Nothing is built
+ * now: the next scriptsForUrl() / getByUuid() builds it, or a quiet
+ * moment (REFRESH_AFTER_MS without a further change) does, whichever
+ * comes first.  So a burst of changes costs one build, and a page never
+ * gets an out-of-date list.
+ */
+IPCScript.invalidate = function () {
+  gStale = true;
+  if (!gRefreshTimer) {
+    gRefreshTimer = Cc["@mozilla.org/timer;1"].createInstance(Ci.nsITimer);
+  }
+  // Re-arming restarts the wait.
+  gRefreshTimer.initWithCallback(
+      gRefreshNotify, REFRESH_AFTER_MS, Ci.nsITimer.TYPE_ONE_SHOT);
+};

@@ -64,6 +64,7 @@
 - Keep the first-install date and the HTTP-only cookie choice in backups; import Violentmonkey's
 - Don't turn a 3.9 backup's guessed homepage into a declared one
 - Import much faster: several scripts' files download at once (still installed one by one, in order), and a site that doesn't answer gives up after 15 s per file, 2 s per icon
+- Import without freezing the browser: the list of scripts that pages use is rebuilt once after a burst of changes instead of after every change, and the import works in small steps (a 213-script backup: 30 s instead of 82 s, no pause longer than 0.3 s)
 
 **Other**
 - Declare Pale Moon 35 compatibility
