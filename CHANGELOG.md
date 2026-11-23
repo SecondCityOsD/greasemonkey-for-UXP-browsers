@@ -38,6 +38,7 @@
 - Labels are readable with dark themes
 - Scratchpad shows its "not saved" alert again
 - The toolbar menu and its tooltip no longer fail on a script that is being uninstalled
+- A script installed right after a failed download could fail to install (its download folder was deleted by the failed one's clean-up)
 - Back/Forward, imports and Sync keep user rules, values and settings correctly
 
 #### 3.9

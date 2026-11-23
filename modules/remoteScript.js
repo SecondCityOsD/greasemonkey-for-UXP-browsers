@@ -622,17 +622,20 @@ RemoteScript.prototype.cleanup = function (aErrorMessage) {
   this._tempDir = null;
   if (_RemoteScript_Cleanup_tempDir && _RemoteScript_Cleanup_tempDir.exists()) {
     GM_util.timeout(function () {
-      if (_RemoteScript_Cleanup_tempDir
-          && _RemoteScript_Cleanup_tempDir.exists()) {
-        try {
+      try {
+        if (_RemoteScript_Cleanup_tempDir.exists()) {
           _RemoteScript_Cleanup_tempDir.remove(true);
-        } catch (e) {
-          // Ignore.
         }
+        // Gone: its name is free, and a later temp folder may take it
+        // (when getTempDir falls back to createUnique's gm-temp,
+        // gm-temp-1, ...).  A second try later deleted that folder,
+        // another script's download, which then failed to install.
+        return undefined;
+      } catch (e) {
+        // Held open (on Windows, a scanner, say): still ours, so try again.
       }
       GM_util.timeout(function () {
-        if (_RemoteScript_Cleanup_tempDir
-            && _RemoteScript_Cleanup_tempDir.exists()) {
+        if (_RemoteScript_Cleanup_tempDir.exists()) {
           GM_util.enqueueRemove(_RemoteScript_Cleanup_tempDir, true);
         }
       }, TIMEOUT);
