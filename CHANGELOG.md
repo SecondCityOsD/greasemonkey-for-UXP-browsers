@@ -11,7 +11,7 @@
 - Script Options: editor for stored values (text or JSON); separate Homepage, Script page and Contribute rows; `@contributionURL`; pinned hashes behind a "SHA" link
 - Pinned hashes in base64 (SRI) format are checked: sha256, sha384, sha512
 - Backups keep dependency files, the first-install date and the HTTP-only cookie choice, and these are imported from Violentmonkey too
-- Imports are much faster (files download in parallel) and no longer freeze the browser
+- Imports are much faster and no longer freeze the browser: scripts install at once and get their @require files and icons after, as in Violentmonkey, and the Add-ons Manager lists them when the import is done
 - `GM_info`, `GM_cookie` and `GM_download` work as they do in Violentmonkey
 - `GM_download` saves like any other download (the browser's download folder, asking where if the browser is set to ask); with the browser download API, straight into that folder, with subfolders, `conflictAction` and live progress
 - Compatible with Pale Moon 35; new text translated into 20 languages
@@ -38,7 +38,11 @@
 - Labels are readable with dark themes
 - Scratchpad shows its "not saved" alert again
 - The toolbar menu and its tooltip no longer fail on a script that is being uninstalled
+- Scripts that store values no longer slow down the Add-ons Manager while it's open
 - A script installed right after a failed download could fail to install (its download folder was deleted by the failed one's clean-up)
+- Closing the browser during an import: the import stops cleanly, and the scripts still getting their files get them at the next start
+- A change made just before closing the browser is no longer lost: the script list is written on quit, and at least once a second while changes keep coming
+- An imported script whose @require can't be downloaded tries again at the next start (it is switched off after three tries), and importing again replaces it
 - Back/Forward, imports and Sync keep user rules, values and settings correctly
 
 #### 3.9

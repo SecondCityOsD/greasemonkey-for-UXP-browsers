@@ -48,12 +48,17 @@ if (typeof Cu === "undefined") {
 Cu.import("chrome://greasemonkey-modules/content/constants.js");
 
 Cu.import("resource://gre/modules/AddonManager.jsm");
+Cu.import("resource://gre/modules/osfile.jsm");
+Cu.import("resource://gre/modules/Services.jsm");
 
+Cu.import("chrome://greasemonkey-modules/content/GM_notification.js");
 Cu.import("chrome://greasemonkey-modules/content/parseScript.js");
 Cu.import("chrome://greasemonkey-modules/content/prefManager.js");
 Cu.import("chrome://greasemonkey-modules/content/remoteScript.js");
 Cu.import("chrome://greasemonkey-modules/content/storageBack.js");
 Cu.import("chrome://greasemonkey-modules/content/util.js");
+
+Cu.importGlobalProperties(["TextEncoder"]);
 
 
 // Layout constants.
@@ -113,6 +118,9 @@ const IMPORT_FILES_AT_ONCE = 6;
 const IMPORT_SCRIPTS_AT_ONCE = 8;
 const IMPORT_DEPENDENCY_TIMEOUT_MS = 15000;
 const IMPORT_ICON_TIMEOUT_MS = 2000;
+// How long the import works before the browser gets its turn again: under
+// one screen refresh, so clicks and scrolling are answered between slices.
+const IMPORT_SLICE_MS = 12;
 
 // nsIZipWriter open flags (PR_* constants, unavailable on the JS side).
 const PR_WRONLY = 0x02;
@@ -390,16 +398,22 @@ function GM_BackupImport(aSrcFile, aOptions, aCallback) {
   result.total = toInstall.length;
 
   let finish = function () {
-    _cleanupDir(depDir);
     if (opts.restoreSettings && manifest && manifest.settings) {
       _applyImportedSettings(manifest.settings, result);
     }
     aCallback(true, result, null);
   };
+  // The archived files stay until the scripts installed without theirs
+  // have fetched them (they use these first).
+  let fetchesDone = function (aFailures) {
+    _cleanupDir(depDir);
+    _reportFetchFailures(aFailures);
+  };
 
   if (!toInstall.length) {
     if (opts.restoreSettings && manifest && manifest.settings) {
       // Settings-only restore is a legitimate operation.
+      _cleanupDir(depDir);
       finish();
       return;
     }
@@ -409,7 +423,8 @@ function GM_BackupImport(aSrcFile, aOptions, aCallback) {
   }
 
   let start = function () {
-    _installAll(toInstall, scripts, depFiles, opts, result, finish);
+    _installAll(toInstall, scripts, depFiles, opts, result, finish,
+        fetchesDone);
   };
   if (opts.skipSnapshot) {
     start();
@@ -1067,28 +1082,38 @@ function _readEntryAsString(aZipReader, aEntryName) {
 }
 
 /**
- * Installs the archive's scripts.  Each is prepared first (sidecar,
- * archived dependencies, parse, "already installed" check), then its
- * @require / @resource / @icon files download, several scripts at once
- * (IMPORT_FILES_AT_ONCE / IMPORT_SCRIPTS_AT_ONCE), while the installs
- * happen strictly one at a time and in the archive's order, so the scripts
- * directory and config.xml are written one entry at a time and the
- * execution order is the archive's.  aOpts carries the import options
- * (overwrite / restoreValues / onProgress) documented on GM_BackupImport.
+ * Installs the archive's scripts, strictly one at a time and in the
+ * archive's order, so the scripts directory and config.xml are written one
+ * entry at a time and the execution order is the archive's.  Each is
+ * prepared first (sidecar, archived dependencies, parse, "already
+ * installed" check).  A script whose @require / @resource / @icon files
+ * are all archived (our own backups), or that has none, installs with
+ * them.  One whose files are on the web installs at once without them,
+ * waiting for them (Script.markDependenciesPending), and they are fetched
+ * after its install, several scripts' at once (IMPORT_FILES_AT_ONCE /
+ * IMPORT_SCRIPTS_AT_ONCE), as Violentmonkey does: waiting for them first
+ * made every script wait for the slowest site before it.  aOpts carries
+ * the import options (overwrite / restoreValues / onProgress) documented
+ * on GM_BackupImport.
  *
- * Each turn of the event loop does one piece of the work: install one
- * script, or prepare one and start its downloads.  Doing them back to
- * back (every prepare up front, every finished download's install at
- * once) froze the browser for seconds at a time on a 200-script backup.
+ * The work is done in slices of about IMPORT_SLICE_MS (installing a
+ * script, or preparing one and writing its file, as many as fit), and the
+ * browser gets its turn between them.  Doing it all back to back (every
+ * prepare up front, every finished download's install at once) froze the
+ * browser for seconds at a time on a 200-script backup.
  *
  * @param {string[]} aKeys      - Archive keys to install, in order.
  * @param {object}   aScripts   - Archive entries by key (_collectScripts).
  * @param {object}   aDepFiles  - Extracted archived dependency files.
  * @param {object}   aOpts
- * @param {object}   aResult    - {imported, skipped, errors}, filled in.
+ * @param {object}   aResult    - {imported, skipped, errors, fetching},
+ *   filled in; fetching counts the scripts installed without their files.
  * @param {function} aDone      - Called once, after the last install.
+ * @param {function} [aFetchesDone] - Called once, after that and the last
+ *   fetch, with the failures: [{key, name, message, gaveUp}].
  */
-function _installAll(aKeys, aScripts, aDepFiles, aOpts, aResult, aDone) {
+function _installAll(
+    aKeys, aScripts, aDepFiles, aOpts, aResult, aDone, aFetchesDone) {
   // Filled in as each is prepared; emptied again once installed.
   let jobs = [];
   let nextToStart = 0;
@@ -1097,12 +1122,23 @@ function _installAll(aKeys, aScripts, aDepFiles, aOpts, aResult, aDone) {
   let scriptsInFlight = 0;
   let scheduled = false;
   let finished = false;
+  // The ids of the scripts this import installed: a second copy in the
+  // archive is "already installed", even while the first still waits for
+  // its files.
+  let thisImport = new Set();
+  aResult.fetching = 0;
 
   let schedule = function () {
     if (!scheduled) {
       scheduled = true;
-      GM_util.timeout(step, 0);
+      _nextTurn(step);
     }
+  };
+
+  // The files a job downloads before its install: none for one that gets
+  // them after.
+  let costNow = function (aJob) {
+    return aJob.deferred ? 0 : aJob.cost;
   };
 
   let hasRoom = function (aJob) {
@@ -1111,16 +1147,17 @@ function _installAll(aKeys, aScripts, aDepFiles, aOpts, aResult, aDone) {
     }
     // One script is always let through, however many files it has.
     return (scriptsInFlight == 0)
-        || (filesInFlight + aJob.cost <= IMPORT_FILES_AT_ONCE);
+        || (filesInFlight + costNow(aJob) <= IMPORT_FILES_AT_ONCE);
   };
 
-  // Prepares the next script and starts its downloads if there is room.
-  // When there is none, a download's end brings the next step.
+  // Prepares the next script and starts its downloads (or the writing of
+  // its file) if there is room.  Returns whether it got anywhere; when
+  // there was no room, a download's end brings the next step.
   let startNext = function () {
     let job = jobs[nextToStart];
     if (!job) {
-      job = _prepareImport(
-          aKeys[nextToStart], aScripts[aKeys[nextToStart]], aDepFiles, aOpts);
+      job = _prepareImport(aKeys[nextToStart], aScripts[aKeys[nextToStart]],
+          aDepFiles, aOpts, thisImport);
       job.index = nextToStart;
       job.total = aKeys.length;
       jobs[nextToStart] = job;
@@ -1128,47 +1165,185 @@ function _installAll(aKeys, aScripts, aDepFiles, aOpts, aResult, aDone) {
     if (job.state != "waiting") {
       // Skipped: nothing to download.
       nextToStart++;
-      schedule();
-      return undefined;
+      return true;
     }
     if (!hasRoom(job)) {
-      return undefined;
+      return false;
     }
     nextToStart++;
     scriptsInFlight++;
-    filesInFlight += job.cost;
+    filesInFlight += costNow(job);
     _downloadForImport(job, function () {
       scriptsInFlight--;
-      filesInFlight -= job.cost;
+      filesInFlight -= costNow(job);
       schedule();
     });
-    schedule();
+    return true;
   };
 
-  let step = function () {
-    scheduled = false;
-    if (finished) {
-      return undefined;
+  // The files of the scripts installed without them.
+  let fetchQueue = [];
+  let fetchScripts = 0;
+  let fetchFiles = 0;
+  let fetchFailures = [];
+  let fetchesReported = false;
+  let reportFetches = function () {
+    if (finished && !fetchQueue.length && !fetchScripts && !fetchesReported) {
+      fetchesReported = true;
+      if (aFetchesDone) {
+        aFetchesDone(fetchFailures);
+      }
+    }
+  };
+  let startFetches = function () {
+    while (fetchQueue.length && (fetchScripts < IMPORT_SCRIPTS_AT_ONCE)
+        && !Services.startup.shuttingDown) {
+      let job = fetchQueue[0];
+      if (fetchScripts && (fetchFiles + job.cost > IMPORT_FILES_AT_ONCE)) {
+        break;
+      }
+      fetchQueue.shift();
+      fetchScripts++;
+      fetchFiles += job.cost;
+      job.parsedScript.fetchPendingDependencies({
+        "dependencyMs": IMPORT_DEPENDENCY_TIMEOUT_MS,
+        "iconMs": IMPORT_ICON_TIMEOUT_MS,
+        "prefetch": job.prefetch,
+        "source": job.source,
+      }, function (aSuccess, aMessage, aGaveUp) {
+        fetchScripts--;
+        fetchFiles -= job.cost;
+        if (!aSuccess && aMessage) {
+          fetchFailures.push({
+            "gaveUp": !!aGaveUp,
+            "key": job.key,
+            "message": aMessage,
+            "name": job.parsedScript.name,
+          });
+        }
+        startFetches();
+        reportFetches();
+      });
+    }
+  };
+
+  // One piece of work: install the next script if it is ready, or prepare
+  // the next one and start its downloads.  Returns whether there may be
+  // more to do now.
+  let work = function () {
+    if (Services.startup.shuttingDown) {
+      // The browser is closing: config.xml has just been written
+      // (Config.flushSave), and a script installed after that would be
+      // left out of it, an orphaned folder.  The import stops; importing
+      // again installs the rest.
+      finished = true;
+      return false;
     }
     if (nextToInstall >= aKeys.length) {
       finished = true;
       aDone();
-      return undefined;
+      reportFetches();
+      return false;
     }
     let head = jobs[nextToInstall];
     if (head && (head.state != "waiting") && (head.state != "downloading")) {
-      _commitImport(head, aOpts, aResult);
+      _commitImport(head, aOpts, aResult, thisImport);
+      if (head.deferred && head.installed) {
+        aResult.fetching++;
+        fetchQueue.push(head);
+        startFetches();
+      }
       jobs[nextToInstall] = null;
       nextToInstall++;
-      schedule();
-      return undefined;
+      return true;
     }
-    if (nextToStart < aKeys.length) {
-      startNext();
+    return (nextToStart < aKeys.length) && startNext();
+  };
+
+  let step = function () {
+    scheduled = false;
+    let deadline = Date.now() + IMPORT_SLICE_MS;
+    while (!finished) {
+      if (!work()) {
+        // Waiting for a download (its end schedules the next step), or
+        // done.
+        return undefined;
+      }
+      if (Date.now() >= deadline) {
+        schedule();
+        return undefined;
+      }
     }
   };
 
   schedule();
+}
+
+/**
+ * Runs aFn at the next turn of the event loop, after what is already
+ * waiting (clicks, scrolling, painting).  A 0 ms timer waited for the next
+ * tick of the system clock, ~16 ms on Windows: an import's slices spent
+ * half their time on it.
+ *
+ * @param {function} aFn
+ */
+function _nextTurn(aFn) {
+  Services.tm.mainThread.dispatch({
+    "run": aFn,
+  }, Ci.nsIThread.DISPATCH_NORMAL);
+}
+
+/**
+ * Tells the user, once an import's fetches are over, which of its scripts
+ * couldn't get their @require / @resource files: those still waiting (the
+ * next start tries again; importing again does it now) and those marked
+ * broken, which switches them off (Script.fetchPendingDependencies).  Each
+ * reason goes to the Browser Console.
+ *
+ * @param {Array} aFailures - [{key, name, message, gaveUp}].
+ */
+function _reportFetchFailures(aFailures) {
+  if (!aFailures || !aFailures.length) {
+    return undefined;
+  }
+  aFailures.forEach(function (aFailure) {
+    GM_util.logError("Backup import: " + aFailure.key
+        + ": dependency download failed - " + aFailure.message, false);
+  });
+  let notify = function (aList, aKey, aFallback, aTopic) {
+    if (!aList.length) {
+      return undefined;
+    }
+    let text = aFallback;
+    try {
+      text = GM_CONSTANTS.localeStringBundle.createBundle(
+          GM_CONSTANTS.localeGreasemonkeyProperties).GetStringFromName(aKey);
+    } catch (e) {
+      // This locale doesn't have it yet: the English.
+    }
+    let names = aList.map(function (aFailure) {
+      return aFailure.name;
+    }).join(", ");
+    // Functions, so a "$" in a name is taken literally.
+    GM_notification(text
+        .replace("%1", function () { return aList.length; })
+        .replace("%2", function () { return names; }),
+        aTopic, { "persistence": -1, "persistWhileVisible": true });
+  };
+  notify(aFailures.filter(function (aFailure) {
+    return !aFailure.gaveUp;
+  }), "backup.dependenciesRetry",
+      "%1 imported scripts couldn't get their @require or @resource files"
+      + " yet, so they don't run.  Greasemonkey tries again the next time"
+      + " it starts, or import them again to try now: %2",
+      "greasemonkey-import-dependencies-retry");
+  notify(aFailures.filter(function (aFailure) {
+    return aFailure.gaveUp;
+  }), "backup.dependenciesFailed",
+      "%1 imported scripts couldn't get their @require or @resource files,"
+      + " so they are switched off (marked broken in the Add-ons Manager):"
+      + " %2",
+      "greasemonkey-import-dependencies-failed");
 }
 
 /**
@@ -1180,7 +1355,7 @@ function _installAll(aKeys, aScripts, aDepFiles, aOpts, aResult, aDone) {
  *   parsedScript, cost, state, error, remoteScript}.  state is "waiting"
  *   (to download) or "skipped" (error says why).
  */
-function _prepareImport(aKey, aEntry, aDepFiles, aOpts) {
+function _prepareImport(aKey, aEntry, aDepFiles, aOpts, aThisImport) {
   let job = {
     "cost": 0,
     "entry": aEntry,
@@ -1297,11 +1472,14 @@ function _prepareImport(aKey, aEntry, aDepFiles, aOpts) {
   // Skipped early so it isn't downloaded for nothing; checked again at
   // install time, when an earlier entry of this archive may have
   // installed the same script.
-  if (_importClashes(parsedScript, aOpts)) {
+  if (_importClashes(parsedScript, aOpts, aThisImport)) {
     return skip("already installed");
   }
 
   job.cost = _importDownloadCount(parsedScript, prefetch);
+  // Files from the web: the script is installed at once, without them,
+  // and they are fetched after (see _installAll).
+  job.deferred = job.cost > 0;
   return job;
 }
 
@@ -1311,10 +1489,34 @@ function _prepareImport(aKey, aEntry, aDepFiles, aOpts) {
  *   in-place update instead: config.install() resolves the existing script,
  *   keeps its list position, and its stored values carry over via
  *   basedir-name reuse; the sidecar's options/values then apply on top.
+ *   An installed copy that couldn't get its files (broken, or still
+ *   waiting for them) doesn't count: importing again replaces it the same
+ *   way, which is how to try again now.  One this import installed
+ *   (aThisImport: their ids) always does.
  */
-function _importClashes(aScript, aOpts) {
-  return GM_util.getService().config.installIsUpdate(aScript)
-      && !(aOpts && aOpts.overwrite);
+function _importClashes(aScript, aOpts, aThisImport) {
+  if (aOpts && aOpts.overwrite) {
+    return false;
+  }
+  if (aThisImport && aThisImport.has(aScript.id)) {
+    return true;
+  }
+  let installed = _installedCopy(aScript);
+  return !!installed && !installed.broken && !installed._dependenciesPending;
+}
+
+/**
+ * @param {Script} aScript
+ * @returns {?Script} The installed script with aScript's id.
+ */
+function _installedCopy(aScript) {
+  let config = GM_util.getService().config;
+  if (!config.installIsUpdate(aScript)) {
+    return null;
+  }
+  return config.getMatchingScripts(function (aInstalled) {
+    return aInstalled.id == aScript.id;
+  })[0] || null;
 }
 
 /**
@@ -1349,7 +1551,9 @@ function _downloadForImport(aJob, aDone) {
   let tempFile;
   try {
     remoteScript = new RemoteScript();
-    tempFile = GM_util.getTempFile(remoteScript._tempDir,
+    // Its own new, empty folder: the name is free as it is.
+    tempFile = remoteScript._tempDir.clone();
+    tempFile.append(
         cleanFilename(aJob.parsedScript.name, GM_CONSTANTS.fileScriptName)
         + GM_CONSTANTS.fileScriptExtension);
   } catch (e) {
@@ -1359,7 +1563,7 @@ function _downloadForImport(aJob, aDone) {
   aJob.remoteScript = remoteScript;
   aJob.state = "downloading";
 
-  GM_util.writeToFile(aJob.source, tempFile, function (aWriteErr) {
+  let written = function (aWriteErr) {
     if (aWriteErr) {
       fail("temp write failed - " + aWriteErr);
       return undefined;
@@ -1367,6 +1571,12 @@ function _downloadForImport(aJob, aDone) {
     try {
       remoteScript.setScript(aJob.parsedScript, tempFile);
       remoteScript.setSilent(true);
+      if (aJob.deferred) {
+        // Installed without its files, which are fetched after.
+        aJob.state = "ready";
+        aDone();
+        return undefined;
+      }
       if (aJob.prefetch) {
         remoteScript.setPrefetchedDependencies(aJob.prefetch);
       }
@@ -1386,7 +1596,15 @@ function _downloadForImport(aJob, aDone) {
       fail("download setup failed - " + e);
     }
     return undefined;
-  });
+  };
+  // On OS.File's own thread: creating and opening the file (twice, with
+  // GM_util.writeToFile) cost the browser's thread a few ms per script.
+  OS.File.writeAtomic(tempFile.path, new TextEncoder().encode(aJob.source))
+      .then(function () {
+        written(null);
+      }, function (aError) {
+        written(aError || "the file can't be written");
+      });
   return undefined;
 }
 
@@ -1394,7 +1612,7 @@ function _downloadForImport(aJob, aDone) {
  * Installs one prepared, downloaded job, or records why it wasn't, then
  * applies its sidecar options and stored values.
  */
-function _commitImport(aJob, aOpts, aResult) {
+function _commitImport(aJob, aOpts, aResult, aThisImport) {
   if (aOpts && (typeof aOpts.onProgress === "function")) {
     try {
       aOpts.onProgress(aJob.index, aJob.total, aJob.key);
@@ -1417,18 +1635,33 @@ function _commitImport(aJob, aOpts, aResult) {
     notInstalled(aJob.error);
     return undefined;
   }
-  if (_importClashes(aJob.parsedScript, aOpts)) {
+  if (_importClashes(aJob.parsedScript, aOpts, aThisImport)) {
     notInstalled("already installed");
     return undefined;
   }
   try {
+    if (aJob.deferred) {
+      aJob.parsedScript.markDependenciesPending();
+    }
+    // A broken copy this replaces was switched off by Greasemonkey, not by
+    // the user: the new one doesn't take that over (config.install() copies
+    // the old copy's on/off), unless the backup says so.
+    let replaced = _installedCopy(aJob.parsedScript);
+    let wasBroken = !!replaced && replaced.broken;
     aJob.remoteScript.install();
+    if (wasBroken) {
+      aJob.parsedScript._enabled = true;
+    }
     _applyImportedOptions(aJob.parsedScript, aJob.options);
     if (aJob.entry.storage && !(aOpts && (aOpts.restoreValues === false))) {
       _applyImportedStorage(
           aJob.parsedScript, aJob.entry.storage, aJob.entry.storageShape);
     }
     aResult.imported++;
+    aJob.installed = true;
+    if (aThisImport) {
+      aThisImport.add(aJob.parsedScript.id);
+    }
   } catch (e) {
     aResult.skipped++;
     aResult.errors.push(aJob.key + ": install failed - " + e);

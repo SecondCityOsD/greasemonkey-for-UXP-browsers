@@ -142,6 +142,8 @@
         onclick="GM_backupExport();" />
       <label id="gm-import" value="&backup.import;" class="text-link"
         onclick="GM_backupImport();" />
+      <!-- In the Import link's place while an import runs. -->
+      <label id="gm-import-progress" hidden="true" />
       <!-- Recover Orphans link.  Hidden by default; init() in
            addonsOverlay.js scans <profile>/gm_scripts/ at panel-load time
            and, when orphaned script dirs exist, sets a localized

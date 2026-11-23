@@ -85,6 +85,170 @@ gDragDrop.onDrop = function GM_onDrop(aEvent) {
   }
 };
 
+/**
+ * Rows for newly installed scripts, waiting to be added to the list.
+ * gListView.addItem() searches the whole list for the add-on, then puts
+ * the row at the top, so the whole list is laid out again; and the
+ * install's own "modified" right after built the row a second time.
+ * Importing 200 scripts with this page open took three times as long as
+ * with it closed.  So new rows wait for a pause in the installs (or
+ * PENDING_ROWS_MAX_WAIT_MS at most, so a long import shows progress) and
+ * are then added a batch at a time: built once, from the script as it is
+ * by then, and put in the list in one go.
+ */
+var gPendingRows = {
+  "firstQueued": 0,
+  "flushing": false,
+  // An import from this page is running: its rows wait until it's over
+  // (holdScriptRows).
+  "held": false,
+  // Rows to build again: the same script with new files (refreshes).
+  "refresh": new Set(),
+  "scripts": new Set(),
+  "timer": null,
+};
+const PENDING_ROWS_QUIET_MS = 300;
+const PENDING_ROWS_MAX_WAIT_MS = 2000;
+// A batch of rows, then a pause so clicks and scrolling are answered.
+const PENDING_ROWS_PER_BATCH = 10;
+const PENDING_ROWS_GAP_MS = 50;
+
+/**
+ * @param {Script}  aScript
+ * @param {boolean} [aRefresh] - Its row is there: build it again.
+ */
+function queueScriptRow(aScript, aRefresh) {
+  (aRefresh ? gPendingRows.refresh : gPendingRows.scripts).add(aScript);
+  if (gPendingRows.held || gPendingRows.flushing) {
+    // The import's end, or the next batch, takes it.
+    return undefined;
+  }
+  let now = Date.now();
+  if (gPendingRows.timer) {
+    if (now - gPendingRows.firstQueued >= PENDING_ROWS_MAX_WAIT_MS) {
+      return undefined;
+    }
+    clearTimeout(gPendingRows.timer);
+  } else {
+    gPendingRows.firstQueued = now;
+  }
+  gPendingRows.timer = setTimeout(addPendingRows, PENDING_ROWS_QUIET_MS);
+}
+
+/**
+ * While an import runs, this page leaves it alone, and once it's over it
+ * adds the rows of the scripts it doesn't show yet.  With the User Scripts
+ * list showing, the page following each of the import's changes (even
+ * without adding rows) took the import half again as long, and kept the
+ * browser busy three times as long, as with the list closed.  A script
+ * switched on or off elsewhere during the import shows the change when
+ * the list is next drawn.
+ *
+ * @param {boolean} aHold
+ */
+function holdScriptRows(aHold) {
+  let config = GM_util.getService().config;
+  if (aHold == gPendingRows.held) {
+    return undefined;
+  }
+  gPendingRows.held = aHold;
+  if (aHold) {
+    config.removeObserver(observer);
+    return undefined;
+  }
+  config.addObserver(observer);
+  let shown = new Set();
+  for (let item of gListView._listBox.childNodes) {
+    if (item.mAddon) {
+      shown.add(item.mAddon.id);
+    }
+  }
+  config.scripts.forEach(function (aScript) {
+    if (!aScript.needsUninstall
+        && !shown.has(aScript.id + GM_CONSTANTS.scriptIDSuffix)) {
+      gPendingRows.scripts.add(aScript);
+    }
+  });
+  setEmptyWarningVisible();
+  if (gPendingRows.scripts.size && !gPendingRows.timer) {
+    addPendingRows();
+  }
+}
+// For the Import link (GM_backupImport), outside this scope.
+window.GM_holdScriptRows = holdScriptRows;
+
+function addPendingRows() {
+  gPendingRows.timer = null;
+  if (gPendingRows.held) {
+    // holdScriptRows(false) adds them.
+    gPendingRows.flushing = false;
+    return undefined;
+  }
+  if (!isScriptView()) {
+    // Another list is showing; the User Scripts one is built afresh, new
+    // scripts included, when it is shown again.
+    gPendingRows.scripts.clear();
+    gPendingRows.refresh.clear();
+    gPendingRows.flushing = false;
+    return undefined;
+  }
+  let listBox = gListView._listBox;
+  // The list may have been built afresh meanwhile (the view shown again).
+  let shown = new Map();
+  for (let item of listBox.childNodes) {
+    if (item.mAddon) {
+      shown.set(item.mAddon.id, item);
+    }
+  }
+  let items = [];
+  for (let script of gPendingRows.scripts) {
+    gPendingRows.scripts.delete(script);
+    let addon = ScriptAddonFactoryByScript(script);
+    if (!shown.has(addon.id)) {
+      shown.set(addon.id, null);
+      items.push(createItem(addon));
+    }
+    if (items.length >= PENDING_ROWS_PER_BATCH) {
+      break;
+    }
+  }
+  let rebuilt = new Set();
+  for (let script of gPendingRows.refresh) {
+    if (items.length + rebuilt.size >= PENDING_ROWS_PER_BATCH) {
+      break;
+    }
+    gPendingRows.refresh.delete(script);
+    let id = script.id + GM_CONSTANTS.scriptIDSuffix;
+    let oldItem = shown.get(id);
+    if (oldItem && !rebuilt.has(id) && !gPendingRows.scripts.has(script)) {
+      oldItem.parentNode.replaceChild(
+          createItem(ScriptAddonFactoryByScript(script, true)), oldItem);
+      rebuilt.add(id);
+    }
+  }
+  if (items.length) {
+    // Newest on top, where one row at a time used to put them.
+    let batch = document.createDocumentFragment();
+    for (let i = items.length - 1; i >= 0; i--) {
+      batch.appendChild(items[i]);
+    }
+    listBox.insertBefore(batch, listBox.firstChild);
+    gListView.showEmptyNotice(false);
+    // The new rows need to respect any active live-search filter.
+    try {
+      if (typeof gmLiveSearchInput == "function") {
+        gmLiveSearchInput();
+      }
+    } catch (e) {}
+  }
+  setEmptyWarningVisible();
+  gPendingRows.flushing =
+      (gPendingRows.scripts.size + gPendingRows.refresh.size) > 0;
+  if (gPendingRows.flushing) {
+    gPendingRows.timer = setTimeout(addPendingRows, PENDING_ROWS_GAP_MS);
+  }
+}
+
 // Set up an "observer" on the config, to keep the displayed items up to date
 // with their actual state.
 var observer = {
@@ -96,6 +260,12 @@ var observer = {
       "move": "move",
       "uninstall": "uninstall",
     };
+    if (!events.hasOwnProperty(aEvent)) {
+      // A stored value and the like: nothing here shows it.  Each one used
+      // to rebuild the script's add-on and the empty-list notice, which
+      // slowed every script's GM_setValue while this page was open.
+      return undefined;
+    }
     let _eventsAlsoDetail = [
       events["edit-enabled"],
       events["modified"],
@@ -108,6 +278,14 @@ var observer = {
       type = 2;
     }
     if (type == 0) {
+      return undefined;
+    }
+    if ((type == 1) && gPendingRows.scripts.has(aScript)) {
+      // Its row isn't built yet; it will be, from the script as it is then.
+      if ((aEvent == events["uninstall"]) && !aData) {
+        gPendingRows.scripts.delete(aScript);
+        setEmptyWarningVisible();
+      }
       return undefined;
     }
 
@@ -155,12 +333,7 @@ var observer = {
 
         break;
       case events["install"]:
-        gListView.addItem(addon);
-        // The newly-appended richlistitem needs to respect any active
-        // live-search filter.  Re-apply.
-        try {
-          if (typeof gmLiveSearchInput == "function") gmLiveSearchInput();
-        } catch (e) {}
+        queueScriptRow(aScript);
 
         break;
       case events["move"]:
@@ -202,6 +375,15 @@ var observer = {
         if (type == 2) {
           // A new id (renamed in an edit or update): the list replaces
           // the row; the detail pane stays as it is.
+          break;
+        }
+        if (aData == aScript.id) {
+          // The same script with new files (an @icon fetched after an
+          // import, an update's): its row is built again with the next
+          // batch, once however many such changes come in.  Built at
+          // once, on top of the batches filling the list after an
+          // import, it paused the browser for up to a third of a second.
+          queueScriptRow(aScript, true);
           break;
         }
         var oldAddon = ScriptAddonFactoryByScript({
@@ -1118,8 +1300,26 @@ function GM_backupImport() {
   // 3.9 ships the straight import: install every parsable script (skipping
   // ones already installed), restore their stored values, no snapshot.
   let backup = GM_backup_get();
-  backup.GM_BackupImport(fp.file, { "skipSnapshot": true },
-      function (aSuccess, aResult, aErr) {
+  // While it runs, the list waits for its new rows, and the Import link
+  // gives way to the progress.
+  let importLink = document.getElementById("gm-import");
+  let progress = document.getElementById("gm-import-progress");
+  let showImporting = function (aShow) {
+    importLink.hidden = aShow;
+    progress.hidden = !aShow;
+    progress.value = recoverString("backup.importing", "Importing…");
+  };
+  GM_holdScriptRows(true);
+  showImporting(true);
+  backup.GM_BackupImport(fp.file, {
+    "onProgress": function (aIndex, aTotal) {
+      progress.value = recoverString("backup.importProgress",
+          "Importing %1 of %2…", [aIndex + 1, aTotal]);
+    },
+    "skipSnapshot": true,
+  }, function (aSuccess, aResult, aErr) {
+    showImporting(false);
+    GM_holdScriptRows(false);
     let bundle = GM_backup_stringBundle();
     if (!aSuccess) {
       alert(bundle.GetStringFromName("backup.failed").replace("%1", aErr || ""));
@@ -1128,6 +1328,11 @@ function GM_backupImport() {
     let msg = bundle.GetStringFromName("backup.imported")
         .replace("%1", aResult.imported)
         .replace("%2", aResult.skipped);
+    if (aResult.fetching) {
+      msg += "\n\n" + recoverString("backup.stillFetching",
+          "%1 of them are still downloading their @require files and icons,"
+          + " and start working as those arrive.", [aResult.fetching]);
+    }
     if (aResult.errors && aResult.errors.length) {
       // As many as fit; all of them in the Browser Console (an import of
       // many scripts pushed the alert's OK button off the screen).

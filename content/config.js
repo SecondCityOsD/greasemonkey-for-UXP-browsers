@@ -20,6 +20,14 @@ Cu.import("chrome://greasemonkey-modules/content/util.js");
 
 
 const TAG_USER_SCRIPT_CONFIG = "UserScriptConfig";
+// Imported scripts still waiting for their files at startup: fetched this
+// long after it, this many scripts at a time (_fetchWaitingDependencies).
+const WAITING_DEPENDENCIES_DELAY_MS = 5000;
+const WAITING_DEPENDENCIES_AT_ONCE = 4;
+// config.xml is written this long after the last change, and at least this
+// often while changes keep coming (_scheduleSave).
+const SAVE_DELAY_MS = 250;
+const SAVE_AT_LEAST_EVERY_MS = 1000;
 
 function Config() {
   this._saveTimer = null;
@@ -264,6 +272,7 @@ Config.prototype._load = function () {
       null);
 
   this._scripts = [];
+  let waiting = [];
   for (let i = 0, node = null; node = nodes.snapshotItem(i); i++) {
     let script;
     try {
@@ -274,6 +283,16 @@ Config.prototype._load = function () {
       continue;
     }
     let _allFilesExist = script.allFilesExistResult();
+    if (script._dependenciesPending && script.fileExists(script.file)) {
+      // Imported, but the browser closed before its files were in: it
+      // still waits for them (and runs on no page), and they are fetched
+      // again below.  Whatever is missing: one waiting only for its @icon
+      // (not among the files checked above) was otherwise never fetched,
+      // and so never ran.
+      this._scripts.push(script);
+      waiting.push(script);
+      continue;
+    }
     if (_allFilesExist.length == 0) {
       // Files are intact.  If the script was previously flagged
       // broken (a transient file-system glitch or a partial backup
@@ -317,30 +336,88 @@ Config.prototype._load = function () {
       this._changed(script, "modified", null);
     }
   }
+  this._fetchWaitingDependencies(waiting);
 };
 
-Config.prototype._save = function (aSaveNow) {
+/**
+ * Fetches the files of scripts an import installed without them (see
+ * Script.markDependenciesPending), a few at a time, shortly after startup
+ * so they don't slow it down.
+ *
+ * @param {Script[]} aScripts
+ */
+Config.prototype._fetchWaitingDependencies = function (aScripts) {
+  if (!aScripts.length) {
+    return undefined;
+  }
+  let queue = aScripts.concat();
+  let next = function () {
+    let script = queue.shift();
+    if (script) {
+      script.fetchPendingDependencies(null, next);
+    }
+  };
+  GM_util.timeout(function () {
+    for (let i = 0; i < WAITING_DEPENDENCIES_AT_ONCE; i++) {
+      next();
+    }
+  }, WAITING_DEPENDENCIES_DELAY_MS);
+};
+
+/**
+ * Writes config.xml a moment after a change (SAVE_DELAY_MS), so that a
+ * burst of changes is one write, but at least every SAVE_AT_LEAST_EVERY_MS
+ * while they keep coming.  Each change used to put the write off again:
+ * an import makes one every few milliseconds, so nothing was written
+ * until it was over, and a crash meanwhile left every script it had
+ * installed out of config.xml (as orphaned folders).
+ */
+Config.prototype._scheduleSave = function () {
+  let now = Date.now();
+  if (this._saveTimer) {
+    this._saveTimer.cancel();
+  } else {
+    this._firstUnsaved = now;
+  }
+  let delay = Math.max(0, Math.min(SAVE_DELAY_MS,
+      this._firstUnsaved + SAVE_AT_LEAST_EVERY_MS - now));
+  this._saveTimer = Components.classes["@mozilla.org/timer;1"]
+      .createInstance(Components.interfaces.nsITimer);
+  let config = this;
+  this._saveTimer.initWithCallback({
+    "notify": function () {
+      config._save(true);
+    },
+  }, delay, Ci.nsITimer.TYPE_ONE_SHOT);
+};
+
+/**
+ * Writes a change config.xml is still waiting for, at once and before
+ * returning: called on quit, when a write put off a moment (or one done on
+ * another thread) could be cut short.
+ */
+Config.prototype.flushSave = function () {
+  if (this._saveTimer) {
+    this._save(true, true);
+  }
+};
+
+/**
+ * @param {boolean} [aSaveNow] - Write now, not a moment after the last
+ *   change (see _scheduleSave).
+ * @param {boolean} [aBeforeReturning] - Write on this thread, finished when
+ *   this returns (flushSave); otherwise the file is written on another.
+ */
+Config.prototype._save = function (aSaveNow, aBeforeReturning) {
   // If we have not explicitly been told to save now, then defer execution
   // via a timer, to avoid locking up the UI.
   if (!aSaveNow) {
-    // Reduce work in the case of many changes near to each other in time.
-    if (this._saveTimer) {
-      this._saveTimer.cancel(this._saveTimer);
-    }
-
-    this._saveTimer = Components.classes["@mozilla.org/timer;1"]
-        .createInstance(Components.interfaces.nsITimer);
-
-    // Dereference "this" for the closure.
-    var _save = this._save.bind(this);
-
-    this._saveTimer.initWithCallback({
-      "notify": function () {
-        _save(true);
-      },
-    }, 250, Ci.nsITimer.TYPE_ONE_SHOT);
-
+    this._scheduleSave();
     return undefined;
+  }
+  if (this._saveTimer) {
+    this._saveTimer.cancel();
+    this._saveTimer = null;
   }
 
   let doc = Components.classes["@mozilla.org/xmlextras/domparser;1"]
@@ -360,7 +437,33 @@ Config.prototype._save = function (aSaveNow) {
   let domSerializer = Components
       .classes["@mozilla.org/xmlextras/xmlserializer;1"]
       .createInstance(Components.interfaces.nsIDOMSerializer);
-  GM_util.writeToFile(domSerializer.serializeToString(doc), this._configFile);
+  let text = domSerializer.serializeToString(doc);
+  if (!aBeforeReturning) {
+    GM_util.writeToFile(text, this._configFile);
+    return undefined;
+  }
+  // A safe-file stream: the old config.xml stays until the new one is
+  // complete.
+  let stream = Cc["@mozilla.org/network/safe-file-output-stream;1"]
+      .createInstance(Ci.nsIFileOutputStream);
+  try {
+    stream.init(this._configFile, 0x02 | 0x08 | 0x20 /* write, create, truncate */,
+        GM_CONSTANTS.fileMask, 0);
+    let converter = Cc["@mozilla.org/intl/converter-output-stream;1"]
+        .createInstance(Ci.nsIConverterOutputStream);
+    converter.init(stream, "UTF-8", 0, 0);
+    converter.writeString(text);
+    converter.flush();
+    stream.QueryInterface(Ci.nsISafeOutputStream).finish();
+  } catch (e) {
+    GM_util.logError("Greasemonkey: config.xml couldn't be written: " + e,
+        false);
+    try {
+      stream.close();
+    } catch (e2) {
+      // Never opened.
+    }
+  }
 };
 
 // Backward compatibility.

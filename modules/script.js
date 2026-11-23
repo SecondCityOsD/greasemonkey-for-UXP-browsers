@@ -76,6 +76,13 @@ const RUN_AT_REGEXP = /^document-(start|body|end|idle)$/;
 // @require files are in.
 const PENDING_EXEC_DOCUMENT_START = "document-start update";
 const PENDING_EXEC_DOWNLOAD = "dependency download";
+// How often fetchPendingDependencies tries a script's files (the import,
+// then a start each) before it calls the script broken.
+const DEPENDENCY_TRIES = 3;
+// ...and the time each file of theirs gets: a @require / @resource, an
+// @icon (as an import's).
+const PENDING_DEPENDENCY_MS = 15000;
+const PENDING_ICON_MS = 2000;
 
 /**
  * Derives the human-readable page of a script from the URL it is
@@ -272,6 +279,11 @@ function Script(aConfigNode) {
   // backup restored, or a reinstall) the script auto-recovers.
   this._broken = false;
   this._brokenMissingFiles = [];
+  // Installed without its @require / @resource / @icon files, which are
+  // being fetched (see markDependenciesPending), and how often that has
+  // failed (fetchPendingDependencies).
+  this._dependenciesPending = false;
+  this._dependencyFailures = 0;
   this._updateMetaStatus = "unknown";
   // "@downloadURL none": this copy must never update (see updateURL).
   this._updatesDisabled = false;
@@ -1190,6 +1202,15 @@ Script.prototype._fromConfigNode = function (aNode) {
   this._unwrap = aNode.getAttribute("unwrap") == "true";
   this._httpOnlyCookies = aNode.getAttribute("httpOnlyCookies") == "true";
   this._broken = aNode.getAttribute("broken") == "true";
+  // The browser closed before an import had its files: it still waits for
+  // them (Config._load fetches them again).
+  this._dependenciesPending =
+      aNode.getAttribute("dependenciesPending") == "true";
+  this._dependencyFailures =
+      parseInt(aNode.getAttribute("dependencyFailures"), 10) || 0;
+  if (this._dependenciesPending) {
+    this.pendingExec.push(PENDING_EXEC_DOWNLOAD);
+  }
   // brokenMissingFiles is space-separated leaf names; empty string
   // when the attribute is absent (the common case for non-broken
   // entries).  Filter empties from the split result so a missing
@@ -1427,6 +1448,12 @@ Script.prototype.toConfigNode = function (aDoc) {
       scriptNode.setAttribute(
           "brokenMissingFiles", this._brokenMissingFiles.join(" "));
     }
+  }
+  if (this._dependenciesPending) {
+    scriptNode.setAttribute("dependenciesPending", "true");
+  }
+  if (this._dependencyFailures) {
+    scriptNode.setAttribute("dependencyFailures", this._dependencyFailures);
   }
   scriptNode.setAttribute("runAt", this._runAt);
   // The user's own choices, only when made (see the constructor).
@@ -1808,6 +1835,11 @@ Script.prototype.updateFromNewScript = function (
         // _dependhash is unchanged, the next edit tries the download
         // again.  Left as it was, pendingExec kept the script off every
         // page and grew with each page load.
+        if (this._dependenciesPending) {
+          // Imported without its files, it has no old ones to run with.
+          this._dependenciesPending = false;
+          this.markBroken(this.allFilesExistResult());
+        }
         this._runPendingExec(false);
         this._changed("modified", this.id);
         let notificationOptions = {
@@ -1852,6 +1884,7 @@ Script.prototype.updateFromNewScript = function (
 
       // Import dependencies from new script.
       this._dependhash = dependhash;
+      this._dependenciesPending = false;
       this._icon = newScript._icon;
       this._requires = newScript._requires;
       this._resources = newScript._resources;
@@ -1920,6 +1953,143 @@ Script.prototype._runPendingExec = function (aUpdated) {
           aEntry.browser);
     }
   }, this);
+};
+
+/**
+ * Marks a script that is about to be installed without its @require /
+ * @resource / @icon files, for fetchPendingDependencies() to fetch: an
+ * import installs at once and fetches after, as Violentmonkey does,
+ * instead of every script waiting for the slowest site before it.  Until
+ * the files are in, the script runs on no page (pendingExec).  The mark
+ * is kept in config.xml, so if the browser closes first, the next start
+ * fetches them again instead of calling the script broken.  The files it
+ * hasn't got yet are given a name in its folder, as an installed script's
+ * files always have; nothing is created under it.
+ */
+Script.prototype.markDependenciesPending = function () {
+  this._dependenciesPending = true;
+  if (this.pendingExec.indexOf(PENDING_EXEC_DOWNLOAD) == -1) {
+    this.pendingExec.push(PENDING_EXEC_DOWNLOAD);
+  }
+  this._requires.concat(this._resources).forEach(function (aDep, aIndex) {
+    if (!aDep._filename) {
+      aDep._filename = "pending-" + aIndex;
+    }
+  });
+};
+
+/**
+ * Fetches the files of a script installed without them (see
+ * markDependenciesPending), the way a local edit's new @require files
+ * are fetched.  Once they are in, the script runs, also in the pages that
+ * waited for it.  When a @require or @resource can't be had (a site down
+ * for a while: openuserjs.org answered 503 now and then), the script keeps
+ * waiting, and the next start tries again (Config._fetchWaitingDependencies).
+ * After DEPENDENCY_TRIES failures, or when its source can't be read, it
+ * can't run: it is marked broken, which switches it off, as a script whose
+ * files are missing at startup is.  (An @icon that can't be had is
+ * skipped.)
+ *
+ * @param {object}   [aOptions] - {source, prefetch, dependencyMs, iconMs}:
+ *   the script's text when the caller has it (an import: reading it back
+ *   from disk cost up to 0.1 s a script), the archived files to use
+ *   instead of downloading, and time limits per file.
+ * @param {function} [aDone] - Called once with (aSuccess, aErrorMessage,
+ *   aGaveUp): aErrorMessage is null when there was nothing to report (the
+ *   script was removed meanwhile, or an edit's own download took over);
+ *   aGaveUp, that the script is now broken rather than still waiting.
+ */
+Script.prototype.fetchPendingDependencies = function (aOptions, aDone) {
+  let options = aOptions || {};
+  let done = aDone || function () {};
+  let isInstalled = function () {
+    return GM_util.getService().config.getScriptById(this.id) === this;
+  }.bind(this);
+  let fail = function (aMessage, aFinal) {
+    this._dependencyFailures++;
+    let gaveUp = aFinal || (this._dependencyFailures >= DEPENDENCY_TRIES);
+    if (gaveUp) {
+      this._dependenciesPending = false;
+      this._dependencyFailures = 0;
+      this.markBroken(this.allFilesExistResult());
+      // Switched off now, so the pages that waited don't get it.
+      this._runPendingExec(false);
+    } else {
+      // Still waiting; the pages that waited this time don't get it.
+      this.pendingExec = [PENDING_EXEC_DOWNLOAD];
+    }
+    // Its row, and config.xml (the count of tries, or broken).
+    this._changed("modified", this.id);
+    done(false, aMessage, gaveUp);
+  }.bind(this);
+
+  if (!isInstalled()) {
+    done(false, null);
+    return undefined;
+  }
+  let copy = null;
+  try {
+    copy = parse(options.source || this.textContent,
+        this.downloadURL ? GM_util.getUriFromUrl(this.downloadURL) : null);
+  } catch (e) {
+    copy = null;
+  }
+  if (!copy || copy.parseErrors.length) {
+    // Trying again can't help.
+    fail(copy ? copy.parseErrors.join("\n") : "The script can't be read.",
+        true);
+    return undefined;
+  }
+  copy._basedir = this._basedir;
+  copy._filename = this._filename;
+
+  let scope = {};
+  Cu.import("chrome://greasemonkey-modules/content/remoteScript.js", scope);
+  let rs = new scope.RemoteScript(this.downloadURL);
+  rs.setScript(copy);
+  rs.setSilent(true);
+  if (options.prefetch) {
+    rs.setPrefetchedDependencies(options.prefetch);
+  }
+  // Always with limits: without them (after a restart) a slow site held
+  // one of the few downloads at a time, and the others waited behind it.
+  rs.setDownloadTimeouts(options.dependencyMs || PENDING_DEPENDENCY_MS,
+      options.iconMs || PENDING_ICON_MS);
+  this._dependencyDownload = rs;
+  rs.download(function (aSuccess) {
+    if ((this._dependencyDownload !== rs) || !isInstalled()) {
+      // An edit's own download took over, or the script was removed.
+      rs.cleanup();
+      done(false, null);
+      return undefined;
+    }
+    this._dependencyDownload = null;
+    if (!aSuccess && Cc["@mozilla.org/toolkit/app-startup;1"]
+        .getService(Ci.nsIAppStartup).shuttingDown) {
+      // Cut off by the browser closing: no failed try.  It still waits,
+      // and the next start fetches it.
+      done(false, null);
+      return undefined;
+    }
+    if (!aSuccess) {
+      fail(rs.errorMessage);
+      return undefined;
+    }
+    this._icon = copy._icon;
+    this._requires = copy._requires;
+    this._resources = copy._resources;
+    this._icon._script = this;
+    this._requires.concat(this._resources).forEach(function (aDep) {
+      aDep._script = this;
+    }, this);
+    rs.install(this, true);
+    this._dependenciesPending = false;
+    this._dependencyFailures = 0;
+    this._runPendingExec(true);
+    // Its icon, and config.xml (the files' names, no more waiting).
+    this._changed("modified", this.id);
+    done(true, null);
+  }.bind(this));
 };
 
 /**

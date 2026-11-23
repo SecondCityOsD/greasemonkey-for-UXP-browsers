@@ -47,6 +47,12 @@ var gStartupHasRun = false;
 /////////////////////// Component-global Helper Functions //////////////////////
 
 function shutdown(aService) {
+  // A change config.xml was still waiting for (it's written a moment after
+  // the last one) is written now: closing the browser lost it otherwise.
+  // Not when the config was never loaded this session.
+  if (aService._config) {
+    aService._config.flushSave();
+  }
   // No further scheduled update sweeps once teardown begins.
   GM_updateScheduler.stop();
   // PARKED for 3.9 (see the commented import above).
