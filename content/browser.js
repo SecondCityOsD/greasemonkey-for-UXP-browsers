@@ -280,6 +280,30 @@ GM_BrowserUI.getUserScriptUrlUnderPointer = function (aCallback) {
   }
 };
 
+/**
+ * "Reload current tab after switching on/off a script from menu"
+ * (Preferences > Toolbar button), as in Violentmonkey: once a script, or
+ * Greasemonkey itself, is switched on or off from the menu or the toolbar
+ * button, the current tab reloads, so the change shows on the page.
+ */
+GM_BrowserUI.reloadAfterToggle = function () {
+  if (!GM_prefRoot.getValue("toolbarMenu.autoReload", false)) {
+    return undefined;
+  }
+  try {
+    gBrowser.reload();
+  } catch (e) {
+    // No tab to reload.
+  }
+};
+
+/** Switches Greasemonkey on or off: the toolbar button and the menu item. */
+GM_BrowserUI.toggleEnabled = function () {
+  GM_util.setEnabled(!GM_util.getEnabled());
+  GM_BrowserUI.refreshStatus();
+  GM_BrowserUI.reloadAfterToggle();
+};
+
 GM_BrowserUI.refreshStatus = function () {
   let enabledElm = document.getElementById("gm_toggle_enabled");
   let checkedElm = document.getElementById("gm_toggle_checked");
@@ -497,7 +521,10 @@ function GM_popupClicked(aEvent) {
   if (aEvent.type == "command") {
     // Left-click.
     // Toggle enabled state.
-    script.enabled =! script.enabled;
+    script.enabled = !script.enabled;
+    closeMenus(aEvent.target);
+    GM_BrowserUI.reloadAfterToggle();
+    return undefined;
   } else if (aEvent.type == "click") {
     // Middle-click, Right-click.
     let _buttons = {
@@ -577,10 +604,9 @@ function getScripts() {
   }
   getScripts.scriptsMatching = scriptsMatching;
 
-  function appendScriptAfter(aScript, aPoint, aNoInsert) {
-    if (aScript.needsUninstall) {
-      return undefined;
-    }
+  // A script's checkbox item after aPoint; returns it.  (Scripts being
+  // uninstalled are left out by the caller.)
+  function appendScriptAfter(aScript, aPoint) {
     let mi = document.createElement("menuitem");
     mi.setAttribute("label", aScript.localized.name);
     if (aScript.noframes) {
@@ -589,17 +615,45 @@ function getScripts() {
     mi.script = aScript;
     mi.setAttribute("type", "checkbox");
     mi.setAttribute("checked", aScript.enabled.toString());
-    if (!aNoInsert) {
-      aPoint.parentNode.insertBefore(mi, aPoint.nextSibling);
-    }
-    return {
-      "menuItem": mi,
-      "noframes": aScript.noframes,
-    };
+    aPoint.parentNode.insertBefore(mi, aPoint.nextSibling);
+    return mi;
   }
   getScripts.appendScriptAfter = appendScriptAfter;
 }
 getScripts();
+
+/** The separator before a menu section's disabled scripts ("group"). */
+const DISABLED_SCRIPTS_SEP_CLASS = "scripts-disabled-sep";
+
+/**
+ * Arranges one menu section's scripts by "Disabled scripts:" (Preferences
+ * > Toolbar button), as Violentmonkey's popup does: "show" lists them as
+ * they are, "group" puts the disabled ones after the enabled ones, "hide"
+ * leaves the disabled ones out.  Each keeps its execution order.
+ *
+ * @param {Script[]} aScripts - In execution order.
+ * @param {string}   aMode    - "show", "group" or "hide"; anything else
+ *   is "show".
+ * @returns {{first: Script[], after: Script[]}} after: the disabled
+ *   scripts listed after a separator ("group" only).
+ */
+function GM_arrangeDisabledScripts(aScripts, aMode) {
+  let enabled = aScripts.filter(function (aScript) {
+    return aScript.enabled;
+  });
+  if (aMode == "hide") {
+    return { "first": enabled, "after": [] };
+  }
+  if (aMode == "group") {
+    return {
+      "first": enabled,
+      "after": aScripts.filter(function (aScript) {
+        return !aScript.enabled;
+      }),
+    };
+  }
+  return { "first": aScripts.slice(), "after": [] };
+}
 
 function asyncShowPopup(aEventTarget, aUrls) {
   let popup = aEventTarget;
@@ -609,15 +663,34 @@ function asyncShowPopup(aEventTarget, aUrls) {
   let scriptsSepElm = popup.getElementsByClassName("scripts-sep")[0];
   let noScriptsElm = popup.getElementsByClassName("no-scripts")[0];
 
-  // Remove existing menu items, between separators.
+  // Remove existing menu items, between separators (the one before a
+  // section's disabled scripts goes with them).
   function removeMenuitemsAfter(aEl) {
     while (true) {
       let sibling = aEl.nextSibling;
-      if (!sibling || (sibling.tagName == "menuseparator")) {
+      if (!sibling || ((sibling.tagName == "menuseparator")
+          && !sibling.classList.contains(DISABLED_SCRIPTS_SEP_CLASS))) {
         break;
       }
       sibling.parentNode.removeChild(sibling);
     }
+  }
+
+  // Lists a section's scripts after aPoint: the first ones, then (in
+  // "group" mode) a separator and the disabled ones.
+  function appendSection(aPoint, aArranged) {
+    let point = aPoint;
+    let append = function (aScript) {
+      point = getScripts.appendScriptAfter(aScript, point);
+    };
+    aArranged.first.forEach(append);
+    if (aArranged.first.length && aArranged.after.length) {
+      let separator = document.createElement("menuseparator");
+      separator.classList.add(DISABLED_SCRIPTS_SEP_CLASS);
+      point.parentNode.insertBefore(separator, point.nextSibling);
+      point = separator;
+    }
+    aArranged.after.forEach(append);
   }
   removeMenuitemsAfter(scriptsFramedElm);
   removeMenuitemsAfter(scriptsTopElm);
@@ -640,22 +713,25 @@ function asyncShowPopup(aEventTarget, aUrls) {
     }
   }
 
-  scriptsSepElm.collapsed = !(runsOnTop.length && runsFramed.length);
-  noScriptsElm.collapsed = !!(runsOnTop.length || runsFramed.length);
+  // A script being uninstalled isn't listed.
+  let listed = function (aScript) {
+    return !aScript.needsUninstall;
+  };
+  let disabledMode = GM_prefRoot.getValue(
+      "toolbarMenu.disabledScripts", "show");
+  let onTop = GM_arrangeDisabledScripts(
+      runsOnTop.filter(listed), disabledMode);
+  let inFrames = GM_arrangeDisabledScripts(
+      runsFramed.filter(listed), disabledMode);
+  let topCount = onTop.first.length + onTop.after.length;
+  let framedCount = inFrames.first.length + inFrames.after.length;
 
-  let point;
-  if (runsFramed.length) {
-    point = scriptsFramedElm;
-    runsFramed.forEach(
-        function (aScript) {
-          point = getScripts.appendScriptAfter(aScript, point).menuItem;
-        });
-  }
-  point = scriptsTopElm;
-  runsOnTop.forEach(
-      function (aScript) {
-        point = getScripts.appendScriptAfter(aScript, point).menuItem;
-      });
+  scriptsSepElm.collapsed = !(topCount && framedCount);
+  // Also when every script here is disabled and hidden: none runs.
+  noScriptsElm.collapsed = !!(topCount || framedCount);
+
+  appendSection(scriptsFramedElm, inFrames);
+  appendSection(scriptsTopElm, onTop);
 
   // Propagate to commands sub-menu.
   GM_MenuCommander.onPopupShowing(aEventTarget);
@@ -733,27 +809,20 @@ function GM_showTooltip(aEvent) {
       var runsFramedEnable = 0;
       var runsFramedNoframesDisable = 0;
 
-      var _runsFramed;
-      var _runsFramedEnable;
-      var point;
-      if (runsFramed.length) {
-        runsFramed.forEach(
-            function (aScript) {
-              _runsFramed = getScripts.appendScriptAfter(aScript, point, true);
-              _runsFramedEnable = ((_runsFramed.menuItem
-                  .getAttribute("checked") == "true") ? 1 : 0);
-              runsFramedEnable = runsFramedEnable + _runsFramedEnable;
-              if (_runsFramedEnable) {
-                runsFramedNoframesDisable = runsFramedNoframesDisable
-                    + ((!_runsFramed.noframes) ? 1 : 0);
-              }
-        });
-      }
-      runsOnTop.forEach(
-          function (aScript) {
-            runsOnTopEnable = runsOnTopEnable + ((getScripts
-                .appendScriptAfter(aScript, point, true)
-                .menuItem.getAttribute("checked") == "true") ? 1 : 0);
+      // Read off the scripts themselves.  (Menu items were built to read
+      // their checkmarks, which failed on a script being uninstalled.)
+      runsFramed.forEach(function (aScript) {
+        if (aScript.enabled && !aScript.needsUninstall) {
+          runsFramedEnable++;
+          if (!aScript.noframes) {
+            runsFramedNoframesDisable++;
+          }
+        }
+      });
+      runsOnTop.forEach(function (aScript) {
+        if (aScript.enabled && !aScript.needsUninstall) {
+          runsOnTopEnable++;
+        }
       });
 
       let activeFrames = runsFramedNoframesDisable + "/"

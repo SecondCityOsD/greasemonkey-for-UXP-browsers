@@ -14,6 +14,13 @@ pref("extensions.greasemonkey.api.GM_cookie.exposeHttpOnly", false);
 // nsIWebBrowserPersist + nsIFilePicker (see modules/GM_download.js),
 // replacing the script-side polyfill.  Default true.
 pref("extensions.greasemonkey.api.GM_download", true);
+// "Use browser download API" (Preferences > Script APIs), as in
+// Violentmonkey.  false: a download is fetched first, then saved like any
+// other download (the browser's download folder, asking where to save when
+// the browser is set to ask; no subfolders).  true: the browser downloads
+// it straight into the downloads folder, subfolders allowed, with its
+// progress in the Downloads window.
+pref("extensions.greasemonkey.api.GM_download.browserApi", false);
 // GM_getTab / GM_saveTab / GM_getTabs: per-tab, per-script session store
 // (Tampermonkey / ScriptCat).  Default true; set false to remove the trio.
 pref("extensions.greasemonkey.api.GM_getTab", true);
@@ -203,6 +210,13 @@ pref("extensions.greasemonkey.timeoutUpdatesInSeconds", 45);
 // color is its #rrggbb background; the figures go black or white.
 pref("extensions.greasemonkey.toolbarBadge.show", "unique");
 pref("extensions.greasemonkey.toolbarBadge.color", "#d90000");
+// The toolbar menu (Preferences > Toolbar button), as in Violentmonkey.
+// autoReload: reload the current tab after a script, or Greasemonkey
+// itself, is switched on or off from the menu.  disabledScripts: how the
+// menu lists the page's disabled scripts: "show" (among the others),
+// "group" (after the enabled ones) or "hide".
+pref("extensions.greasemonkey.toolbarMenu.autoReload", false);
+pref("extensions.greasemonkey.toolbarMenu.disabledScripts", "show");
 pref("extensions.greasemonkey.unmhtIsGreaseable", false);
 // Greasemonkey-owned script-update scheduling (modules/updateScheduler.js):
 // check every N days; 0 disables scheduled checks entirely.  lastCheck is

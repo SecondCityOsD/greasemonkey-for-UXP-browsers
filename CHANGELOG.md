@@ -7,11 +7,13 @@
 - Source viewer: dark theme that follows the browser (Auto / Light / Dark), a metadata header, better find (highlight every match, match case, whole word, regex, F3), Ctrl+G to go to a line, and a status bar
 - Toolbar: the icon shows how many scripts ran on the tab; each script's commands can be folded
 - Preferences: open as a normal window; new **Advanced** tab (update notifications, badge type and color, HTTP-only cookies)
+- Preferences, as in Violentmonkey: **Use browser download API**, **Reload current tab after switching on/off a script from menu**, and **Disabled scripts:** show / group / hide in the toolbar menu
 - Script Options: editor for stored values (text or JSON); separate Homepage, Script page and Contribute rows; `@contributionURL`; pinned hashes behind a "SHA" link
 - Pinned hashes in base64 (SRI) format are checked: sha256, sha384, sha512
 - Backups keep dependency files, the first-install date and the HTTP-only cookie choice, and these are imported from Violentmonkey too
 - Imports are much faster (files download in parallel) and no longer freeze the browser
 - `GM_info`, `GM_cookie` and `GM_download` work as they do in Violentmonkey
+- `GM_download` saves like any other download (the browser's download folder, asking where if the browser is set to ask); with the browser download API, straight into that folder, with subfolders, `conflictAction` and live progress
 - Compatible with Pale Moon 35; new text translated into 20 languages
 
 **Fixed**
@@ -35,6 +37,7 @@
 - Options open for disabled scripts and close when their script is updated or removed
 - Labels are readable with dark themes
 - Scratchpad shows its "not saved" alert again
+- The toolbar menu and its tooltip no longer fail on a script that is being uninstalled
 - Back/Forward, imports and Sync keep user rules, values and settings correctly
 
 #### 3.9

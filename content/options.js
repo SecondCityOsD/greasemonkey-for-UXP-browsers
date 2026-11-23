@@ -124,7 +124,19 @@ function GM_loadOptions() {
   GM_syncBadgeControls();
   document.getElementById("http-only-cookies")
       .checked = GM_prefRoot.getValue("api.GM_cookie.exposeHttpOnly", false);
+  document.getElementById("download-browser-api")
+      .checked = GM_prefRoot.getValue("api.GM_download.browserApi", false);
+  document.getElementById("menu-auto-reload")
+      .checked = GM_prefRoot.getValue("toolbarMenu.autoReload", false);
+  let menuDisabled = GM_prefRoot.getValue(
+      "toolbarMenu.disabledScripts", "show");
+  document.getElementById("menu-disabled").value =
+      (MENU_DISABLED_VALUES.indexOf(menuDisabled) != -1)
+          ? menuDisabled : "show";
 }
+
+/** How the toolbar menu can list the page's disabled scripts. */
+const MENU_DISABLED_VALUES = ["show", "group", "hide"];
 
 /** What the toolbar badge can count ("none" hides it), and its colour as
  *  in defaults/preferences, for a stored value that isn't #rrggbb. */
@@ -178,6 +190,14 @@ function GM_localizeOptions() {
     ["http-only-cookies", "tooltiptext", "options.httpOnlyCookies.tip"],
     ["http-only-cookies-note", null, "options.httpOnlyCookies.scriptOption"],
     ["http-only-cookies-note", "tooltiptext", "options.httpOnlyCookies.tip"],
+    ["download-browser-api", "label", "options.downloadBrowserApi"],
+    ["download-browser-api", "tooltiptext", "options.downloadBrowserApi.tip"],
+    ["menu-auto-reload", "label", "options.menuAutoReload"],
+    ["menu-disabled-label", "value", "options.menuDisabled"],
+    ["menu-disabled", "tooltiptext", "options.menuDisabled.tip"],
+    ["menu-disabled-show", "label", "options.menuDisabled.show"],
+    ["menu-disabled-group", "label", "options.menuDisabled.group"],
+    ["menu-disabled-hide", "label", "options.menuDisabled.hide"],
   ].forEach(function ([aId, aAttribute, aKey]) {
     let text;
     try {
@@ -243,6 +263,12 @@ function GM_saveOptions() {
       GM_badgeColor(document.getElementById("badge-color").value));
   GM_prefRoot.setValue("api.GM_cookie.exposeHttpOnly",
       !!document.getElementById("http-only-cookies").checked);
+  GM_prefRoot.setValue("api.GM_download.browserApi",
+      !!document.getElementById("download-browser-api").checked);
+  GM_prefRoot.setValue("toolbarMenu.autoReload",
+      !!document.getElementById("menu-auto-reload").checked);
+  GM_prefRoot.setValue("toolbarMenu.disabledScripts",
+      document.getElementById("menu-disabled").value);
   // PARKED for 3.9 (scheduled backups): backup pref save removed here.
   // Changes to global excludes should be active after tab reload.
   // UXP is single-process, so we call broadcastScriptUpdates() directly

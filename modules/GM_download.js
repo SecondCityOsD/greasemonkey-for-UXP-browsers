@@ -56,6 +56,20 @@
  * persist.cancelSave() on the live persist if one has already been
  * constructed; if abort fires before the file-picker resolves, the
  * picker callback short-circuits to onabort.
+ *
+ * Two modes, as in Violentmonkey (Preferences > "Use browser download
+ * API", pref api.GM_download.browserApi):
+ *   - Off (the default): the file is fetched first, with the page's
+ *     cookies and the script's headers and timeout, then saved like any
+ *     other download: into the browser's download folder, or wherever the
+ *     user picks when the browser is set to ask.  The name can't make
+ *     subfolders ("Gallery/001.jpg" saves as "Gallery_001.jpg").  It joins
+ *     the Downloads window once saved.
+ *   - On: the browser downloads it straight into its download folder
+ *     (nsIWebBrowserPersist), subfolders allowed, with live progress in the
+ *     Downloads window; it asks only for saveAs: true, and conflictAction
+ *     ("uniquify", "overwrite", "prompt") decides what an existing file of
+ *     that name does.
  */
 
 const EXPORTED_SYMBOLS = ["createGMDownloadAPI"];
@@ -74,11 +88,13 @@ if (typeof Cu === "undefined") {
 }
 
 Cu.import("chrome://greasemonkey-modules/content/constants.js");
+Cu.import("chrome://greasemonkey-modules/content/prefManager.js");
 Cu.import("chrome://greasemonkey-modules/content/thirdParty/getChromeWinForContentWin.js");
 Cu.import("chrome://greasemonkey-modules/content/util.js");
+Cu.import("resource://gre/modules/osfile.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
 
-Cu.importGlobalProperties(["URL"]);
+Cu.importGlobalProperties(["URL", "XMLHttpRequest"]);
 
 // "name(1).ext" for a name that's taken, as the browser's own downloads
 // do.  createUnique() ("name-1.ext") when the module is missing.
@@ -150,15 +166,45 @@ function checkExtension(aName) {
 }
 
 /**
- * Resolves the default Downloads folder as an nsIFile.  Falls back to
- * the OS temp dir if "DfltDwnld" is unavailable (extremely unusual,
- * but never fatal here — the user can still pick a folder via saveAs).
+ * The folder the browser saves downloads to, chosen as its own downloads
+ * choose it (DownloadIntegration.getPreferredDownloadsDirectory):
+ * browser.download.folderList 0 is the desktop, 2 the folder in
+ * browser.download.dir (created if missing), anything else the system's
+ * Downloads folder.  Scripts' files used to go to the system's Downloads
+ * folder whatever the user had chosen.  Falls back to the home, then the
+ * temp folder, which never fails.
  *
  * @returns {nsIFile}
  */
 function getDownloadsDir() {
   let dirsvc = Cc["@mozilla.org/file/directory_service;1"]
       .getService(Ci.nsIProperties);
+  let folderList = 1;
+  try {
+    folderList = Services.prefs.getIntPref("browser.download.folderList");
+  } catch (e) {
+    // Unset: the system's Downloads folder.
+  }
+  if (folderList == 0) {
+    try {
+      return dirsvc.get("Desk", Ci.nsIFile);
+    } catch (e) {
+      // No desktop: the Downloads folder.
+    }
+  } else if (folderList == 2) {
+    try {
+      let dir = Services.prefs.getComplexValue(
+          "browser.download.dir", Ci.nsIFile);
+      if (!dir.exists()) {
+        dir.create(Ci.nsIFile.DIRECTORY_TYPE, parseInt("755", 8));
+      }
+      if (dir.isDirectory()) {
+        return dir;
+      }
+    } catch (e) {
+      // Unset or can't be created: the Downloads folder, as the browser.
+    }
+  }
   try {
     return dirsvc.get("DfltDwnld", Ci.nsIFile);
   } catch (e) {
@@ -168,6 +214,86 @@ function getDownloadsDir() {
       return dirsvc.get("TmpD", Ci.nsIFile);
     }
   }
+}
+
+/**
+ * Whether the browser saves downloads without asking where
+ * (browser.download.useDownloadDir, "Always ask me where to save files"
+ * unticked).
+ *
+ * @returns {boolean}
+ */
+function browserSavesWithoutAsking() {
+  try {
+    return Services.prefs.getBoolPref("browser.download.useDownloadDir");
+  } catch (e) {
+    return true;
+  }
+}
+
+/**
+ * Whether "Use browser download API" is on (see the file overview).
+ *
+ * @returns {boolean}
+ */
+function useBrowserDownloadApi() {
+  return !!GM_prefRoot.getValue("api.GM_download.browserApi", false);
+}
+
+/**
+ * A script's details.headers as [name, value] pairs.  The headers object
+ * is the script's X-ray-waived one: some UXP builds don't enumerate
+ * waived expandos, so Object.keys is tried, then for-in, and values are
+ * read by bracket access (which does work).  null / undefined values are
+ * left out.
+ *
+ * @param {object} aHeaders
+ * @returns {Array<Array<string>>}
+ */
+function headerPairs(aHeaders) {
+  if (!aHeaders || (typeof aHeaders !== "object")) {
+    return [];
+  }
+  let names = [];
+  try {
+    names = Object.keys(aHeaders);
+  } catch (e) {
+    // Fall through to for-in.
+  }
+  if (!names.length) {
+    try {
+      for (let n in aHeaders) {
+        names.push(n);
+      }
+    } catch (e) {
+      // None, then.
+    }
+  }
+  let pairs = [];
+  for (let i = 0; i < names.length; i++) {
+    let value = aHeaders[names[i]];
+    if ((value !== undefined) && (value !== null)) {
+      pairs.push([String(names[i]), String(value)]);
+    }
+  }
+  return pairs;
+}
+
+/**
+ * The onprogress payload, as Tampermonkey / Violentmonkey give it.
+ *
+ * @param {number} aLoaded
+ * @param {number} aTotal - -1 (or 0) when not known.
+ * @returns {object}
+ */
+function progressPayload(aLoaded, aTotal) {
+  return {
+    "done":             aLoaded,
+    "total":            aTotal,
+    "loaded":           aLoaded,
+    "totalSize":        aTotal,
+    "lengthComputable": aTotal > 0,
+  };
 }
 
 /**
@@ -250,12 +376,20 @@ function uniqueTargetFile(aFile) {
  *
  * @param {ChromeWindow} aChromeWin
  * @param {string}       aDefaultName
+ * @param {nsIFile}      [aDirectory] - The folder it opens in.
  * @returns {nsIFile|null}
  */
-function showFilePicker(aChromeWin, aDefaultName) {
+function showFilePicker(aChromeWin, aDefaultName, aDirectory) {
   let fp = Cc["@mozilla.org/filepicker;1"].createInstance(Ci.nsIFilePicker);
   fp.init(aChromeWin, "GM_download", Ci.nsIFilePicker.modeSave);
   fp.defaultString = aDefaultName;
+  if (aDirectory) {
+    try {
+      fp.displayDirectory = aDirectory;
+    } catch (e) {
+      // The picker's own choice of folder, then.
+    }
+  }
   let result = fp.show();
   if (result == Ci.nsIFilePicker.returnOK
       || result == Ci.nsIFilePicker.returnReplace) {
@@ -383,6 +517,43 @@ function forwardToDm(aDmListener, aMethod, aArgs) {
   }
 }
 
+/** The cancelable of a download that is already on disk. */
+const NOTHING_TO_CANCEL = {
+  "cancel": function () {},
+  "QueryInterface": function (aIID) {
+    if (aIID.equals(Ci.nsICancelable) || aIID.equals(Ci.nsISupports)) {
+      return this;
+    }
+    throw Cr.NS_ERROR_NO_INTERFACE;
+  },
+};
+
+/**
+ * Lists a file that was fetched and written already in the Downloads
+ * window, under the address it came from, as a finished download: the
+ * transfer is told it started, how big it is, and that it stopped.
+ *
+ * @param {nsIURI}              aSourceUri
+ * @param {nsIFile}             aTargetFile
+ * @param {number}              aSize - Bytes.
+ * @param {nsILoadContext|null} aLoadContext
+ */
+function listFinishedDownload(aSourceUri, aTargetFile, aSize, aLoadContext) {
+  let dmListener = registerWithDownloadManager(aSourceUri, aTargetFile,
+      aTargetFile.leafName, NOTHING_TO_CANCEL, aLoadContext);
+  if (!dmListener) {
+    return undefined;
+  }
+  let state = Ci.nsIWebProgressListener;
+  let flags = state.STATE_IS_REQUEST | state.STATE_IS_NETWORK;
+  forwardToDm(dmListener, "onStateChange",
+      [null, null, state.STATE_START | flags, Cr.NS_OK]);
+  forwardToDm(dmListener, "onProgressChange64",
+      [null, null, aSize, aSize, aSize, aSize]);
+  forwardToDm(dmListener, "onStateChange",
+      [null, null, state.STATE_STOP | flags, Cr.NS_OK]);
+}
+
 
 /**
  * Builds the script-facing GM_download API function.  Called once per
@@ -451,7 +622,7 @@ function createGMDownloadAPI(
         // aDetails["on" + aEvent] pattern).
         let waived = Cu.waiveXrays(aDetailsOrUrl);
         let known = [
-          "url", "name", "saveAs", "headers", "timeout",
+          "url", "name", "saveAs", "conflictAction", "headers", "timeout",
           "onload", "onerror", "onabort", "onprogress", "ontimeout",
         ];
         for (let i = 0; i < known.length; i++) {
@@ -553,6 +724,8 @@ function createGMDownloadAPI(
     // fires before then, `aborted` short-circuits the picker callback.
     let handle = Cu.createObjectIn(aSandbox);
     let persist = null;
+    // The fetch, when "Use browser download API" is off.
+    let request = null;
     let aborted = false;
     Cu.exportFunction(function abort() {
       aborted = true;
@@ -561,6 +734,13 @@ function createGMDownloadAPI(
           persist.cancelSave();
         } catch (e) {
           // Already finished / not started — nothing to cancel.
+        }
+      }
+      if (request) {
+        try {
+          request.abort();
+        } catch (e) {
+          // Already finished.
         }
       }
     }, handle, { "defineAs": "abort" });
@@ -666,15 +846,8 @@ function createGMDownloadAPI(
           if (aborted || terminalFired) {
             return;
           }
-          // Match the polyfill / TM/VM event shape:
-          //   { done, total, loaded, totalSize, lengthComputable }
-          safeCall(details.onprogress, {
-            "done":             aCurTotalProgress,
-            "total":            aMaxTotalProgress,
-            "loaded":           aCurTotalProgress,
-            "totalSize":        aMaxTotalProgress,
-            "lengthComputable": aMaxTotalProgress > 0,
-          });
+          safeCall(details.onprogress,
+              progressPayload(aCurTotalProgress, aMaxTotalProgress));
         },
         "onProgressChange64": function (aWebProgress, aRequest,
             aCurSelfProgress, aMaxSelfProgress,
@@ -688,13 +861,8 @@ function createGMDownloadAPI(
           if (aborted || terminalFired) {
             return;
           }
-          safeCall(details.onprogress, {
-            "done":             aCurTotalProgress,
-            "total":            aMaxTotalProgress,
-            "loaded":           aCurTotalProgress,
-            "totalSize":        aMaxTotalProgress,
-            "lengthComputable": aMaxTotalProgress > 0,
-          });
+          safeCall(details.onprogress,
+              progressPayload(aCurTotalProgress, aMaxTotalProgress));
         },
         "onStateChange": function (aWebProgress, aRequest,
             aStateFlags, aStatus) {
@@ -767,43 +935,14 @@ function createGMDownloadAPI(
       // any future principal-required build without paying a noisy
       // throw on every download.
       // Custom request headers (details.headers) -> the CRLF "Name: Value"
-      // string shape saveURI's aExtraHeaders slot expects.  details.headers
-      // is the script's X-ray-waived object; enumerate defensively
-      // (Object.keys, then for-in) because some UXP builds don't enumerate
-      // waived expandos, and read values by bracket access (which does
-      // work).  NOTE: the aExtraHeaders "in string" form and this
-      // enumeration both want on-device confirmation on Pale Moon 34 /
-      // Basilisk 52; a shape mismatch is caught by the try/fallback below
-      // and simply means a header-bearing download fails (normal downloads
-      // pass null and are unaffected).
-      let extraHeaders = null;
-      if (details.headers && (typeof details.headers === "object")) {
-        let names = [];
-        try {
-          names = Object.keys(details.headers);
-        } catch (e) {
-          // ignore — fall through to for-in.
-        }
-        if (!names.length) {
-          try {
-            for (let n in details.headers) {
-              names.push(n);
-            }
-          } catch (e) {
-            // ignore.
-          }
-        }
-        let headerLines = "";
-        for (let i = 0; i < names.length; i++) {
-          let v = details.headers[names[i]];
-          if ((v !== undefined) && (v !== null)) {
-            headerLines += names[i] + ": " + String(v) + "\r\n";
-          }
-        }
-        if (headerLines) {
-          extraHeaders = headerLines;
-        }
-      }
+      // string shape saveURI's aExtraHeaders slot expects.  NOTE: the
+      // aExtraHeaders "in string" form wants on-device confirmation on
+      // Pale Moon 34 / Basilisk 52; a shape mismatch is caught by the
+      // try/fallback below and simply means a header-bearing download
+      // fails (normal downloads pass null and are unaffected).
+      let extraHeaders = headerPairs(details.headers).map(function (aPair) {
+        return aPair[0] + ": " + aPair[1] + "\r\n";
+      }).join("") || null;
 
       let savedOk = false;
       let lastErr = null;
@@ -838,16 +977,188 @@ function createGMDownloadAPI(
       }
     }
 
-    // Whether to prompt for save location.  GM_download's contract
-    // (Tampermonkey / Violentmonkey) is silent download by default;
-    // the picker is only shown when the script explicitly sets
-    // `saveAs: true`.  An earlier draft of this module also honoured
-    // browser.download.useDownloadDir, but that surprised scripts —
-    // a GM_download call would prompt on Pale Moon (which defaults
-    // useDownloadDir to false) but not on Firefox.  Aligned to the
-    // GM4 spec instead.
+    /**
+     * Sets up the fetch as GM_xmlhttpRequest does for the page: its
+     * private-browsing and container identity, the user's cookies (also
+     * for another site, by the same pref), the page as the referrer, and
+     * the script's headers.
+     *
+     * @param {XMLHttpRequest} aReq - Opened, not sent.
+     */
+    function applyPageContext(aReq) {
+      let privateMode = GM_util.windowIsPrivate(aWrappedContentWin);
+      let userContextId = null;
+      try {
+        userContextId = aWrappedContentWin.document.nodePrincipal
+            .originAttributes.userContextId || null;
+      } catch (e) {
+        // No principal: no container.
+      }
+      if (userContextId === null) {
+        if (privateMode
+            && (aReq.channel instanceof Ci.nsIPrivateBrowsingChannel)) {
+          aReq.channel.QueryInterface(Ci.nsIPrivateBrowsingChannel)
+              .setPrivate(true);
+        }
+      } else {
+        aReq.setOriginAttributes({
+          "privateBrowsingId": privateMode ? 1 : 0,
+          "userContextId": userContextId,
+        });
+      }
+      try {
+        aReq.channel.QueryInterface(Ci.nsIHttpChannelInternal)
+            .forceAllowThirdPartyCookie = GM_prefRoot.getValue(
+                "xmlhttprequest.forceThirdPartyCookies", true);
+      } catch (e) {
+        // Not http(s).
+      }
+      let headers = headerPairs(details.headers);
+      let hasReferrer = headers.some(function (aPair) {
+        return aPair[0].toLowerCase() == "referer";
+      });
+      if (aPageUrl && !hasReferrer) {
+        headers.unshift(["Referer", aPageUrl]);
+      }
+      headers.forEach(function (aPair) {
+        try {
+          aReq.setRequestHeader(aPair[0], aPair[1]);
+        } catch (e) {
+          GM_util.logError("GM_download: header " + aPair[0] + " left out: "
+              + e, false, aFileURL, null);
+        }
+      });
+    }
+
+    /**
+     * "Use browser download API" off, Violentmonkey's default: fetches the
+     * file, then saves it like any other download (see the file overview).
+     * Exactly one of onload / onerror / onabort / ontimeout is called.
+     */
+    function fetchThenSave() {
+      let finished = false;
+      let finish = function (aCallback, aPayload) {
+        if (finished) {
+          return undefined;
+        }
+        finished = true;
+        request = null;
+        safeCall(aCallback, aPayload);
+      };
+      let fail = function (aMessage) {
+        finish(details.onerror, {
+          "error":   ERROR.NOT_SUCCEEDED,
+          "details": "GM_download: " + aMessage,
+        });
+      };
+
+      let save = function (aBuffer, aFinalUrl) {
+        // No subfolders: a name's folders become part of it, as the
+        // browser makes "Gallery/001.jpg" into "Gallery_001.jpg".
+        let name = nameParts.join("_");
+        let target;
+        let ownFile = false;
+        try {
+          if ((details.saveAs === true) || !browserSavesWithoutAsking()) {
+            target = showFilePicker(chromeWin, name, getDownloadsDir());
+            if (!target) {
+              finish(details.onabort, {});
+              return undefined;
+            }
+          } else {
+            target = uniqueTargetFile(
+                buildTargetFile(getDownloadsDir(), [name]));
+            ownFile = true;
+          }
+        } catch (e) {
+          fail("can't save as " + name + ": " + e);
+          return undefined;
+        }
+        let size = aBuffer ? aBuffer.byteLength : 0;
+        OS.File.writeAtomic(target.path,
+            new Uint8Array(aBuffer || new ArrayBuffer(0)),
+            { "tmpPath": target.path + ".part" })
+        .then(function () {
+          listFinishedDownload(sourceUri, target, size,
+              getLoadContext(aWrappedContentWin));
+          finish(details.onload, { "finalUrl": aFinalUrl });
+        }, function (aError) {
+          if (ownFile) {
+            try {
+              target.remove(false);
+            } catch (e) {
+              // Locked, say: the empty file stays.
+            }
+          }
+          fail("can't write " + target.path + ": " + aError);
+        });
+      };
+
+      let req = new XMLHttpRequest();
+      request = req;
+      try {
+        req.open("GET", sourceUri.spec, true);
+        applyPageContext(req);
+        req.responseType = "arraybuffer";
+        let timeout = parseInt(details.timeout, 10);
+        if (timeout > 0) {
+          req.timeout = timeout;
+        }
+      } catch (e) {
+        fail(String(e));
+        return undefined;
+      }
+      req.addEventListener("progress", function (aEvent) {
+        if (!finished && !aborted) {
+          safeCall(details.onprogress, progressPayload(
+              aEvent.loaded, aEvent.lengthComputable ? aEvent.total : -1));
+        }
+      });
+      req.addEventListener("abort", function () {
+        finish(details.onabort, {});
+      });
+      req.addEventListener("error", function () {
+        fail("the download of " + sourceUri.spec + " failed.");
+      });
+      req.addEventListener("timeout", function () {
+        finish(details.ontimeout, {});
+      });
+      req.addEventListener("load", function () {
+        if (finished) {
+          return undefined;
+        }
+        if (aborted) {
+          finish(details.onabort, {});
+          return undefined;
+        }
+        // An error page isn't the file: it isn't saved under its name.
+        if (((sourceUri.scheme == "http") || (sourceUri.scheme == "https"))
+            && ((req.status < 200) || (req.status >= 400))) {
+          fail("HTTP " + req.status + " " + req.statusText
+              + " (" + (req.responseURL || sourceUri.spec) + ")");
+          return undefined;
+        }
+        // Being written: abort() has nothing left to stop.
+        request = null;
+        save(req.response, req.responseURL || sourceUri.spec);
+      });
+      try {
+        req.send();
+      } catch (e) {
+        fail(String(e));
+      }
+    }
+
+    if (!useBrowserDownloadApi()) {
+      fetchThenSave();
+      return handle;
+    }
+
+    // "Use browser download API" on: silent unless the script asks for
+    // the Save dialog (saveAs: true), as Violentmonkey's
+    // downloads.download() is.
     if (details.saveAs === true) {
-      let picked = showFilePicker(chromeWin, leafName);
+      let picked = showFilePicker(chromeWin, leafName, getDownloadsDir());
       if (!picked) {
         safeCall(details.onabort, {});
         return handle;
@@ -855,9 +1166,25 @@ function createGMDownloadAPI(
       startPersist(picked, false);
     } else {
       let target;
+      let ownFile = true;
       try {
-        target = uniqueTargetFile(
-            buildTargetFile(getDownloadsDir(), nameParts));
+        target = buildTargetFile(getDownloadsDir(), nameParts);
+        // conflictAction, as downloads.download() takes it: "uniquify"
+        // (the default) saves as "name(1).ext", "overwrite" replaces the
+        // file, "prompt" asks where to save instead.
+        let clash = target.exists() && !target.isDirectory();
+        if (clash && (details.conflictAction == "prompt")) {
+          target = showFilePicker(chromeWin, leafName, target.parent);
+          if (!target) {
+            safeCall(details.onabort, {});
+            return handle;
+          }
+          ownFile = false;
+        } else if (clash && (details.conflictAction == "overwrite")) {
+          ownFile = false;
+        } else {
+          target = uniqueTargetFile(target);
+        }
       } catch (e) {
         safeCall(details.onerror, {
           "error":   ERROR.NOT_SUCCEEDED,
@@ -866,7 +1193,7 @@ function createGMDownloadAPI(
         });
         return handle;
       }
-      startPersist(target, true);
+      startPersist(target, ownFile);
     }
 
     return handle;

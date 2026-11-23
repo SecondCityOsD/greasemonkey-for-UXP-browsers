@@ -132,6 +132,20 @@
   </groupbox>
   <groupbox>
     <caption id="toolbar-button-caption" label="Toolbar button" />
+    <checkbox id="menu-auto-reload"
+      label="Reload current tab after switching on/off a script from menu" />
+    <hbox align="center">
+      <label id="menu-disabled-label" value="Disabled scripts:"
+        control="menu-disabled" />
+      <menulist id="menu-disabled"
+        tooltiptext="How the menu lists this page's disabled scripts: among the others, in a group after them, or not at all.">
+        <menupopup>
+          <menuitem id="menu-disabled-show" value="show" label="show" />
+          <menuitem id="menu-disabled-group" value="group" label="group" />
+          <menuitem id="menu-disabled-hide" value="hide" label="hide" />
+        </menupopup>
+      </menulist>
+    </hbox>
     <hbox align="center">
       <label id="badge-show-label" value="Badge:" control="badge-show" />
       <menulist id="badge-show" oncommand="GM_syncBadgeControls();">
@@ -157,6 +171,8 @@
       style="opacity: 0.6; -moz-margin-start: 24px; margin-inline-start: 24px;"
       tooltiptext="When enabled, scripts can read and write cookies with the HTTP-only flag. This allows scripts to access cookies that cannot be accessed via JavaScript. Use with caution as it may pose security risks."
       >(only for scripts with this option enabled in their settings)</description>
+    <checkbox id="download-browser-api" label="Use browser download API"
+      tooltiptext="Allows scripts to save files into subfolders inside your downloads directory and shows download progress in the Downloads window." />
   </groupbox>
 </tabpanel>
 </tabpanels>
