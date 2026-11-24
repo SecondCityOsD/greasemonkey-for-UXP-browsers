@@ -72,12 +72,6 @@
 
 const EXPORTED_SYMBOLS = ["createSandbox", "runScriptInSandbox"];
 
-if (typeof Cc === "undefined") {
-  var Cc = Components.classes;
-}
-if (typeof Ci === "undefined") {
-  var Ci = Components.interfaces;
-}
 if (typeof Cu === "undefined") {
   var Cu = Components.utils;
 }
@@ -102,7 +96,6 @@ Cu.import("chrome://greasemonkey-modules/content/xmlHttpRequester.js");
 
 // https://hg.mozilla.org/releases/mozilla-esr52/file/324cc1bccf3d/js/src/jsapi.cpp#l582
 // Only a particular set of strings are allowed.
-// const JAVASCRIPT_VERSION_MAX = "ECMAv5";
 // http://bugzil.la/880917
 /** JavaScript version string passed to Cu.evalInSandbox and jsSubScriptLoader. */
 const JAVASCRIPT_VERSION_MAX = "latest";
@@ -830,7 +823,7 @@ function runScriptInSandbox(aSandbox, aScript) {
   /**
    * Wrapper around evalWithWrapper that catches all errors and logs them
    * cleanly.  Returns a boolean for callers who want to know whether the
-   * eval succeeded, but the script-body path (line 886 below) ignores it,
+   * eval succeeded, but the script-body path at the end ignores it,
    * and the @require loop now treats each failure as isolated — matching
    * Violentmonkey's gm-api-wrapper semantics where one @require throwing
    * does not abort the rest of the chain.

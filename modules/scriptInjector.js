@@ -70,7 +70,6 @@ Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("chrome://greasemonkey-modules/content/constants.js");
 Cu.import("chrome://greasemonkey-modules/content/cspNonce.js");
 Cu.import("chrome://greasemonkey-modules/content/extractMeta.js");
-Cu.import("chrome://greasemonkey-modules/content/GM_openInTab.js");
 Cu.import("chrome://greasemonkey-modules/content/ipcScript.js");
 Cu.import("chrome://greasemonkey-modules/content/prefManager.js");
 Cu.import("chrome://greasemonkey-modules/content/sandbox.js");
