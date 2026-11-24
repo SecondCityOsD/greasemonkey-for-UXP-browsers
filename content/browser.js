@@ -501,12 +501,6 @@ GM_BrowserUI.checkDisabledScriptNavigation = function (
   notification.persistence = -1;
 };
 
-GM_BrowserUI.scriptPrefs = function (aScript) {
-  window.openDialog(
-      GM_CONSTANTS.scriptPrefsUrl + "#" + encodeURIComponent(aScript.id),
-      null, "modal,resizable");
-};
-
 GM_BrowserUI.init();
 
 /**
@@ -549,8 +543,8 @@ function GM_popupClicked(aEvent) {
         });
       } else {
         if ((button == _buttons.right) && shift) {
-          // Open preferences.
-          GM_BrowserUI.scriptPrefs(script);
+          // Open its Options window.
+          GM_util.openScriptOptions(script);
         }
       }
     }
@@ -759,10 +753,15 @@ function GM_getEnabled() {
 function GM_showTooltip(aEvent) {
   function setTooltip(aUrls) {
     let urls = getScripts.uniq(aUrls);
+    // A script removed in the Add-ons Manager (Undo still offered) counts
+    // nowhere, as the menu doesn't list it.
+    let kept = function (aScript) {
+      return !aScript.needsUninstall;
+    };
     // First url = top window.
-    let runsOnTop = getScripts.scriptsMatching([urls.shift()]);
+    let runsOnTop = getScripts.scriptsMatching([urls.shift()]).filter(kept);
     // Remainder are all its subframes.
-    let runsFramed = getScripts.scriptsMatching(urls);
+    let runsFramed = getScripts.scriptsMatching(urls).filter(kept);
 
     let versionElm = aEvent.target
         .getElementsByClassName("greasemonkey-tooltip-version")[0];
@@ -790,10 +789,11 @@ function GM_showTooltip(aEvent) {
 
       var total = 0;
       var totalEnable = 0;
-      GM_util.getService().config.scripts.forEach(function (aScript) {
-        total++;
-        totalEnable = totalEnable + (aScript.enabled ? 1 : 0);
-      });
+      GM_util.getService().config.scripts.filter(kept).forEach(
+          function (aScript) {
+            total++;
+            totalEnable = totalEnable + (aScript.enabled ? 1 : 0);
+          });
 
       total = totalEnable + "/" + total;
       let totalElm = aEvent.target
@@ -812,7 +812,7 @@ function GM_showTooltip(aEvent) {
       // Read off the scripts themselves.  (Menu items were built to read
       // their checkmarks, which failed on a script being uninstalled.)
       runsFramed.forEach(function (aScript) {
-        if (aScript.enabled && !aScript.needsUninstall) {
+        if (aScript.enabled) {
           runsFramedEnable++;
           if (!aScript.noframes) {
             runsFramedNoframesDisable++;
@@ -820,7 +820,7 @@ function GM_showTooltip(aEvent) {
         }
       });
       runsOnTop.forEach(function (aScript) {
-        if (aScript.enabled && !aScript.needsUninstall) {
+        if (aScript.enabled) {
           runsOnTopEnable++;
         }
       });

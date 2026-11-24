@@ -1626,12 +1626,14 @@ function runScriptInSandbox(aSandbox, aScript) {
 
   if (aScript.topLevelAwait) {
     // @topLevelAwait: wrap the script in an async IIFE so top-level
-    // await is valid.  This matches Violentmonkey's behavior.
+    // await is valid.  This matches Violentmonkey's behavior.  The code
+    // starts on the wrapper's line, so its errors give its own line
+    // numbers (they were one too high).
     try {
       let code = GM_util.fileXhr(
           aScript.fileURL, "application/javascript");
       Cu.evalInSandbox(
-          "(async () => {\n" + code + "\n})();",
+          "(async () => {" + code + "\n})();",
           aSandbox, JAVASCRIPT_VERSION_MAX, aScript.fileURL, 1);
     } catch (e) {
       GM_util.logError(e, false, e.fileName, e.lineNumber);

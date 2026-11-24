@@ -7,12 +7,14 @@
  *   the status bar.
  *
  * Loaded as a chrome XHTML document in a browser tab via
- *   chrome://greasemonkey/content/sourceViewer.xhtml?path=<encoded OS path>
- *       &url=<encoded address it was downloaded from>
- *       &icon=<encoded file: URL of the downloaded @icon>
- * The toolbar shows the script's icon, name and version (from its
- * metadata, or the file name for a library) and that address.  url and
- * icon are optional; without url the toolbar shows the path.
+ *   chrome://greasemonkey/content/sourceViewer.xhtml?id=<short id>
+ * from GM_util.sourceViewerUrl(), which keeps the file's path, the address
+ * it was downloaded from and the file: URL of its downloaded @icon under
+ * that id: the tab's address bar showed the full path before, the Windows
+ * user name in it.  The toolbar shows the script's icon, name and version
+ * (from its metadata, or the file name for a library) and that address.
+ * The address and icon are optional; without the address the toolbar
+ * shows the path.
  *
  * Opened from:
  *   - RemoteScript.showSource()  — the install-time "Show Script Source"
@@ -52,7 +54,8 @@
  * Safety
  * ------
  * The path is always supplied by our own chrome code (a downloaded temp file
- * or an installed script's on-disk file), never by web content.  The url is
+ * or an installed script's on-disk file), never by web content: the address
+ * only names an id our chrome code registered.  The url is
  * only ever displayed, as text.  No script content is ever evaluated here —
  * it is only read as text and displayed (the metadata parser reads the
  * ==UserScript== block as text too).
@@ -69,6 +72,7 @@ Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/osfile.jsm");
 Cu.import("chrome://greasemonkey-modules/content/constants.js");
 Cu.import("chrome://greasemonkey-modules/content/util.js");
+Cu.import("chrome://greasemonkey-modules/content/util/sourceViewerUrl.js");
 
 /** The browser's CodeMirror bundle, JavaScript mode included. */
 const CM_BUNDLE_URL =
@@ -100,9 +104,9 @@ window.addEventListener("load", GM_sourceViewerLoad, false);
 
 
 /**
- * Window load entry point.  Reads the target path from the URL query, loads
- * the source text from disk, and renders it via CodeMirror (or the textarea
- * fallback).
+ * Window load entry point.  Looks up the file the id in the URL query
+ * names (GM_util.sourceViewerUrl), loads the source text from disk, and
+ * renders it via CodeMirror (or the textarea fallback).
  * @returns {void}
  */
 function GM_sourceViewerLoad() {
@@ -118,8 +122,10 @@ function GM_sourceViewerLoad() {
 
   SvTheme.init(document.body, svString);
 
-  let path = readQueryParam("path");
+  let entry = sourceViewerEntry(readQueryParam("id"));
+  let path = entry && entry.path;
   if (!path) {
+    // No id, or one from before a restart.
     showNote(svString("sourceViewer.error.noPath",
         "No script source to display."));
     return;
@@ -138,7 +144,7 @@ function GM_sourceViewerLoad() {
 
   // The address it came from, not the temp copy's path (which means nothing
   // to the reader and shows the Windows user name in screenshots).
-  let url = readQueryParam("url");
+  let url = entry.url;
   showSourceAddress(url || path);
 
   // Read the raw bytes (the status bar shows the size and any byte-order
@@ -151,7 +157,7 @@ function GM_sourceViewerLoad() {
         showStatus(text, bytes);
         let script = parseSource(text, url);
         showSourceName(script, url, path);
-        showSourceIcon(readQueryParam("icon"), script);
+        showSourceIcon(entry.icon, script);
         SvMeta.init({
           "jumpTo": jumpToLine,
           "relayout": function () {
@@ -174,7 +180,7 @@ function GM_sourceViewerLoad() {
 /**
  * Reads one parameter out of the document's URL query string.
  * Prefers location.search, falling back to the full href.
- * @param {string} aName - "path" or "url".
+ * @param {string} aName - "id".
  * @returns {string|null} The decoded value, or null when absent/invalid.
  */
 function readQueryParam(aName) {

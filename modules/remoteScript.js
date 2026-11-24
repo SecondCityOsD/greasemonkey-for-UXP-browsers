@@ -103,53 +103,6 @@ function assertIsFunction(aFunc, aMessage) {
 }
 
 /**
- * Computes the lowercase hex digest of a local file with the given
- * algorithm ("sha256" | "sha384" | "sha512"), streaming it through the
- * platform's native nsICryptoHash (no bytes buffered in JS).  Used to
- * verify pinned @require / @resource integrity (findings S6/S16).  Mirrors
- * backup.js sha256OfFile().
- *
- * @param {nsIFile} aFile - File to hash.
- * @param {string}  aAlgo - "sha256" | "sha384" | "sha512".
- * @returns {string} Lowercase hex digest.
- */
-function hashFileHex(aFile, aAlgo) {
-  let algoConst;
-  switch (aAlgo) {
-    case "sha512":
-      algoConst = Ci.nsICryptoHash.SHA512;
-      break;
-    case "sha384":
-      algoConst = Ci.nsICryptoHash.SHA384;
-      break;
-    default:
-      algoConst = Ci.nsICryptoHash.SHA256;
-      break;
-  }
-  let istream = Cc["@mozilla.org/network/file-input-stream;1"]
-      .createInstance(Ci.nsIFileInputStream);
-  istream.init(aFile, 0x01 /* PR_RDONLY */, parseInt("444", 8), 0);
-  try {
-    let hasher = Cc["@mozilla.org/security/hash;1"]
-        .createInstance(Ci.nsICryptoHash);
-    hasher.init(algoConst);
-    hasher.updateFromStream(istream, 0xffffffff);
-    let binary = hasher.finish(false);
-    let hex = "";
-    for (let i = 0; i < binary.length; i++) {
-      hex += ("0" + binary.charCodeAt(i).toString(16)).slice(-2);
-    }
-    return hex;
-  } finally {
-    try {
-      istream.close();
-    } catch (e) {
-      // Best effort.
-    }
-  }
-}
-
-/**
  * Sanitises a raw filename for safe use on disk.
  *
  * Steps applied in order:
@@ -1098,18 +1051,14 @@ RemoteScript.prototype.showSource = function (aBrowser) {
   // viewer falls back to plain read-only text if CodeMirror can't load.
   // Its toolbar shows the address the script came from, and the @icon once
   // that has downloaded (a data: icon the viewer reads from the metadata).
-  let viewerUrl = "chrome://greasemonkey/content/sourceViewer.xhtml?path="
-      + encodeURIComponent(this._scriptFile.path)
-      + "&url=" + encodeURIComponent(this._url);
+  // The tab's address holds a short id, not the temp copy's path.
   let icon = this.script && this.script.icon;
   let iconReport = this._dependencyReports.filter(function (aReport) {
     return (aReport.dependency === icon) && (aReport.state == "done");
   })[0];
-  if (iconReport) {
-    viewerUrl += "&icon=" + encodeURIComponent(
-        GM_util.getUriFromFile(iconReport.file).spec);
-  }
-  let tab = tabBrowser.addTab(viewerUrl);
+  let tab = tabBrowser.addTab(GM_util.sourceViewerUrl(
+      this._scriptFile, this._url,
+      iconReport ? GM_util.getUriFromFile(iconReport.file).spec : null));
   tabBrowser.selectedTab = tab;
 
   // Ensure any temporary files are deleted after the tab is closed.
@@ -1394,7 +1343,7 @@ RemoteScript.prototype._downloadDependency = function (
     if (aDependency._integrity) {
       let matched = false;
       try {
-        matched = (hashFileHex(file, aDependency._integrity.algo)
+        matched = (GM_util.hashFile(file, aDependency._integrity.algo)
             === aDependency._integrity.hex);
       } catch (e) {
         matched = false;
@@ -1422,6 +1371,14 @@ RemoteScript.prototype._downloadDependency = function (
     aDone(null);
   }.bind(this);
 
+  // An @icon this script may not download (a chrome:, about: or
+  // javascript: address, say; see _refusesUri) is skipped: _downloadFile
+  // refuses it by stopping the whole install, as it does for an @require.
+  if (isIcon && this._refusesUri(uri)) {
+    skipIcon();
+    return undefined;
+  }
+
   report("downloading");
   let limit = this._timeouts
       ? (isIcon ? this._timeouts.icon : this._timeouts.dependency) : 0;
@@ -1431,6 +1388,22 @@ RemoteScript.prototype._downloadDependency = function (
     // starting a download, so no callback will report back.
     aDone(null);
   }
+};
+
+/**
+ * True when this script may not download aUri: an address of another
+ * scheme than the script's own that Greasemonkey doesn't run on (chrome:,
+ * about:, a file: for a script from the web).  The script's own address
+ * is never refused, and nothing is when there is none (an update of a
+ * locally installed script).
+ *
+ * @param {nsIURI} aUri
+ * @returns {boolean}
+ */
+RemoteScript.prototype._refusesUri = function (aUri) {
+  return !!this._uri && (aUri != this._uri)
+      && (aUri.scheme != this._uri.scheme)
+      && !GM_util.isGreasemonkeyable(aUri.spec);
 };
 
 /**
@@ -1495,22 +1468,14 @@ RemoteScript.prototype._downloadFile = function (
     }.bind(this);
   }
 
-  // If we have a URI (locally installed scripts, when updating, won't)...
-  if (this._uri) {
-    if (aUri == this._uri) {
-      // No-op, always download the script itself.
-    } else if (aUri.scheme == this._uri.scheme) {
-      // No-op, always allow files from the same scheme as the script.
-    } else if (!GM_util.isGreasemonkeyable(aUri.spec)) {
-      // Otherwise, these are unsafe.
-      // Do not download them.
-      this.cleanup(
-          GM_CONSTANTS.localeStringBundle.createBundle(
-              GM_CONSTANTS.localeGreasemonkeyProperties)
-              .GetStringFromName("error.remoteScript.unsafeUrl")
-              .replace("%1", aUri.spec));
-      return undefined;
-    }
+  // Unsafe addresses are not downloaded (an @icon's never get here).
+  if (this._refusesUri(aUri)) {
+    this.cleanup(
+        GM_CONSTANTS.localeStringBundle.createBundle(
+            GM_CONSTANTS.localeGreasemonkeyProperties)
+            .GetStringFromName("error.remoteScript.unsafeUrl")
+            .replace("%1", aUri.spec));
+    return undefined;
   }
 
   let channel = null;

@@ -191,6 +191,11 @@
     <checkbox id="download-browser-api" label="Use browser download API"
       tooltiptext="Allows scripts to save files into subfolders inside your downloads directory and shows download progress in the Downloads window." />
   </groupbox>
+  <groupbox>
+    <caption id="scratchpad-caption" label="Scratchpad" />
+    <checkbox id="scratchpad-enhanced" label="Enhance the Scratchpad editor"
+      tooltiptext="When Scratchpad edits a user script: its name in the title, a summary of its metadata above the code, code folding, hints as you type, its warnings when you save, and Options, View and Open Folder buttons. Unticked, Scratchpad is as it always was. Applies to Scratchpad windows opened afterwards." />
+  </groupbox>
 </tabpanel>
 </tabpanels>
 </tabbox>

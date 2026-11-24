@@ -182,18 +182,8 @@ function fillPlaceholders(aTemplate, aValues) {
   });
 }
 
-/**
- * @param {string} aPattern - The @match / @exclude-match value.
- * @param {Error}  aError   - Why MatchPattern refused it.
- * @returns {string} The parseWarnings entry for an ignored pattern.
- */
-function ignoringMatchWarning(aPattern, aError) {
-  return fillPlaceholders(
-      GM_CONSTANTS.localeStringBundle.createBundle(
-          GM_CONSTANTS.localeGreasemonkeyProperties)
-          .GetStringFromName("error.parse.ignoringMatch"),
-      [aPattern, aError.message || aError]);
-}
+// ignoringMatchWarning(aPattern, aError), the parseWarnings entry for a
+// skipped @match / @exclude-match pattern, comes from matchPattern.js.
 
 /**
  * @param {object} aData  - Parsed @icon / @icon64 meta line.

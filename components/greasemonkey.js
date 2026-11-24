@@ -44,6 +44,29 @@ const DIRECTORY_TEMP = GM_CONSTANTS.directoryService
 var gGreasemonkeyVersion = "unknown";
 var gStartupHasRun = false;
 
+/**
+ * Greasemonkey's version as the Add-ons Manager last recorded it (the
+ * extensions.xpiState preference), readable at once: GM_info.version was
+ * "unknown" on the first pages after startup, until AddonManager's
+ * asynchronous answer came.
+ *
+ * @returns {string|null}
+ */
+function recordedVersion() {
+  try {
+    let state = JSON.parse(Services.prefs.getCharPref("extensions.xpiState"));
+    for (let location in state) {
+      let addon = state[location] && state[location][GM_CONSTANTS.addonGUID];
+      if (addon && addon.v) {
+        return String(addon.v);
+      }
+    }
+  } catch (e) {
+    // Not there yet (a first install): AddonManager's answer follows.
+  }
+  return null;
+}
+
 /////////////////////// Component-global Helper Functions //////////////////////
 
 function shutdown(aService) {
@@ -92,6 +115,8 @@ function startup(aService) {
   startScriptInjector();
   initScriptProtocol();
 
+  gGreasemonkeyVersion = recordedVersion() || gGreasemonkeyVersion;
+
   // Beam down initial set of scripts.
   IPCScript.setSource(function () {
     return aService.scriptUpdateData();
@@ -126,7 +151,17 @@ function startup(aService) {
 
   // Import this once, early, so that enqueued deletes can happen.
   Cu.import("chrome://greasemonkey-modules/content/util/enqueueRemove.js");
+
+  // A minute in, out of startup's way: temporary folders more than a day
+  // old, left by downloads or imports cut short.
+  GM_util.timeout(function () {
+    Cu.import("chrome://greasemonkey-modules/content/util/getTempDir.js", {})
+        .cleanOldTempDirs();
+  }, CLEAN_TEMP_DIRS_DELAY_MS);
 }
+
+/** When cleanOldTempDirs runs after startup. */
+const CLEAN_TEMP_DIRS_DELAY_MS = 60 * 1000;
 
 // Config events that make the scripts' snapshot out of date.
 const SNAPSHOT_EVENTS = [
@@ -136,6 +171,7 @@ const SNAPSHOT_EVENTS = [
   // "missing-removed",
   "modified",
   "move",
+  "pending-uninstall",
   "uninstall",
 ];
 

@@ -169,6 +169,7 @@ Basilisk `gm-device-test/pagemode` (a hostile page hunting for the APIs).
 │   Install dialog              — content/install.{js,xul}                 │
 │   New-script dialog           — content/newScript.{js,xul}               │
 │   Editor host (Scratchpad)    — content/scratchpadOverlay.{js,xul}       │
+│                                  + content/scratchpadTools.js            │
 │                                  + modules/util/openInEditor.js          │
 │   Backup / restore            — modules/backup.js (no UI of its own)     │
 └──────────────────────────────────────────────────────────────────────────┘
@@ -524,6 +525,19 @@ it and the window carries on with the installed file.  A save that would
 give a script another installed script's `@name` + `@namespace` (or a draft
 that doesn't parse) is refused with an alert and the window stays open,
 unsaved.  A saved edit is read at once (`updateModifiedScripts`).
+
+With **Enhance the Scratchpad editor** ticked (Preferences > Advanced,
+`extensions.greasemonkey.scratchpad.enhanced`, on by default),
+`content/scratchpadTools.js` adds, for a user script only: its name and
+version as the window title; Options / View / Open Folder buttons (the
+modeless Options window of `util/openScriptOptions.js`, the source viewer,
+the folder); a Metadata summary above the code, built by `parseScript.js`
+as you type (toggle: `scratchpad.metadata`); code folding; hints from
+CodeMirror's show-hint add-on after `// @`, in `@grant` / `@run-at` /
+`@inject-into` values and after `GM_` / `GM.`; and the parser's warnings
+in Scratchpad's notification bar after a save.  Pretty Print is hidden
+then.  Unticked, Scratchpad is as it always was; its theme is always its
+own (the developer tools' `devtools.theme`).
 
 `extensions.greasemonkey.editor` can be set to any external executable;
 `util/setEditor.js` provides the file picker.  An external editor writes

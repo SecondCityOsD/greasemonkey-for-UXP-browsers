@@ -208,9 +208,7 @@ function viewDependencyFile(aFile, aUrl) {
   }
   let tabBrowser = browserWindow.gBrowser;
   tabBrowser.selectedTab = tabBrowser.addTab(
-      "chrome://greasemonkey/content/sourceViewer.xhtml?path="
-      + encodeURIComponent(aFile.path)
-      + "&url=" + encodeURIComponent(aUrl));
+      GM_util.sourceViewerUrl(aFile, aUrl));
   browserWindow.focus();
 }
 

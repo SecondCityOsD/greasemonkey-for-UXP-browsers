@@ -28,12 +28,21 @@ const WAITING_DEPENDENCIES_AT_ONCE = 4;
 // often while changes keep coming (_scheduleSave).
 const SAVE_DELAY_MS = 250;
 const SAVE_AT_LEAST_EVERY_MS = 1000;
+// Next to config.xml: the entries of scripts an import installed that no
+// config.xml in place lists yet (Config.noteImported), one per line.
+const IMPORT_JOURNAL_NAME = "import-journal.txt";
 
 function Config() {
   this._saveTimer = null;
   this._scripts = null;
   this._configFile = GM_util.scriptDir();
   this._configFile.append("config.xml");
+  this._configWriter = new OrderedFileWriter(this._configFile);
+  // Scripts an import installed that no config.xml in place lists yet:
+  // their entries wait in the import journal meanwhile (noteImported).
+  this._journal = [];
+  this._journalFile = GM_util.scriptDir();
+  this._journalFile.append(IMPORT_JOURNAL_NAME);
   this._globalExcludes = JSON.parse(GM_prefRoot.getValue("globalExcludes"));
   this._observers = [];
   // Populated by _scanOrphans() during initialize(); each entry is
@@ -47,7 +56,9 @@ Config.prototype.GM_GUID = GM_CONSTANTS.addonGUID;
 
 Config.prototype.initialize = function () {
   this._updateVersion();
-  this._load();
+  let waiting = this._load();
+  this._adoptInterruptedImport(waiting);
+  this._fetchWaitingDependencies(waiting);
   this._orphans = this._scanOrphans();
   if (this._orphans.length > 0) {
     // Non-ASCII text in code is written as escapes, which read the same
@@ -206,8 +217,40 @@ Config.prototype._scanOrphans = function () {
     }
   }
 
+  // By folder name, numbers as numbers (many2 before many10): the
+  // directory listing gave them as text.
+  orphans.sort(function (aA, aB) {
+    return naturalCompare(aA.basedir, aB.basedir);
+  });
   return orphans;
 };
+
+/**
+ * Compares two names the way people read them: runs of digits as numbers
+ * ("many2" before "many10"), the rest without regard to case.
+ *
+ * @param {string} aA
+ * @param {string} aB
+ * @returns {number} Below, at or above 0.
+ */
+function naturalCompare(aA, aB) {
+  let partsA = String(aA).toLowerCase().match(/\d+|\D+/g) || [];
+  let partsB = String(aB).toLowerCase().match(/\d+|\D+/g) || [];
+  for (let i = 0; i < Math.min(partsA.length, partsB.length); i++) {
+    let a = partsA[i];
+    let b = partsB[i];
+    if (a == b) {
+      continue;
+    }
+    if (/^\d/.test(a) && /^\d/.test(b)) {
+      // Numbers by value; equal values (7 and 007) by their digits.
+      let diff = Number(a) - Number(b);
+      return diff || ((a < b) ? -1 : 1);
+    }
+    return (a < b) ? -1 : 1;
+  }
+  return partsA.length - partsB.length;
+}
 
 Config.prototype.addObserver = function (aObserver, aScript) {
   let observers = aScript ? aScript._observers : this._observers;
@@ -259,84 +302,90 @@ Config.prototype._find = function (aScript) {
 };
 
 Config.prototype._load = function () {
-  let domParser = Components.classes["@mozilla.org/xmlextras/domparser;1"]
-      .createInstance(Components.interfaces.nsIDOMParser);
-
   let configContents = "<" + TAG_USER_SCRIPT_CONFIG + "/>";
   if (this._configFile.exists()) {
     configContents = GM_util.getContents(this._configFile);
   }
-  let doc = domParser.parseFromString(configContents, "text/xml");
-  let nodes = doc.evaluate("/" + TAG_USER_SCRIPT_CONFIG + "/Script", doc, null,
-      7 /* XPathResult.ORDERED_NODE_SNAPSHOT_TYPE */,
-      null);
+  let nodes = scriptNodes(configContents);
 
   this._scripts = [];
   let waiting = [];
-  for (let i = 0, node = null; node = nodes.snapshotItem(i); i++) {
+  for (let i = 0; i < nodes.length; i++) {
     let script;
     try {
-      script = new Script(node);
+      script = new Script(nodes[i]);
     } catch (e) {
       // If parsing the script node failed, fail gracefully by skipping it.
       GM_util.logError(e, false, e.fileName, e.lineNumber);
       continue;
     }
-    let _allFilesExist = script.allFilesExistResult();
-    if (script._dependenciesPending && script.fileExists(script.file)) {
-      // Imported, but the browser closed before its files were in: it
-      // still waits for them (and runs on no page), and they are fetched
-      // again below.  Whatever is missing: one waiting only for its @icon
-      // (not among the files checked above) was otherwise never fetched,
-      // and so never ran.
-      this._scripts.push(script);
-      waiting.push(script);
-      continue;
-    }
-    if (_allFilesExist.length == 0) {
-      // Files are intact.  If the script was previously flagged
-      // broken (a transient file-system glitch or a partial backup
-      // restore that's since been completed), clear the flag so the
-      // User Scripts panel renders it normally.  Doesn't auto-
-      // re-enable — the user must explicitly toggle it back on.
-      if (script.broken) {
-        script.clearBroken();
-        this._changed(script, "modified", null);
-      }
-      this._scripts.push(script);
-    } else {
-      // Files are missing.  Historically (~3.6.x) the entry was
-      // removed from config.xml at this point and the script was
-      // permanently forgotten.  That was destructive: a version
-      // downgrade that wrote different file paths, or a backup that
-      // restored config.xml but not all the script directories,
-      // would silently delete the user's entire script collection.
-      //
-      // The non-destructive replacement:
-      //   - Mark the script broken + record which files are missing.
-      //   - Disable the script (so it doesn't try to inject with a
-      //     broken file set and throw at first @require fetch).
-      //   - KEEP the entry in config.xml.  Next startup will retry
-      //     allFilesExistResult; if the files came back, clearBroken()
-      //     above fires and the script recovers automatically.
-      //
-      // The user sees the script in the User Scripts panel marked
-      // as broken (rendered by addonsOverlay.js / the Recover-
-      // Orphans UI, separate commit).
-      let _info = GM_CONSTANTS.localeStringBundle.createBundle(
-          GM_CONSTANTS.localeGreasemonkeyProperties)
-          .GetStringFromName("error.scriptIsNotComplete")
-          .replace("%1", script.name)
-          .replace("%2", _allFilesExist);
-      GM_util.logError(_info, false, script.fileURL, null);
-      script.markBroken(_allFilesExist);
-      this._scripts.push(script);
-      // Persist the broken flag so the panel renders correctly on
-      // next start without redoing the file-system probe.
-      this._changed(script, "modified", null);
-    }
+    this._addLoadedScript(script, waiting);
   }
-  this._fetchWaitingDependencies(waiting);
+  return waiting;
+};
+
+/**
+ * Adds a script read from config.xml (or the import journal), after a
+ * look at its files.
+ *
+ * @param {Script}   aScript
+ * @param {Script[]} aWaiting - Gets it if it still waits for files an
+ *   import was fetching (see _fetchWaitingDependencies).
+ */
+Config.prototype._addLoadedScript = function (aScript, aWaiting) {
+  let _allFilesExist = aScript.allFilesExistResult();
+  if (aScript._dependenciesPending && aScript.fileExists(aScript.file)) {
+    // Imported, but the browser closed before its files were in: it
+    // still waits for them (and runs on no page), and they are fetched
+    // again shortly (see initialize).  Whatever is missing: one waiting
+    // only for its @icon (not among the files checked above) was
+    // otherwise never fetched, and so never ran.
+    this._scripts.push(aScript);
+    aWaiting.push(aScript);
+    return undefined;
+  }
+  if (_allFilesExist.length == 0) {
+    // Files are intact.  If the script was previously flagged
+    // broken (a transient file-system glitch or a partial backup
+    // restore that's since been completed), clear the flag so the
+    // User Scripts panel renders it normally.  Doesn't auto-
+    // re-enable — the user must explicitly toggle it back on.
+    if (aScript.broken) {
+      aScript.clearBroken();
+      this._changed(aScript, "modified", null);
+    }
+    this._scripts.push(aScript);
+  } else {
+    // Files are missing.  Historically (~3.6.x) the entry was
+    // removed from config.xml at this point and the script was
+    // permanently forgotten.  That was destructive: a version
+    // downgrade that wrote different file paths, or a backup that
+    // restored config.xml but not all the script directories,
+    // would silently delete the user's entire script collection.
+    //
+    // The non-destructive replacement:
+    //   - Mark the script broken + record which files are missing.
+    //   - Disable the script (so it doesn't try to inject with a
+    //     broken file set and throw at first @require fetch).
+    //   - KEEP the entry in config.xml.  Next startup will retry
+    //     allFilesExistResult; if the files came back, clearBroken()
+    //     above fires and the script recovers automatically.
+    //
+    // The user sees the script in the User Scripts panel marked
+    // as broken (rendered by addonsOverlay.js / the Recover-
+    // Orphans UI, separate commit).
+    let _info = GM_CONSTANTS.localeStringBundle.createBundle(
+        GM_CONSTANTS.localeGreasemonkeyProperties)
+        .GetStringFromName("error.scriptIsNotComplete")
+        .replace("%1", aScript.name)
+        .replace("%2", _allFilesExist);
+    GM_util.logError(_info, false, aScript.fileURL, null);
+    aScript.markBroken(_allFilesExist);
+    this._scripts.push(aScript);
+    // Persist the broken flag so the panel renders correctly on
+    // next start without redoing the file-system probe.
+    this._changed(aScript, "modified", null);
+  }
 };
 
 /**
@@ -420,50 +469,177 @@ Config.prototype._save = function (aSaveNow, aBeforeReturning) {
     this._saveTimer = null;
   }
 
+  let text = this._configText(this._scripts);
+  // The import journal's scripts this text lists: once it is in place,
+  // the journal lets them go.
+  let listed = this._journal.concat();
+  let config = this;
+  this._configWriter.write(text, !!aBeforeReturning,
+      function (aError, aSuperseded) {
+        if (!aError && !aSuperseded) {
+          config._journalSaved(listed);
+        }
+      });
+};
+
+/**
+ * @param {Script[]} aScripts
+ * @returns {string} config.xml's text for them.
+ */
+Config.prototype._configText = function (aScripts) {
   let doc = Components.classes["@mozilla.org/xmlextras/domparser;1"]
       .createInstance(Components.interfaces.nsIDOMParser)
       .parseFromString(
           "<" + TAG_USER_SCRIPT_CONFIG + "></" + TAG_USER_SCRIPT_CONFIG + ">",
           "text/xml");
 
-  for (let i = 0, iLen = this._scripts.length; i < iLen; i++) {
-    let scriptObj = this._scripts[i];
+  for (let i = 0, iLen = aScripts.length; i < iLen; i++) {
     doc.firstChild.appendChild(doc.createTextNode("\n\t"));
-    doc.firstChild.appendChild(scriptObj.toConfigNode(doc));
+    doc.firstChild.appendChild(aScripts[i].toConfigNode(doc));
   }
 
   doc.firstChild.appendChild(doc.createTextNode("\n"));
 
-  let domSerializer = Components
-      .classes["@mozilla.org/xmlextras/xmlserializer;1"]
-      .createInstance(Components.interfaces.nsIDOMSerializer);
-  let text = domSerializer.serializeToString(doc);
-  if (!aBeforeReturning) {
-    GM_util.writeToFile(text, this._configFile);
+  return Components.classes["@mozilla.org/xmlextras/xmlserializer;1"]
+      .createInstance(Components.interfaces.nsIDOMSerializer)
+      .serializeToString(doc);
+};
+
+/**
+ * Keeps the config.xml entry of a script an import just installed, with
+ * the settings it brought, in the import journal next to config.xml, until
+ * a config.xml listing it is in place.  config.xml is written a moment
+ * after changes (at least every second while they keep coming, later
+ * while the import keeps the browser busy): a crash meanwhile left the
+ * scripts as orphaned folders, without their settings.  The next start
+ * adds them back from the journal (_adoptInterruptedImport).
+ *
+ * The entry is added to the journal at once, as a line of its own: a
+ * write in the background was still waiting when the browser was killed.
+ *
+ * @param {Script} aScript - Installed.
+ */
+Config.prototype.noteImported = function (aScript) {
+  if (this._journal.indexOf(aScript) == -1) {
+    this._journal.push(aScript);
+  }
+  appendFileNow(JSON.stringify(this._configText([aScript])) + "\n",
+      this._journalFile);
+};
+
+/**
+ * A config.xml listing aListed is in place: the journal lets them go.
+ *
+ * @param {Script[]} aListed
+ */
+Config.prototype._journalSaved = function (aListed) {
+  if (!aListed.length) {
     return undefined;
   }
-  // A safe-file stream: the old config.xml stays until the new one is
-  // complete.
-  let stream = Cc["@mozilla.org/network/safe-file-output-stream;1"]
-      .createInstance(Ci.nsIFileOutputStream);
-  try {
-    stream.init(this._configFile, 0x02 | 0x08 | 0x20 /* write, create, truncate */,
-        GM_CONSTANTS.fileMask, 0);
-    let converter = Cc["@mozilla.org/intl/converter-output-stream;1"]
-        .createInstance(Ci.nsIConverterOutputStream);
-    converter.init(stream, "UTF-8", 0, 0);
-    converter.writeString(text);
-    converter.flush();
-    stream.QueryInterface(Ci.nsISafeOutputStream).finish();
-  } catch (e) {
-    GM_util.logError("Greasemonkey: config.xml couldn't be written: " + e,
-        false);
-    try {
-      stream.close();
-    } catch (e2) {
-      // Never opened.
-    }
+  this._journal = this._journal.filter(function (aScript) {
+    return aListed.indexOf(aScript) == -1;
+  });
+  this._writeJournal();
+};
+
+/**
+ * Writes the import journal again: the entries of its scripts still
+ * installed (at most a second's worth of an import).  With none left, the
+ * file goes.
+ */
+Config.prototype._writeJournal = function () {
+  let scripts = this._scripts;
+  this._journal = this._journal.filter(function (aScript) {
+    return scripts.indexOf(aScript) > -1;
+  });
+  if (this._journal.length) {
+    writeFileNow(this._journal.map(function (aScript) {
+      return JSON.stringify(this._configText([aScript])) + "\n";
+    }, this).join(""), this._journalFile);
+    return undefined;
   }
+  try {
+    if (this._journalFile.exists()) {
+      this._journalFile.remove(false);
+    }
+  } catch (e) {
+    GM_util.logError("Greasemonkey: " + IMPORT_JOURNAL_NAME
+        + " couldn't be removed: " + e, false);
+  }
+};
+
+/**
+ * Adds back the scripts an import had installed when the browser closed
+ * or crashed before config.xml listed them (see noteImported): each as
+ * config.xml would have had it, if its folder is there and no script
+ * listed has its folder or id.  One still waiting for its files gets
+ * them fetched, as after any interrupted import.
+ *
+ * @param {Script[]} aWaiting - See _addLoadedScript.
+ */
+Config.prototype._adoptInterruptedImport = function (aWaiting) {
+  if (!this._journalFile.exists()) {
+    return undefined;
+  }
+  let lines = [];
+  try {
+    lines = GM_util.getContents(this._journalFile).split("\n");
+  } catch (e) {
+    GM_util.logError(
+        "Greasemonkey: " + IMPORT_JOURNAL_NAME + " couldn't be read: " + e,
+        false);
+  }
+  // By folder, in the order they came; a later line (the same script
+  // noted again) replaces an earlier one.  A line cut short by the crash
+  // is left out.
+  let entries = new Map();
+  lines.forEach(function (aLine) {
+    let node;
+    try {
+      node = scriptNodes(JSON.parse(aLine))[0];
+    } catch (e) {
+      return undefined;
+    }
+    if (node) {
+      entries.set(node.getAttribute("basedir"), node);
+    }
+  });
+  let nodes = Array.from(entries.values());
+  let basedirs = new Set();
+  let ids = new Set();
+  this._scripts.forEach(function (aScript) {
+    basedirs.add(aScript._basedir);
+    ids.add(aScript.id);
+  });
+  let adopted = [];
+  for (let i = 0; i < nodes.length; i++) {
+    let script;
+    try {
+      script = new Script(nodes[i]);
+    } catch (e) {
+      continue;
+    }
+    if (!script._basedir || basedirs.has(script._basedir)
+        || ids.has(script.id) || !script.fileExists(script.file)) {
+      continue;
+    }
+    basedirs.add(script._basedir);
+    ids.add(script.id);
+    this._addLoadedScript(script, aWaiting);
+    adopted.push(script);
+  }
+  // In the journal until a config.xml listing them is in place.
+  this._journal = adopted;
+  if (!adopted.length) {
+    this._writeJournal();
+    return undefined;
+  }
+  Services.console.logStringMessage("Greasemonkey: added back "
+      + adopted.length + " script(s) an import had installed when the"
+      + " browser closed: " + adopted.map(function (aScript) {
+        return aScript.name;
+      }).join(", "));
+  this._save();
 };
 
 // Backward compatibility.
@@ -758,3 +934,140 @@ Config.prototype._updateVersion = function () {
     }
   }.bind(this));
 };
+
+/**
+ * @param {string} aText - config.xml's text (or the import journal's).
+ * @returns {Element[]} Its <Script> entries, in order.
+ */
+function scriptNodes(aText) {
+  let doc = Components.classes["@mozilla.org/xmlextras/domparser;1"]
+      .createInstance(Components.interfaces.nsIDOMParser)
+      .parseFromString(aText, "text/xml");
+  let snapshot = doc.evaluate("/" + TAG_USER_SCRIPT_CONFIG + "/Script", doc,
+      null, 7 /* XPathResult.ORDERED_NODE_SNAPSHOT_TYPE */, null);
+  let nodes = [];
+  for (let i = 0, node = null; node = snapshot.snapshotItem(i); i++) {
+    nodes.push(node);
+  }
+  return nodes;
+}
+
+/**
+ * Writes one file over and over, so that the newest text is what stays:
+ * a write finished on another thread after a newer one is in place (the
+ * quit's, written at once) is dropped, where it used to put its older
+ * text back.
+ *
+ * @param {nsIFile} aFile
+ */
+function OrderedFileWriter(aFile) {
+  this.file = aFile;
+  // Writes started, and the newest of them in place.
+  this._started = 0;
+  this._landed = 0;
+}
+
+/**
+ * @param {string}   aText
+ * @param {boolean}  aNow - On this thread, done when this returns.
+ * @param {Function} [aCallback] - (error, superseded).
+ */
+OrderedFileWriter.prototype.write = function (aText, aNow, aCallback) {
+  let number = ++this._started;
+  let writer = this;
+  if (aNow) {
+    let error = writeFileNow(aText, this.file);
+    if (!error) {
+      this._landed = number;
+    }
+    if (aCallback) {
+      aCallback(error, false);
+    }
+    return undefined;
+  }
+  try {
+    GM_util.writeToFile(aText, this.file, function (aError, aSuperseded) {
+      if (!aError && !aSuperseded) {
+        writer._landed = Math.max(writer._landed, number);
+      }
+      if (aCallback) {
+        aCallback(aError, aSuperseded);
+      }
+    }, {
+      "superseded": function () {
+        return writer._landed > number;
+      },
+    });
+  } catch (e) {
+    // Not even started (no temporary file could be made, say).
+    GM_util.logError("Greasemonkey: " + this.file.leafName
+        + " couldn't be written: " + e, false);
+    if (aCallback) {
+      aCallback(e, false);
+    }
+  }
+};
+
+/**
+ * Adds aText at the end of aFile (made if missing), on this thread.
+ *
+ * @param {string}  aText
+ * @param {nsIFile} aFile
+ * @returns {Error|null}
+ */
+function appendFileNow(aText, aFile) {
+  let stream = Cc["@mozilla.org/network/file-output-stream;1"]
+      .createInstance(Ci.nsIFileOutputStream);
+  try {
+    stream.init(aFile, 0x02 | 0x08 | 0x10 /* write, create, append */,
+        GM_CONSTANTS.fileMask, 0);
+    let converter = Cc["@mozilla.org/intl/converter-output-stream;1"]
+        .createInstance(Ci.nsIConverterOutputStream);
+    converter.init(stream, "UTF-8", 0, 0);
+    converter.writeString(aText);
+    converter.close();
+    return null;
+  } catch (e) {
+    GM_util.logError("Greasemonkey: " + aFile.leafName
+        + " couldn't be written: " + e, false);
+    try {
+      stream.close();
+    } catch (e2) {
+      // Never opened.
+    }
+    return e;
+  }
+}
+
+/**
+ * Writes aText to aFile on this thread, through a safe-file stream: the
+ * old file stays until the new one is complete.
+ *
+ * @param {string}  aText
+ * @param {nsIFile} aFile
+ * @returns {Error|null}
+ */
+function writeFileNow(aText, aFile) {
+  let stream = Cc["@mozilla.org/network/safe-file-output-stream;1"]
+      .createInstance(Ci.nsIFileOutputStream);
+  try {
+    stream.init(aFile, 0x02 | 0x08 | 0x20 /* write, create, truncate */,
+        GM_CONSTANTS.fileMask, 0);
+    let converter = Cc["@mozilla.org/intl/converter-output-stream;1"]
+        .createInstance(Ci.nsIConverterOutputStream);
+    converter.init(stream, "UTF-8", 0, 0);
+    converter.writeString(aText);
+    converter.flush();
+    stream.QueryInterface(Ci.nsISafeOutputStream).finish();
+    return null;
+  } catch (e) {
+    GM_util.logError("Greasemonkey: " + aFile.leafName
+        + " couldn't be written: " + e, false);
+    try {
+      stream.close();
+    } catch (e2) {
+      // Never opened.
+    }
+    return e;
+  }
+}

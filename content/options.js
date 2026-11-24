@@ -126,6 +126,8 @@ function GM_loadOptions() {
       .checked = GM_prefRoot.getValue("api.GM_cookie.exposeHttpOnly", false);
   document.getElementById("download-browser-api")
       .checked = GM_prefRoot.getValue("api.GM_download.browserApi", false);
+  document.getElementById("scratchpad-enhanced")
+      .checked = GM_prefRoot.getValue("scratchpad.enhanced", true);
   document.getElementById("menu-auto-reload")
       .checked = GM_prefRoot.getValue("toolbarMenu.autoReload", false);
   let menuDisabled = GM_prefRoot.getValue(
@@ -213,6 +215,9 @@ function GM_localizeOptions() {
     ["http-only-cookies-note", "tooltiptext", "options.httpOnlyCookies.tip"],
     ["download-browser-api", "label", "options.downloadBrowserApi"],
     ["download-browser-api", "tooltiptext", "options.downloadBrowserApi.tip"],
+    ["scratchpad-caption", "label", "options.scratchpad"],
+    ["scratchpad-enhanced", "label", "options.scratchpadEnhanced"],
+    ["scratchpad-enhanced", "tooltiptext", "options.scratchpadEnhanced.tip"],
     ["menu-auto-reload", "label", "options.menuAutoReload"],
     ["menu-disabled-label", "value", "options.menuDisabled"],
     ["menu-disabled", "tooltiptext", "options.menuDisabled.tip"],
@@ -290,6 +295,8 @@ function GM_saveOptions() {
       !!document.getElementById("http-only-cookies").checked);
   GM_prefRoot.setValue("api.GM_download.browserApi",
       !!document.getElementById("download-browser-api").checked);
+  GM_prefRoot.setValue("scratchpad.enhanced",
+      !!document.getElementById("scratchpad-enhanced").checked);
   GM_prefRoot.setValue("toolbarMenu.autoReload",
       !!document.getElementById("menu-auto-reload").checked);
   GM_prefRoot.setValue("toolbarMenu.disabledScripts",

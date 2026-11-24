@@ -1,6 +1,11 @@
 <?xml version="1.0"?>
+<?xml-stylesheet href="chrome://greasemonkey/skin/scratchpad.css" type="text/css"?>
 <overlay id="greasemonkey-browser-overlay"
   xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul">
+  <script type="application/x-javascript"
+    src="chrome://greasemonkey/content/thirdParty/mplUtils.js" />
+  <script type="application/x-javascript"
+    src="chrome://greasemonkey/content/scratchpadTools.js" />
   <script type="application/x-javascript"
     src="chrome://greasemonkey/content/scratchpadOverlay.js" />
 </overlay>

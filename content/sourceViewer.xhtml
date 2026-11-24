@@ -4,7 +4,8 @@
   Read-only, syntax-highlighted user-script source viewer.
 
   Loaded as a chrome document inside a browser tab via
-    chrome://greasemonkey/content/sourceViewer.xhtml?path=<encoded OS path>
+    chrome://greasemonkey/content/sourceViewer.xhtml?id=<short id>
+  (GM_util.sourceViewerUrl keeps the file's path under that id).
 
   XHTML (not XUL) so CodeMirror's document.createElement() calls produce HTML
   elements and it can render.  All visible text is set at runtime from

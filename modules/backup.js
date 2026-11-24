@@ -810,35 +810,6 @@ function _buildOptionsJson(aScript, aDependencies) {
  * to downloading it from its original URL, exactly as format v1 did for
  * everything.
  */
-/**
- * Computes the lowercase hex SHA-256 of a file by streaming it through the
- * platform's native nsICryptoHash — no bytes are buffered in JS.  Used for
- * dependency dedup (content addressing) and import-time integrity checks.
- * A WebExtension has neither file access nor native file hashing.
- *
- * @param {nsIFile} aFile - File to hash.
- * @returns {string} 64-char lowercase hex digest.
- */
-function sha256OfFile(aFile) {
-  let istream = Cc["@mozilla.org/network/file-input-stream;1"]
-      .createInstance(Ci.nsIFileInputStream);
-  istream.init(aFile, 0x01 /* PR_RDONLY */, parseInt("444", 8), 0);
-  try {
-    let hasher = Cc["@mozilla.org/security/hash;1"]
-        .createInstance(Ci.nsICryptoHash);
-    hasher.init(Ci.nsICryptoHash.SHA256);
-    hasher.updateFromStream(istream, 0xffffffff);
-    let binary = hasher.finish(false);
-    let hex = "";
-    for (let i = 0; i < binary.length; i++) {
-      hex += ("0" + binary.charCodeAt(i).toString(16)).slice(-2);
-    }
-    return hex;
-  } finally {
-    try { istream.close(); } catch (e) { /* best effort */ }
-  }
-}
-
 function _exportDependencies(
     aZipWriter, aScript, aUserJsName, aQueue, aSeenHashes) {
   let out = [];
@@ -872,7 +843,7 @@ function _exportDependencies(
         // Hashing failure isn't fatal: store the bytes without a hash.
         let sha256 = null;
         try {
-          sha256 = sha256OfFile(file);
+          sha256 = GM_util.hashFile(file, "sha256");
         } catch (e) {
           sha256 = null;
         }
@@ -1412,7 +1383,7 @@ function _prepareImport(aKey, aEntry, aDepFiles, aOpts, aThisImport) {
       if (dep.sha256) {
         let actual = null;
         try {
-          actual = sha256OfFile(depFile);
+          actual = GM_util.hashFile(depFile, "sha256");
         } catch (e) {
           actual = null;
         }
@@ -1657,6 +1628,9 @@ function _commitImport(aJob, aOpts, aResult, aThisImport) {
       _applyImportedStorage(
           aJob.parsedScript, aJob.entry.storage, aJob.entry.storageShape);
     }
+    // Its config.xml entry, settings included, is kept aside until
+    // config.xml lists it: a crash in the meantime left it an orphan.
+    GM_util.getService().config.noteImported(aJob.parsedScript);
     aResult.imported++;
     aJob.installed = true;
     if (aThisImport) {

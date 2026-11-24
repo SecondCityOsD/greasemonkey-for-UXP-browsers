@@ -39,10 +39,17 @@ converter.charset = GM_CONSTANTS.fileScriptCharset;
  *   failed move into place).  Existing 0-arg callers are unaffected; callers
  *   that care can inspect the argument and abort instead of proceeding —
  *   previously the callback simply never fired on failure, silently stalling
- *   any continuation chained on it.
+ *   any continuation chained on it.  A second argument says whether the
+ *   copy was dropped as superseded (see aOptions).
+ * @param {object} [aOptions]
+ * @param {Function} [aOptions.superseded] - Asked once the copy is
+ *   written, just before it is moved into place: true drops it, because a
+ *   newer version of the file is in place already.  Without it, an older
+ *   write finishing late put its older text back (config.xml written at
+ *   once on quit, then overwritten by a write started a moment before).
  * @returns {void}
  */
-function writeToFile(aData, aFile, aCallback) {
+function writeToFile(aData, aFile, aCallback, aOptions) {
   // Assume aData is a string; convert it to a UTF-8 stream.
   let istream = converter.convertToInputStream(aData);
 
@@ -55,14 +62,29 @@ function writeToFile(aData, aFile, aCallback) {
 
   NetUtil.asyncCopy(istream, ostream, function (aStatus) {
     let error = null;
+    let superseded = false;
     if (Components.isSuccessCode(aStatus)) {
-      // On successful write, move it to the real location.  moveTo can
-      // itself throw (destination locked on Windows, permissions) — that
-      // is a failure too, not an exception to leak into NetUtil.
       try {
-        tmpFile.moveTo(aFile.parent, aFile.leafName);
+        superseded = !!(aOptions && aOptions.superseded
+            && aOptions.superseded());
       } catch (e) {
-        error = e;
+        superseded = false;
+      }
+      if (superseded) {
+        try {
+          tmpFile.remove(false);
+        } catch (e) {
+          // Best effort, as below.
+        }
+      } else {
+        // On successful write, move it to the real location.  moveTo can
+        // itself throw (destination locked on Windows, permissions) — that
+        // is a failure too, not an exception to leak into NetUtil.
+        try {
+          tmpFile.moveTo(aFile.parent, aFile.leafName);
+        } catch (e) {
+          error = e;
+        }
       }
     } else {
       error = new Error(
@@ -79,7 +101,7 @@ function writeToFile(aData, aFile, aCallback) {
       }
     }
     if (aCallback) {
-      aCallback(error || undefined);
+      aCallback(error || undefined, superseded);
     }
   });
 }

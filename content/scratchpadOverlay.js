@@ -30,6 +30,7 @@ window.addEventListener("load", function () {
   Cu.import("resource://gre/modules/Services.jsm");
 
   Cu.import("chrome://greasemonkey-modules/content/editorSave.js");
+  Cu.import("chrome://greasemonkey-modules/content/prefManager.js");
   Cu.import("chrome://greasemonkey-modules/content/util.js");
 
   GM_guardScratchpadSaves(Scratchpad);
@@ -38,36 +39,20 @@ window.addEventListener("load", function () {
     GM_editorSave.removeDraft(Scratchpad.filename);
   }, false);
 
-  // If we're opening a user script:
-  // Put the cursor at the top.
-  var initializeCheckCount = 0;
-  var initializeMaxCount = 50;
-  var initializeCheckTimer = null;
-  // ms
-  let initializeInterval = 20;
-  function moveCursorToTop() {
-    if (initializeCheckCount > initializeMaxCount) {
-      GM_util.logError(
-          GM_CONSTANTS.info.scriptHandler + " - "
-          + GM_CONSTANTS.localeStringBundle.createBundle(
-              GM_CONSTANTS.localeGreasemonkeyProperties)
-              .GetStringFromName("error.scratchpad.notInitialized"));
-      clearInterval(initializeCheckTimer);
-    }
-    initializeCheckCount++;
+  // The cursor at the top once the editor is in.
+  Scratchpad.addObserver({
+    "onReady": function () {
+      Scratchpad.editor.setCursor({"line": 0, "ch": 0});
+    },
+  });
 
-    if (!Scratchpad.initialized) {
-      return undefined;
-    }
-
-    Scratchpad.editor.setCursor({
-      "line": 0,
-      "ch": 0,
-    });
-
-    clearInterval(initializeCheckTimer);
+  // Preferences > Advanced > "Enhance the Scratchpad editor": its title,
+  // toolbar, Metadata summary, folding, hints and the warnings bar
+  // (scratchpadTools.js).  Off, Scratchpad is as it always was.
+  let enhanced = GM_prefRoot.getValue(GM_SP_ENHANCED_PREF, true);
+  if (enhanced) {
+    GM_ScratchpadTools.init(Scratchpad);
   }
-  initializeCheckTimer = setInterval(moveCursorToTop, initializeInterval);
 
   // Hide all the elements which don't make sense when editing a script.
   // See #1771 and #1774.
@@ -125,6 +110,14 @@ window.addEventListener("load", function () {
       "value": true,
     },
   ];
+
+  if (enhanced) {
+    // Pretty Print reformats the whole script, metadata block and all.
+    mainMenuNodes.push(
+        {"id": "sp-toolbar-pprint", "attribute": "collapsed", "value": true},
+        {"id": "sp-menu-pprint", "attribute": "collapsed", "value": true},
+        {"id": "sp-cmd-pprint", "attribute": "disabled", "value": true});
+  }
 
   for (let i = 0, iLen = mainMenuNodes.length; i < iLen; i++) {
     let mainMenuNode = mainMenuNodes[i];
@@ -193,6 +186,11 @@ window.addEventListener("load", function () {
  *   then edits the installed file.
  * - An installed script's save is written, then read at once, instead of
  *   at the next page load.
+ * - A save that goes ahead with lines the parser ignores (a @match it
+ *   can't use, say) says so in Scratchpad's notification bar, when the
+ *   editor is enhanced (see GM_SP_ENHANCED_PREF).
+ * - Each good save tells scratchpadTools.js (a GM_ScratchpadSaved event):
+ *   a new script is installed now, and its name may have changed.
  *
  * @param {object} aScratchpad - This window's Scratchpad object.
  * @returns {void}
@@ -203,6 +201,59 @@ function GM_guardScratchpadSaves(aScratchpad) {
 
   function refuse(aMessage) {
     Services.prompt.alert(window, GM_CONSTANTS.info.scriptHandler, aMessage);
+  }
+
+  // Scratchpad's own notification bar: the browser window's "installed
+  // successfully" popup was shown while Scratchpad had the focus, so it
+  // was dismissed before anyone saw it.  Null where there's none.
+  function noticeBox() {
+    try {
+      return aScratchpad.notificationBox
+          || document.getElementById("scratchpad-notificationbox");
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function noticeInstalled(aScript) {
+    let box = noticeBox();
+    if (!box) {
+      return undefined;
+    }
+    let old = box.getNotificationWithValue("greasemonkey-installed");
+    if (old) {
+      box.removeNotification(old);
+    }
+    box.appendNotification(
+        "(" + aScript.localized.name + ") "
+        + GM_CONSTANTS.localeStringBundle.createBundle(
+            GM_CONSTANTS.localeGmBrowserProperties)
+            .GetStringFromName("script.installed"),
+        "greasemonkey-installed", null, box.PRIORITY_INFO_MEDIUM, null);
+    return undefined;
+  }
+
+  // The parser's warnings about the text just saved, in place of the last
+  // save's; none, nothing.
+  function noticeWarnings(aWarnings) {
+    let box = noticeBox();
+    if (!box || !GM_prefRoot.getValue(GM_SP_ENHANCED_PREF, true)) {
+      return undefined;
+    }
+    let old = box.getNotificationWithValue("greasemonkey-warnings");
+    if (old) {
+      box.removeNotification(old);
+    }
+    if (aWarnings.length) {
+      box.appendNotification(
+          GM_ScratchpadTools.string("scratchpad.savedWithWarnings",
+              "Saved, with warnings: %1")
+              .replace("%1", function () {
+                return aWarnings.join("  \u2022  ");
+              }),
+          "greasemonkey-warnings", null, box.PRIORITY_WARNING_LOW, null);
+    }
+    return undefined;
   }
 
   aScratchpad.saveFile = function (aCallback) {
@@ -237,17 +288,26 @@ function GM_guardScratchpadSaves(aScratchpad) {
           return undefined;
         }
         GM_editorSave.removeDraft(draftPath);
+        noticeInstalled(aScript);
         // Save again, now as the installed script's file: the text may
         // have changed while its @require files downloaded.
         this.setFilename(aScript.file.path);
         this.saveFile(aCallback);
-      }, {"skipEditor": true});
+      }, {
+        // Its alert reports a failure; the success shows in its own bar
+        // (the browser's popup where it has none).
+        "reportsFailures": true,
+        "silent": !!noticeBox(),
+        "skipEditor": true,
+      });
       return undefined;
     }
 
     scratchpadSave.call(this, function (aStatus) {
       if (result.script && Components.isSuccessCode(aStatus)) {
         GM_util.getService().config.updateModifiedScripts();
+        noticeWarnings(result.warnings);
+        window.dispatchEvent(new CustomEvent("GM_ScratchpadSaved"));
       }
       done(aStatus);
     });

@@ -39,6 +39,10 @@ Cu.import("chrome://greasemonkey-modules/content/util.js");
  *   row when reinstalling a stack of recovered scripts.
  * @param {boolean}  [aOptions.silent=false] - When true, no "installed
  *   successfully" message (createUserScript's empty template).
+ * @param {boolean}  [aOptions.reportsFailures=false] - When true, no
+ *   popup for a dependency that fails to download: the caller shows the
+ *   error itself (Scratchpad's alert, Recover Orphans' summary), which
+ *   otherwise appeared twice.
  * @param {object}   [aOptions.dependencies] - Local copies of dependencies
  *   to use instead of downloading them, as RemoteScript's
  *   setPrefetchedDependencies takes them (Recover Orphans).
@@ -77,20 +81,16 @@ function installScriptFromSource(aSource, aCallback, aOptions) {
     remoteScript.setPrefetchedDependencies(opts.dependencies || null);
     remoteScript.download(function (aSuccess) {
       if (!aSuccess) {
-        let notificationOptions = {
-          "persistence": -1,
-          "persistWhileVisible": true,
-        };
-        // The callers show the same words (the editor's alert, Recover
-        // Orphans' summary).
         let message = GM_CONSTANTS.localeStringBundle.createBundle(
             GM_CONSTANTS.localeGreasemonkeyProperties)
             .GetStringFromName("error.couldNotDownloadDependencies")
             .replace("%1", function () {
               return remoteScript.errorMessage || "";
             });
-        GM_notification(message, "greasemonkey-dependency-download-failed",
-            notificationOptions);
+        if (!opts.reportsFailures) {
+          GM_notification(message, "greasemonkey-dependency-download-failed",
+              {"persistence": -1, "persistWhileVisible": true});
+        }
         if (aCallback) {
           aCallback(new Error(message));
         }

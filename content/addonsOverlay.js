@@ -97,11 +97,17 @@ gDragDrop.onDrop = function GM_onDrop(aEvent) {
  * by then, and put in the list in one go.
  */
 var gPendingRows = {
+  // New rows went in since the list was last sorted (applySort at the end).
+  "added": false,
   "firstQueued": 0,
   "flushing": false,
   // An import from this page is running: its rows wait until it's over
   // (holdScriptRows).
   "held": false,
+  // Meanwhile: the rows shown when it began, and those of their scripts
+  // that changed (switched on or off elsewhere, say), built again at the end.
+  "heldChanged": new Set(),
+  "heldRows": new Set(),
   // Rows to build again: the same script with new files (refreshes).
   "refresh": new Set(),
   "scripts": new Set(),
@@ -110,7 +116,8 @@ var gPendingRows = {
 const PENDING_ROWS_QUIET_MS = 300;
 const PENDING_ROWS_MAX_WAIT_MS = 2000;
 // A batch of rows, then a pause so clicks and scrolling are answered.
-const PENDING_ROWS_PER_BATCH = 10;
+// (Ten at a time paused the browser for up to a quarter of a second.)
+const PENDING_ROWS_PER_BATCH = 5;
 const PENDING_ROWS_GAP_MS = 50;
 
 /**
@@ -140,9 +147,11 @@ function queueScriptRow(aScript, aRefresh) {
  * adds the rows of the scripts it doesn't show yet.  With the User Scripts
  * list showing, the page following each of the import's changes (even
  * without adding rows) took the import half again as long, and kept the
- * browser busy three times as long, as with the list closed.  A script
- * switched on or off elsewhere during the import shows the change when
- * the list is next drawn.
+ * browser busy three times as long, as with the list closed.  Meanwhile
+ * it only notes which of the rows shown change (heldObserver): once the
+ * import is over, those are built again, and the rows of scripts removed
+ * or replaced meanwhile go.  A script switched on or off elsewhere during
+ * an import kept its old row before.
  *
  * @param {boolean} aHold
  */
@@ -154,15 +163,43 @@ function holdScriptRows(aHold) {
   gPendingRows.held = aHold;
   if (aHold) {
     config.removeObserver(observer);
+    gPendingRows.heldChanged.clear();
+    gPendingRows.heldRows.clear();
+    for (let item of gListView._listBox.childNodes) {
+      if (item.mAddon) {
+        gPendingRows.heldRows.add(item.mAddon.id);
+      }
+    }
+    config.addObserver(heldObserver);
     return undefined;
   }
+  config.removeObserver(heldObserver);
   config.addObserver(observer);
+  // Addon id -> the script installed under it now.
+  let listed = new Map();
+  config.scripts.forEach(function (aScript) {
+    listed.set(aScript.id + GM_CONSTANTS.scriptIDSuffix, aScript);
+  });
   let shown = new Set();
+  let gone = [];
   for (let item of gListView._listBox.childNodes) {
     if (item.mAddon) {
       shown.add(item.mAddon.id);
+      if (!listed.has(item.mAddon.id)) {
+        gone.push(item.mAddon);
+      }
     }
   }
+  gone.forEach(function (aAddon) {
+    gListView.removeItem(aAddon);
+  });
+  gPendingRows.heldChanged.forEach(function (aScript) {
+    if (listed.get(aScript.id + GM_CONSTANTS.scriptIDSuffix) === aScript) {
+      gPendingRows.refresh.add(aScript);
+    }
+  });
+  gPendingRows.heldChanged.clear();
+  gPendingRows.heldRows.clear();
   config.scripts.forEach(function (aScript) {
     if (!aScript.needsUninstall
         && !shown.has(aScript.id + GM_CONSTANTS.scriptIDSuffix)) {
@@ -170,10 +207,26 @@ function holdScriptRows(aHold) {
     }
   });
   setEmptyWarningVisible();
-  if (gPendingRows.scripts.size && !gPendingRows.timer) {
+  if ((gPendingRows.scripts.size || gPendingRows.refresh.size)
+      && !gPendingRows.timer) {
     addPendingRows();
   }
 }
+
+/**
+ * The config's listener while an import holds the list (holdScriptRows):
+ * notes the shown rows whose scripts change, a set lookup per change
+ * however many the import makes.
+ */
+var heldObserver = {
+  "notifyEvent": function (aScript, aEvent) {
+    if (((aEvent == "edit-enabled") || (aEvent == "modified"))
+        && gPendingRows.heldRows.has(
+            aScript.id + GM_CONSTANTS.scriptIDSuffix)) {
+      gPendingRows.heldChanged.add(aScript);
+    }
+  },
+};
 // For the Import link (GM_backupImport), outside this scope.
 window.GM_holdScriptRows = holdScriptRows;
 
@@ -233,6 +286,7 @@ function addPendingRows() {
       batch.appendChild(items[i]);
     }
     listBox.insertBefore(batch, listBox.firstChild);
+    gPendingRows.added = true;
     gListView.showEmptyNotice(false);
     // The new rows need to respect any active live-search filter.
     try {
@@ -246,6 +300,11 @@ function addPendingRows() {
       (gPendingRows.scripts.size + gPendingRows.refresh.size) > 0;
   if (gPendingRows.flushing) {
     gPendingRows.timer = setTimeout(addPendingRows, PENDING_ROWS_GAP_MS);
+  } else if (gPendingRows.added) {
+    // All in: put the new rows where the list's sort wants them (by
+    // execution order, say), once, not after every batch.
+    gPendingRows.added = false;
+    applySort();
   }
 }
 
@@ -583,7 +642,7 @@ function init() {
       },
       "doCommand": function (aAddon) {
         if (aAddon && (aAddon.type == GM_CONSTANTS.scriptAddonType)) {
-          gmOpenScriptPrefs(aAddon);
+          GM_util.openScriptOptions(aAddon._script);
           return undefined;
         }
         return platformShowItemPreferences.doCommand(aAddon);
@@ -836,51 +895,6 @@ function updateDetailEditButton() {
   btn.hidden = !(addon && (addon.type == GM_CONSTANTS.scriptAddonType));
 };
 
-/**
- * Opens the per-script preferences window as a non-modal, resizable,
- * maximizable top-level chrome window.  Used for user scripts by the
- * Add-ons Manager's Options command (list row and detail pane; see the
- * cmd_showItemPreferences override in init()).
- *
- * If a prefs window for this exact script is already open, focuses it
- * instead of stacking duplicates.
- */
-function gmOpenScriptPrefs(aAddon) {
-  let url = aAddon.optionsURL;
-  if (!url) return;
-
-  // Already open?  Focus it.
-  let enumerator = Services.wm.getEnumerator(null);
-  while (enumerator.hasMoreElements()) {
-    let win = enumerator.getNext();
-    try {
-      if (win.closed) continue;
-      if (win.document && win.document.documentURI === url) {
-        win.focus();
-        return;
-      }
-    } catch (e) { /* tear-down race; keep looking */ }
-  }
-
-  // ── 3.7.0 feedback #2: window must be resizable + minimisable ───
-  // Earlier attempts that asked for "chrome,titlebar,toolbar,...,
-  // resizable,dialog=no" produced a window whose corners couldn't be
-  // dragged on Pale Moon.  The recipe Pale Moon's own PageInfo
-  // window uses ("chrome,toolbar,dialog=no,resizable,minimizable,
-  // centerscreen") DOES give a fully resizable, Min/Max-equipped
-  // chrome window — so we adopt it verbatim here.  The presence of
-  // `minimizable` is what convinces Windows' WM to add the Min/Max
-  // buttons to the title bar; without it some builds render only a
-  // close button.
-  let features = "chrome,toolbar,dialog=no,resizable,minimizable,centerscreen";
-  let browserWin = Services.wm.getMostRecentWindow("navigator:browser");
-  if (browserWin) {
-    browserWin.openDialog(url, "_blank", features);
-  } else {
-    Services.ww.openWindow(null, url, "_blank", features, null);
-  }
-}
-
 function onPopupShowing(aEvent) {
   // e.g. the restart to gDetailView - aAddon.richlistitem is undefined
   gViewController.updateCommands();
@@ -980,7 +994,9 @@ function unload() {
     }
   });
 
-  GM_config.removeObserver(observer);
+  // Closed during an import from this page: its lighter listener is the
+  // one in place (holdScriptRows).
+  GM_config.removeObserver(gPendingRows.held ? heldObserver : observer);
 };
 })();
 
@@ -1567,7 +1583,8 @@ function GM_recoverOrphans() {
         keepRecoveredOrphan(scope, item.orphan, aScript);
       }
       next(aIndex + 1);
-    }, { "dependencies": copies, "silent": true, "skipEditor": true });
+    }, { "dependencies": copies, "reportsFailures": true, "silent": true,
+      "skipEditor": true });
   }
 
   next(0);

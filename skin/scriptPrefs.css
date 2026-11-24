@@ -115,6 +115,8 @@ cludes {
 .prefs-pages-hint,
 #grp-permissions description.prefs-meta-value:empty::before,
 #values-count,
+#externals-count,
+#externals-status,
 .values-empty-label {
   opacity: 0.6;
 }
@@ -235,13 +237,19 @@ cludes {
 .values-pane {
   padding: 6px;
 }
-#values-toolbar {
+#values-toolbar,
+#externals-toolbar {
   padding: 0 0 4px 0;
 }
-#values-toolbar > button {
+#values-toolbar > button,
+#externals-toolbar > button {
   margin-left: 4px;
 }
-#values-tree {
+#externals-status {
+  margin-left: 8px;
+}
+#values-tree,
+#externals-tree {
   height: 320px;
 }
 .values-empty-label {

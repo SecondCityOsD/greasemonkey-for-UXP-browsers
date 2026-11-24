@@ -46,12 +46,6 @@
     label="&gmDisable;" command="cmd_disableItem" />
   <menuitem command="cmd_userscript_edit"
     label="&edit;" accesskey="&edit.accesskey;" class="greasemonkey" />
-  <!-- Remove — routes through cmd_userscript_remove, which calls the
-       script addon's own undoable uninstall() so the Add-ons Manager
-       shows the same "removed — Undo" affordance as the row button
-       (the generic cmd_uninstallItem removed immediately, no undo). -->
-  <menuitem class="greasemonkey" label="&gmRemove;"
-    command="cmd_userscript_remove" />
   <menuitem command="cmd_userscript_show"
     label="&show;" accesskey="&show.accesskey;" class="greasemonkey" />
   <menuseparator class="greasemonkey" />
@@ -72,6 +66,15 @@
   <!-- Custom forced find updates item. -->
   <menuitem command="cmd_userscript_forcedFindItemUpdates" class="greasemonkey"
     label="&forcedFindUpdate;" />
+
+  <!-- Remove, last and apart, as in Greasemonkey 4.14: in the middle it
+       was easy to hit by mistake.  It routes through cmd_userscript_remove,
+       which calls the script addon's own undoable uninstall() so the
+       Add-ons Manager shows the same "removed — Undo" affordance as the row
+       button (the generic cmd_uninstallItem removed immediately, no undo). -->
+  <menuseparator class="greasemonkey" />
+  <menuitem class="greasemonkey" label="&gmRemove;"
+    command="cmd_userscript_remove" />
 </menupopup>
 
 <vbox id="list-view">

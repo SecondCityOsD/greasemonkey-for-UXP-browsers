@@ -206,6 +206,11 @@ pref("extensions.greasemonkey.sortBy", "uiState,name");
 // Source viewer colours: "auto" (follow the browser's toolbars), "light" or
 // "dark".  Set from the viewer's toolbar.
 pref("extensions.greasemonkey.sourceViewer.theme", "auto");
+// Scratchpad, when it edits a user script: Preferences > Advanced >
+// "Enhance the Scratchpad editor" (content/scratchpadTools.js), and with
+// it the Metadata summary above the code (its toolbar button).
+pref("extensions.greasemonkey.scratchpad.enhanced", true);
+pref("extensions.greasemonkey.scratchpad.metadata", true);
 pref("extensions.greasemonkey.sync.enabled", true);
 pref("extensions.greasemonkey.sync.values", false);
 pref("extensions.greasemonkey.sync.values.deleteNonExistentValues", false);

@@ -39,7 +39,7 @@
  *
  * ***** END LICENSE BLOCK ***** */
 
-const EXPORTED_SYMBOLS = ["MatchPattern"];
+const EXPORTED_SYMBOLS = ["MatchPattern", "ignoringMatchWarning"];
 
 if (typeof Cc === "undefined") {
   var Cc = Components.classes;
@@ -139,6 +139,63 @@ if (GM_prefRoot.getValue("api.@match.better")) {
   gPartsRegexp = new RegExp("^([a-z*]+)://([^/]*)(/.*)$", "");
 }
 
+/**
+ * @param {string} aKey - A greasemonkey.properties string.
+ * @param {Array}  aValues - What goes in its %1, %2, ...; a placeholder
+ *     without a value stays as it is.
+ * @returns {string} The string filled in a single pass (a value holding
+ *     "%2" isn't filled again).
+ */
+function localized(aKey, aValues) {
+  return GM_CONSTANTS.localeStringBundle.createBundle(
+      GM_CONSTANTS.localeGreasemonkeyProperties)
+      .GetStringFromName(aKey)
+      .replace(/%(\d)/g, function (aPlaceholder, aIndex) {
+        let value = aValues[aIndex - 1];
+        return (typeof value == "undefined") ? aPlaceholder : String(value);
+      });
+}
+
+/**
+ * The Error for a pattern MatchPattern refuses.  Its message stands alone
+ * ("@match: Invalid host specified: a b"); its reason is the part the
+ * "Ignoring @match pattern X because: ..." warning adds, without the
+ * "@match:" prefix, and without the value when that is the whole pattern,
+ * which the warning names already.
+ *
+ * @param {string}  aKey - The error's greasemonkey.properties string.
+ * @param {string}  aValue - The refused part of the pattern.
+ * @param {boolean} aIsWholePattern - aValue is the whole pattern.
+ * @returns {Error}
+ */
+function refusedPattern(aKey, aValue, aIsWholePattern) {
+  let error = new Error(localized(aKey, [aValue]));
+  let reason = error.message;
+  if (aIsWholePattern) {
+    let bare = localized(aKey, []).replace(/[\s:\uFF1A]*%1\s*$/, "");
+    if (bare.indexOf("%1") == -1) {
+      reason = bare;
+    }
+  }
+  error.reason = reason.replace(/^@match\s*:\s*/i, "");
+  return error;
+}
+
+/**
+ * The warning for an @match / @exclude-match pattern that is skipped:
+ * "Ignoring @match pattern https://example.com because: Could not parse
+ * the pattern".  It read "...because: @match: Could not parse the
+ * pattern: [string] https://example.com" before, the address twice.
+ *
+ * @param {string} aPattern - The pattern as written.
+ * @param {Error}  aError - What new MatchPattern(aPattern) threw.
+ * @returns {string}
+ */
+function ignoringMatchWarning(aPattern, aError) {
+  let reason = (aError && (aError.reason || aError.message)) || aError;
+  return localized("error.parse.ignoringMatch", [aPattern, reason]);
+}
+
 // For the format of "pattern".
 // http://code.google.com/chrome/extensions/match_patterns.html
 /**
@@ -171,12 +228,7 @@ function MatchPattern(aPattern) {
     }
   }
   if (!_match) {
-    aPattern = "[" + (typeof aPattern) + "] " + aPattern;
-    throw new Error(
-        GM_CONSTANTS.localeStringBundle.createBundle(
-            GM_CONSTANTS.localeGreasemonkeyProperties)
-            .GetStringFromName("error.matchPattern.parse")
-            .replace("%1", aPattern));
+    throw refusedPattern("error.matchPattern.parse", aPattern, true);
   }
   let scheme = match[1];
   // Tolerate `http*://...` as an alias for `*://...` — Violentmonkey and
@@ -193,27 +245,15 @@ function MatchPattern(aPattern) {
   let path = match[3];
 
   if ((scheme != "*") && (SCHEMES_VALID.indexOf(scheme) == -1)) {
-    throw new Error(
-        GM_CONSTANTS.localeStringBundle.createBundle(
-            GM_CONSTANTS.localeGreasemonkeyProperties)
-            .GetStringFromName("error.matchPattern.scheme")
-            .replace("%1", scheme));
+    throw refusedPattern("error.matchPattern.scheme", scheme, false);
   }
 
   if (!HOST_REGEXP.test(host)) {
-    throw new Error(
-        GM_CONSTANTS.localeStringBundle.createBundle(
-            GM_CONSTANTS.localeGreasemonkeyProperties)
-            .GetStringFromName("error.matchPattern.host")
-            .replace("%1", host));
+    throw refusedPattern("error.matchPattern.host", host, false);
   }
 
   if (path[0] !== "/") {
-    throw new Error(
-        GM_CONSTANTS.localeStringBundle.createBundle(
-            GM_CONSTANTS.localeGreasemonkeyProperties)
-            .GetStringFromName("error.matchPattern.path")
-            .replace("%1", path));
+    throw refusedPattern("error.matchPattern.path", path, false);
   }
 
   // MatchPattern.jsm

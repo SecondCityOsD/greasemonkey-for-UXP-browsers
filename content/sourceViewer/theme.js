@@ -27,6 +27,7 @@ if (typeof Cu === "undefined") {
 
 Cu.import("chrome://greasemonkey-modules/content/prefManager.js");
 Cu.import("chrome://greasemonkey-modules/content/util.js");
+Cu.import("chrome://greasemonkey-modules/content/util/browserIsDark.js");
 
 /** Relative to extensions.greasemonkey. */
 const SV_THEME_PREF = "sourceViewer.theme";
@@ -109,15 +110,7 @@ var SvTheme = {
 
   /** @returns {boolean} Whether the host browser window's theme is dark. */
   "_browserIsDark": function () {
-    if (!this._hostWindow) {
-      return false;
-    }
-    let doc = this._hostWindow.document;
-    let toolbar = this._toolbar(doc);
-    if (toolbar) {
-      return toolbar.hasAttribute("brighttext");
-    }
-    return doc.documentElement.getAttribute("lwthemetextcolor") == "bright";
+    return browserIsDark(this._hostWindow);
   },
 
   /** Watches the host window's theme markers. */
@@ -128,7 +121,7 @@ var SvTheme = {
     }
     let doc = this._hostWindow.document;
     this._observer = new MutationObserver(this._refresh.bind(this));
-    let toolbar = this._toolbar(doc);
+    let toolbar = browserThemeToolbar(doc);
     if (toolbar) {
       this._observer.observe(toolbar, {
         "attributes": true,
@@ -169,12 +162,6 @@ var SvTheme = {
       // Not in a docshell tree we can walk: fall through.
     }
     return GM_util.getBrowserWindow() || null;
-  },
-
-  /** @returns {Element|null} The toolbar whose brighttext to read. */
-  "_toolbar": function (aDoc) {
-    return aDoc.querySelector("#nav-bar:not([collapsed=true])")
-        || aDoc.querySelector("toolbar:not([collapsed=true])");
   },
 
   "_buttons": function () {

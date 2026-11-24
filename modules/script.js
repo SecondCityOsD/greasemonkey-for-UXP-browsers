@@ -26,6 +26,8 @@
  *   "install"       — script just installed
  *   "modified"      — metadata or file changed (triggers config.xml write)
  *   "uninstall"     — script removed
+ *   "pending-uninstall" — removed in the Add-ons Manager, Undo still
+ *                     offered, or undone (no config save)
  *   "cludes"        — userIncludes/userExcludes/userMatches changed
  *   "val-set"       — GM_setValue called (no config save)
  *   "val-del"       — GM_deleteValue called (no config save)
@@ -318,14 +320,34 @@ Script.prototype = Object.create(AbstractScript.prototype, {
 
 /**
  * Fires a change notification up to the Config object.
- * "val-del" and "val-set" events skip the config.xml write (storage-only).
+ * "val-del", "val-set" and "pending-uninstall" events skip the config.xml
+ * write (nothing in it changed).
  *
  * @param {string} aEvent - Change event name (see file header for list).
  * @param {*}      aData  - Event-specific payload (e.g. new enabled state).
  */
 Script.prototype._changed = function (aEvent, aData) {
-  let dontSave = ((aEvent == "val-del") || (aEvent == "val-set"));
+  let dontSave = ((aEvent == "val-del") || (aEvent == "val-set")
+      || (aEvent == "pending-uninstall"));
   GM_util.getService().config._changed(this, aEvent, aData, dontSave);
+};
+
+/**
+ * Removed in the Add-ons Manager, whose row offers Undo until the page
+ * closes (the removal happens then): meanwhile the script doesn't run,
+ * isn't in the toolbar menu and doesn't count in the Options window's
+ * position ("2 of 10").  It did all three, unticked in the menu.  Not
+ * saved: after a crash the script is simply still there.
+ *
+ * @param {boolean} aPending - false when the removal is undone.
+ */
+Script.prototype.setNeedsUninstall = function (aPending) {
+  aPending = !!aPending;
+  if (this.needsUninstall === aPending) {
+    return undefined;
+  }
+  this.needsUninstall = aPending;
+  this._changed("pending-uninstall", aPending);
 };
 
 // Backward compatibility.
@@ -1113,11 +1135,7 @@ Script.prototype._fromConfigNode = function (aNode) {
     try {
       aList.push(new MatchPattern(aText));
     } catch (e) {
-      GM_util.logError(GM_CONSTANTS.localeStringBundle.createBundle(
-          GM_CONSTANTS.localeGreasemonkeyProperties)
-          .GetStringFromName("error.parse.ignoringMatch")
-          .replace("%1", function () { return aText; })
-          .replace("%2", function () { return e; }), false, fileURL, null);
+      GM_util.logError(ignoringMatchWarning(aText, e), false, fileURL, null);
     }
   }
 
@@ -1990,10 +2008,11 @@ Script.prototype.markDependenciesPending = function () {
  * files are missing at startup is.  (An @icon that can't be had is
  * skipped.)
  *
- * @param {object}   [aOptions] - {source, prefetch, dependencyMs, iconMs}:
- *   the script's text when the caller has it (an import: reading it back
- *   from disk cost up to 0.1 s a script), the archived files to use
- *   instead of downloading, and time limits per file.
+ * @param {object}   [aOptions] - {source, prefetch, dependencyMs, iconMs,
+ *   manual}: the script's text when the caller has it (an import: reading
+ *   it back from disk cost up to 0.1 s a script), the archived files to
+ *   use instead of downloading, time limits per file, and manual (see
+ *   downloadDependenciesAgain).
  * @param {function} [aDone] - Called once with (aSuccess, aErrorMessage,
  *   aGaveUp): aErrorMessage is null when there was nothing to report (the
  *   script was removed meanwhile, or an edit's own download took over);
@@ -2006,6 +2025,12 @@ Script.prototype.fetchPendingDependencies = function (aOptions, aDone) {
     return GM_util.getService().config.getScriptById(this.id) === this;
   }.bind(this);
   let fail = function (aMessage, aFinal) {
+    if (options.manual && !this._dependenciesPending) {
+      // Asked for again by hand: the script stays as it was (running with
+      // its files, or broken), with no try counted.
+      done(false, aMessage, false);
+      return undefined;
+    }
     this._dependencyFailures++;
     let gaveUp = aFinal || (this._dependencyFailures >= DEPENDENCY_TRIES);
     if (gaveUp) {
@@ -2085,11 +2110,35 @@ Script.prototype.fetchPendingDependencies = function (aOptions, aDone) {
     rs.install(this, true);
     this._dependenciesPending = false;
     this._dependencyFailures = 0;
+    let repaired = this._broken && !this.allFilesExistResult().length;
+    if (repaired) {
+      this.clearBroken();
+    }
     this._runPendingExec(true);
     // Its icon, and config.xml (the files' names, no more waiting).
     this._changed("modified", this.id);
+    if (repaired) {
+      // Switched off by Greasemonkey when its files went missing, not by
+      // the user: on again, as an import's new copy of it is.
+      this.enabled = true;
+    }
     done(true, null);
   }.bind(this));
+};
+
+/**
+ * Downloads the script's @require, @resource and @icon files again from
+ * their addresses (the Options window's Externals tab), checking any
+ * pinned hash, and puts them in its folder.  Also how a script whose
+ * files went missing is repaired: it is no longer broken, and on again.
+ * When a file can't be had, nothing changes: a working script keeps the
+ * files it has.  A script still waiting for its files after an import
+ * gets them as it would anyway.
+ *
+ * @param {function} [aDone] - As fetchPendingDependencies'.
+ */
+Script.prototype.downloadDependenciesAgain = function (aDone) {
+  this.fetchPendingDependencies({"manual": true}, aDone);
 };
 
 /**

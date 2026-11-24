@@ -191,31 +191,22 @@ function notSaved(aProblem) {
  *
  * @param {string} aPath - The file the editor saves to.
  * @param {string} aText - The text it would write.
- * @returns {{draft: boolean, script: ?Script, problem: ?string}}
+ * @returns {{draft: boolean, script: ?Script, problem: ?string,
+ *     warnings: string[]}}
  *   draft: aPath is a new script's draft; script: the installed script
- *   whose file aPath is; problem: the alert for a refused save, or null.
+ *   whose file aPath is; problem: the alert for a refused save, or null;
+ *   warnings: the parser's, about lines it ignores (a save goes ahead).
  */
 function check(aPath, aText) {
   let draft = isDraft(aPath);
   let config = GM_util.getService().config;
-  let script = null;
-  if (!draft) {
-    let file = fileFromPath(aPath);
-    if (file) {
-      script = config.scripts.find(function (aScript) {
-        try {
-          return aScript.file.equals(file);
-        } catch (e) {
-          return false;
-        }
-      }) || null;
-    }
-    if (!script) {
-      return {"draft": false, "script": null, "problem": null};
-    }
+  let script = draft ? null : scriptForPath(aPath);
+  if (!draft && !script) {
+    return {"draft": false, "script": null, "problem": null, "warnings": []};
   }
 
-  let result = {"draft": draft, "script": script, "problem": null};
+  let result = {"draft": draft, "script": script, "problem": null,
+    "warnings": []};
   // The same base URL updateModifiedScripts parses an edit with.
   let parsed = parse(aText,
       script ? GM_util.getUriFromUrl(script.downloadURL) : null);
@@ -223,7 +214,10 @@ function check(aPath, aText) {
     result.problem = notSaved(
         localeString("error.parsingScript", "Could not parse script:")
         + "\n" + localeString("error.unknown", "Unknown error."));
-  } else if (draft && parsed.parseErrors.length) {
+    return result;
+  }
+  result.warnings = parsed.parseWarnings.concat();
+  if (draft && parsed.parseErrors.length) {
     result.problem = notSaved(
         localeString("error.parsingScript", "Could not parse script:")
         + "\n" + parsed.parseErrors.join("\n"));
@@ -240,10 +234,29 @@ function check(aPath, aText) {
   return result;
 }
 
+/**
+ * @param {string} aPath - A file path.
+ * @returns {?Script} The installed script whose file it is.
+ */
+function scriptForPath(aPath) {
+  let file = fileFromPath(aPath);
+  if (!file) {
+    return null;
+  }
+  return GM_util.getService().config.scripts.find(function (aScript) {
+    try {
+      return aScript.file.equals(file);
+    } catch (e) {
+      return false;
+    }
+  }) || null;
+}
+
 const GM_editorSave = {
   "check": check,
   "isDraft": isDraft,
   "notSaved": notSaved,
   "openDraft": openDraft,
   "removeDraft": removeDraft,
+  "scriptForPath": scriptForPath,
 };

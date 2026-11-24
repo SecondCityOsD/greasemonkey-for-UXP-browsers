@@ -36,6 +36,7 @@ if (typeof Cu === "undefined") {
 
 // Ref'd in XUL.
 Cu.import("chrome://greasemonkey-modules/content/util.js");
+Cu.import("resource://gre/modules/PluralForm.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
 
 // GM_CONSTANTS — for the localized auto-update confirmation bundle.
@@ -127,11 +128,13 @@ var gScriptObserver = {
           break;
         case "modified":
           refreshAutoUpdateRadio();
+          // Its files may have come in (an import fetches them after).
+          populateExternalsTab();
           break;
       }
     }
     if ((aEvent == "move") || (aEvent == "install")
-        || (aEvent == "uninstall")) {
+        || (aEvent == "uninstall") || (aEvent == "pending-uninstall")) {
       refreshPositionDropdown();
     }
   },
@@ -165,6 +168,7 @@ window.addEventListener("load", function () {
   populateBehaviourSection();
   populatePermissionsSection();
   populateValuesTab();
+  populateExternalsTab();
   syncToggleEnabledButton();
   installReadonlyListTooltips();
   installScrollBubbling();
@@ -276,8 +280,8 @@ function populateMetadataSection() {
   // "none" is what the metadata says for an old copy that must not update
   // (updateURL is null then; see Script.updatesDisabled).
   setLabel("meta-updateurl",   gScript.updatesDisabled
-      ? "none" : (gScript.updateURL || ""));
-  setLabel("meta-downloadurl", gScript.downloadURL    || "");
+      ? "none" : shownUrl(gScript.updateURL));
+  setLabel("meta-downloadurl", shownUrl(gScript.downloadURL));
 
   // Description can be multi-line; use a <description> instead of a
   // <label> in the XUL and write through textContent.
@@ -327,48 +331,62 @@ function populateMetadataSection() {
  * Probes via nsIFile.fileSize so this works regardless of whether the
  * config object has a cached size.  Falls back to a localised "Unknown"
  * if the file does not exist or fileSize throws.
- *
- * Auto-scales the unit:
- *   < 1 KB  → "%1 bytes"
- *   < 1 MB  → "%1 KB" with one decimal place when not a round number
- *   ≥ 1 MB  → "%1 MB" with two decimal places
  */
 function computeScriptSizeLabel() {
-  let bundle = GM_CONSTANTS.localeStringBundle.createBundle(
-      GM_CONSTANTS.localeGreasemonkeyProperties);
-  let unknown;
-  try { unknown = bundle.GetStringFromName("scriptPrefs.size.unknown"); }
-  catch (e) { unknown = "Unknown"; }
-
-  let bytes;
+  let bytes = null;
   try {
     let f = gScript.file;
-    if (!f || !f.exists()) return unknown;
-    bytes = f.fileSize;
+    if (f && f.exists()) {
+      bytes = f.fileSize;
+    }
   } catch (e) {
-    return unknown;
+    bytes = null;
   }
+  return formatSize(bytes);
+}
 
-  if (bytes < 1024) {
-    try {
-      return bundle.GetStringFromName("scriptPrefs.size.bytes")
-          .replace("%1", bytes.toString());
-    } catch (e) { return bytes + " bytes"; }
+/**
+ * Auto-scales the unit:
+ *   < 1 KB  → "%1 bytes"
+ *   < 10 KB → "%1 KB" with one decimal place; < 1 MB, a whole number
+ *   ≥ 1 MB  → "%1 MB" with two decimal places
+ *
+ * @param {number|null} aBytes - null when unknown.
+ * @returns {string} "512 bytes", "3.4 KB", "12 KB", "1.25 MB" or "Unknown".
+ */
+function formatSize(aBytes) {
+  if ((aBytes === null) || (typeof aBytes == "undefined")) {
+    return localizedString("scriptPrefs.size.unknown", "Unknown");
   }
-  if (bytes < 1024 * 1024) {
-    let kb = bytes / 1024;
-    let s = (kb < 10) ? kb.toFixed(1) : Math.round(kb).toString();
-    try {
-      return bundle.GetStringFromName("scriptPrefs.size.kb")
-          .replace("%1", s);
-    } catch (e) { return s + " KB"; }
+  if (aBytes < 1024) {
+    return localizedString("scriptPrefs.size.bytes", "%1 bytes")
+        .replace("%1", aBytes.toString());
   }
-  let mb = bytes / (1024 * 1024);
-  let s = mb.toFixed(2);
-  try {
-    return bundle.GetStringFromName("scriptPrefs.size.mb")
-        .replace("%1", s);
-  } catch (e) { return s + " MB"; }
+  if (aBytes < 1024 * 1024) {
+    let kb = aBytes / 1024;
+    return localizedString("scriptPrefs.size.kb", "%1 KB")
+        .replace("%1", (kb < 10) ? kb.toFixed(1) : Math.round(kb).toString());
+  }
+  return localizedString("scriptPrefs.size.mb", "%1 MB")
+      .replace("%1", (aBytes / (1024 * 1024)).toFixed(2));
+}
+
+/**
+ * What the Update URL and Download URL rows show for an address.  A
+ * script made here (New script, Scratchpad) has its own file in the
+ * scripts folder as its address, and one dropped in from a file has that
+ * file's: there is nothing to update from, and the path showed the
+ * Windows user name.
+ *
+ * @param {string|null} aUrl
+ * @returns {string}
+ */
+function shownUrl(aUrl) {
+  if (aUrl && /^file:/i.test(aUrl)) {
+    return localizedString(
+        "scriptPrefs.url.fromFile", "none (installed from a file)");
+  }
+  return aUrl || "";
 }
 
 /**
@@ -434,16 +452,40 @@ function localizedString(aKey, aFallback) {
 }
 
 /**
+ * A count in words: aKey's text in the form the locale's plural rule
+ * picks for aCount ("%1 file;%1 files" gives "1 file", "2 files"); a text
+ * with one form ("Entries: %1") serves any count.
+ *
+ * @param {string} aKey
+ * @param {string} aFallback
+ * @param {number} aCount
+ * @returns {string}
+ */
+function countString(aKey, aFallback, aCount) {
+  return PluralForm.get(aCount, localizedString(aKey, aFallback))
+      .replace("%1", aCount);
+}
+
+/**
  * Click handler for the <description class="text-link"> link fields.
  * Opens the stored URL in a new tab of the most recent browser window.
  */
 function onLinkClick(aEvent, aId) {
   let el = document.getElementById(aId);
   if (!el || !el._gmHref) return;
+  openInBrowserTab(el._gmHref);
+}
+
+/**
+ * Opens aUrl in a new, selected tab of the most recent browser window.
+ *
+ * @param {string} aUrl
+ */
+function openInBrowserTab(aUrl) {
   let chromeWin = Services.wm.getMostRecentWindow("navigator:browser");
   if (!chromeWin) return;
   try {
-    chromeWin.gBrowser.selectedTab = chromeWin.gBrowser.addTab(el._gmHref);
+    chromeWin.gBrowser.selectedTab = chromeWin.gBrowser.addTab(aUrl);
   } catch (e) {
     // Older Pale Moon builds expose addTab via a slightly different name.
     Services.console.logStringMessage(
@@ -623,13 +665,27 @@ function refreshPositionDropdown() {
 }
 
 /**
+ * The scripts the position list counts, in order: all but those removed
+ * in the Add-ons Manager with Undo still offered (Script.setNeedsUninstall)
+ * - and this one, however it stands.
+ *
+ * @returns {Script[]}
+ */
+function positionedScripts() {
+  return (GM_util.getService().config.scripts || []).filter(
+      function (aScript) {
+        return (aScript === gScript) || !aScript.needsUninstall;
+      });
+}
+
+/**
  * Builds the execution-position menulist with "1 of N", "2 of N", …
  * entries and selects the position matching the script's current index
- * in config.scripts.  Stores it in gInitialPosition, so OK moves the
- * script only when the user picked another position.
+ * among positionedScripts().  Stores it in gInitialPosition, so OK moves
+ * the script only when the user picked another position.
  */
 function populatePositionDropdown() {
-  let scripts = GM_util.getService().config.scripts || [];
+  let scripts = positionedScripts();
   let total = scripts.length;
   let current = scripts.indexOf(gScript);
   if (current === -1) current = 0;
@@ -869,11 +925,16 @@ function onMetaCopy() {
     // when there's nothing highlighted but a single field was clicked.
     text = gMetaContextTarget.textContent || "";
   }
-  if (!text) return;
+  copyToClipboard(text);
+}
+
+/** @param {string} aText - Copied when not empty. */
+function copyToClipboard(aText) {
+  if (!aText) return;
   try {
     let helper = Cc["@mozilla.org/widget/clipboardhelper;1"]
         .getService(Ci.nsIClipboardHelper);
-    helper.copyString(text);
+    helper.copyString(aText);
   } catch (e) {
     Services.console.logStringMessage(
         "Greasemonkey scriptPrefs: clipboard copy failed: " + e);
@@ -1233,17 +1294,22 @@ function onDialogAccept() {
     }
   }
 
-  // Position: config.move() takes an offset, so it is counted from where
-  // the script is now (another script may have moved meanwhile).
+  // Position: counted among the listed scripts as they are now (another
+  // may have moved or been removed meanwhile).  The script takes the place
+  // of the one there, so a removed script still waiting for its Undo, not
+  // counted, can't shift it.
   let posMenu = document.getElementById("behave-position");
   if (posMenu && posMenu.selectedItem) {
     let target = parseInt(posMenu.selectedItem.getAttribute("value"), 10);
     let config = GM_util.getService().config;
-    let current = config.scripts.indexOf(gScript);
-    if (!isNaN(target) && (target !== gInitialPosition) && (current > -1)
-        && (target !== current)) {
+    let scripts = positionedScripts();
+    let current = scripts.indexOf(gScript);
+    let there = isNaN(target)
+        ? null : scripts[Math.min(target, scripts.length - 1)];
+    if (there && (target !== gInitialPosition) && (current > -1)
+        && (there !== gScript)) {
       try {
-        config.move(gScript, target - current);
+        config.move(gScript, there);
       } catch (e) {
         // Don't block the dialog close on an internal config error;
         // the rest of the user's edits are still applied.
@@ -1344,7 +1410,7 @@ function rebuildValuesTree() {
   if (!tree) return;
 
   if (gValuesData.length === 0) {
-    tree.view = makeEmptyTreeView();
+    tree.view = makeListTreeView(0, null);
     if (empty) empty.hidden = false;
   } else {
     tree.view = makeValuesTreeView(gValuesData);
@@ -1354,72 +1420,24 @@ function rebuildValuesTree() {
   // Update the toolbar count label.
   let countLabel = document.getElementById("values-count");
   if (countLabel) {
-    let bundle = null;
-    try {
-      bundle = Services.strings.createBundle(
-          "chrome://greasemonkey/locale/greasemonkey.properties");
-    } catch (e) {}
-    if (bundle) {
-      try {
-        countLabel.value = bundle
-            .GetStringFromName("scriptPrefs.values.countFormat")
-            .replace("%1", gValuesData.length);
-      } catch (e) {
-        countLabel.value = gValuesData.length + " entries";
-      }
-    } else {
-      countLabel.value = gValuesData.length + " entries";
-    }
+    countLabel.value = countString("scriptPrefs.values.countFormat",
+        "%1 entry;%1 entries", gValuesData.length);
   }
 }
 
-function makeEmptyTreeView() {
+/**
+ * A plain list for a <tree> (nsITreeView): aRowCount rows, no nesting.
+ * Empty, nothing can be selected.
+ *
+ * @param {number}   aRowCount
+ * @param {Function} aCellText - (row, column id) -> the cell's text.
+ * @returns {object}
+ */
+function makeListTreeView(aRowCount, aCellText) {
   return {
-    "rowCount":         0,
-    "getCellText":      function () { return ""; },
-    "isContainer":      function () { return false; },
-    "isContainerOpen":  function () { return false; },
-    "isContainerEmpty": function () { return true; },
-    "isSeparator":      function () { return false; },
-    "isSorted":         function () { return false; },
-    "getLevel":         function () { return 0; },
-    "getImageSrc":      function () { return null; },
-    "getRowProperties":  function () {},
-    "getCellProperties": function () {},
-    "getColumnProperties": function () {},
-    "setTree":           function () {},
-    "isEditable":        function () { return false; },
-    "isSelectable":      function () { return false; },
-    "cycleHeader":       function () {},
-    "cycleCell":         function () {},
-    "selectionChanged":  function () {},
-    "performAction":     function () {},
-    "performActionOnRow":  function () {},
-    "performActionOnCell": function () {},
-  };
-}
-
-function makeValuesTreeView(aData) {
-  return {
-    "rowCount": aData.length,
-    "getCellText": function (aRow, aCol) {
-      let row = aData[aRow];
-      if (!row) return "";
-      switch (aCol.id) {
-        case "values-col-key":   return row.name;
-        case "values-col-type":  return row.type;
-        case "values-col-value":
-          // Render the value column inline; truncate large objects so
-          // the tree doesn't choke on a 1 MB JSON blob.
-          let display;
-          if (row.type === "string")  display = JSON.stringify(row.value);
-          else if (row.type === "object" || row.type === "array")
-                                      display = JSON.stringify(row.value);
-          else                        display = "" + row.value;
-          if (display.length > 200) display = display.substring(0, 200) + "…";
-          return display;
-        default: return "";
-      }
+    "rowCount":         aRowCount,
+    "getCellText":      function (aRow, aCol) {
+      return (aRow < aRowCount) ? aCellText(aRow, aCol.id) : "";
     },
     "isContainer":      function () { return false; },
     "isContainerOpen":  function () { return false; },
@@ -1433,7 +1451,7 @@ function makeValuesTreeView(aData) {
     "getColumnProperties": function () {},
     "setTree":           function () {},
     "isEditable":        function () { return false; },
-    "isSelectable":      function () { return true; },
+    "isSelectable":      function () { return aRowCount > 0; },
     "cycleHeader":       function () {},
     "cycleCell":         function () {},
     "selectionChanged":  function () {},
@@ -1441,6 +1459,33 @@ function makeValuesTreeView(aData) {
     "performActionOnRow":  function () {},
     "performActionOnCell": function () {},
   };
+}
+
+/**
+ * @param {object[]} aData - gValuesData.
+ * @returns {object} The Values tab's tree view.
+ */
+function makeValuesTreeView(aData) {
+  return makeListTreeView(aData.length, function (aRow, aColumn) {
+    let row = aData[aRow];
+    switch (aColumn) {
+      case "values-col-key":   return row.name;
+      case "values-col-type":  return row.type;
+      case "values-col-value":
+        // Render the value column inline; truncate large objects so
+        // the tree doesn't choke on a 1 MB JSON blob.
+        let display;
+        if ((row.type === "string") || (row.type === "object")
+            || (row.type === "array")) {
+          display = JSON.stringify(row.value);
+        } else {
+          display = "" + row.value;
+        }
+        if (display.length > 200) display = display.substring(0, 200) + "…";
+        return display;
+      default: return "";
+    }
+  });
 }
 
 /**
@@ -1462,6 +1507,192 @@ function selectedValueRow() {
   let tree = document.getElementById("values-tree");
   if (!tree || tree.currentIndex < 0) return null;
   return gValuesData[tree.currentIndex] || null;
+}
+
+/////////////////////////////// Externals tab ////////////////////////////////
+
+/** The Externals tab's rows (see externalRow). */
+var gExternals = [];
+
+/** Download Again is under way (its button is off meanwhile). */
+var gExternalsDownloading = false;
+
+/** How the Integrity column names a pinned hash's algorithm. */
+const HASH_NAMES = {"sha256": "SHA-256", "sha384": "SHA-384", "sha512": "SHA-512"};
+
+/**
+ * Lists the script's @require and @resource files, as Violentmonkey's
+ * Externals tab does: where each comes from, the size of its downloaded
+ * copy, its state and, for one whose address pins a hash, whether the
+ * copy matches it.  Built again when the script changes (its files
+ * fetched after an import, or downloaded again from here).
+ */
+function populateExternalsTab() {
+  let tree = document.getElementById("externals-tree");
+  if (!tree) return;
+  gExternals = (gScript.requires || []).map(function (aRequire) {
+    return externalRow("@require", aRequire);
+  }).concat((gScript.resources || []).map(function (aResource) {
+    return externalRow("@resource " + aResource.name, aResource);
+  }));
+  tree.view = makeListTreeView(gExternals.length, function (aRow, aColumn) {
+    let row = gExternals[aRow];
+    switch (aColumn) {
+      case "externals-col-type":    return row.type;
+      case "externals-col-address": return row.address;
+      case "externals-col-size":
+        return (row.size === null) ? "" : formatSize(row.size);
+      case "externals-col-state":   return row.state;
+      case "externals-col-integrity": return row.integrity;
+      default: return "";
+    }
+  });
+  document.getElementById("externals-empty").hidden = !!gExternals.length;
+  document.getElementById("externals-count").value = countString(
+      "scriptPrefs.externals.countFormat", "%1 file;%1 files",
+      gExternals.length);
+  onExternalSelect();
+}
+
+/**
+ * @param {string} aType - "@require", or "@resource" and its name.
+ * @param {ScriptDependency} aDependency
+ * @returns {{type: string, address: string, size: ?number, state: string,
+ *     integrity: string, file: ?nsIFile, dependency: ScriptDependency}}
+ *   file and size are null while there is no downloaded copy; integrity
+ *   is empty without a pinned hash (or a copy to check).
+ */
+function externalRow(aType, aDependency) {
+  let file = null;
+  let size = null;
+  try {
+    let copy = aDependency.file;
+    if (copy.exists()) {
+      file = copy;
+      size = copy.fileSize;
+    }
+  } catch (e) {
+    // No file name yet: not downloaded.
+  }
+  let state;
+  if (file) {
+    state = localizedString("scriptPrefs.externals.downloaded", "Downloaded");
+  } else if (gScript._dependenciesPending) {
+    state = localizedString(
+        "scriptPrefs.externals.waiting", "Waiting to download");
+  } else {
+    state = localizedString("scriptPrefs.externals.missing", "Missing");
+  }
+  let integrity = "";
+  let pin = aDependency._integrity;
+  if (pin && file) {
+    let matches = false;
+    try {
+      matches = (GM_util.hashFile(file, pin.algo) === pin.hex);
+    } catch (e) {
+      // Unreadable: it doesn't match.
+    }
+    integrity = (matches
+        ? localizedString("scriptPrefs.externals.hashMatches", "%1 matches")
+        : localizedString(
+            "scriptPrefs.externals.hashDiffers", "%1 doesn't match"))
+        .replace("%1", HASH_NAMES[pin.algo] || pin.algo);
+  }
+  return {
+    "address": splitPinnedHashes(aDependency.downloadURL).address,
+    "dependency": aDependency,
+    "file": file,
+    "integrity": integrity,
+    "size": size,
+    "state": state,
+    "type": aType,
+  };
+}
+
+/** @returns {?object} The selected row of the Externals tab. */
+function selectedExternal() {
+  let tree = document.getElementById("externals-tree");
+  if (!tree || (tree.currentIndex < 0)) return null;
+  return gExternals[tree.currentIndex] || null;
+}
+
+/**
+ * View is there for a row with a downloaded copy; Download Again when
+ * the script has files, and none is being downloaded already.
+ */
+function onExternalSelect() {
+  let row = selectedExternal();
+  document.getElementById("externals-view").disabled = !(row && row.file);
+  document.getElementById("externals-download").disabled =
+      gExternalsDownloading || !gExternals.length;
+}
+
+/** @returns {boolean} Whether the right-click menu shows (on a row). */
+function onExternalContextShowing() {
+  let row = selectedExternal();
+  if (!row) return false;
+  document.getElementById("externals-context-view")
+      .setAttribute("disabled", row.file ? "false" : "true");
+  return true;
+}
+
+/**
+ * Shows the selected file's downloaded copy in a browser tab: text in the
+ * read-only source viewer, an image or other file as the browser shows it.
+ */
+function onExternalView() {
+  let row = selectedExternal();
+  if (!row || !row.file) return;
+  let type = row.dependency.mimetype || "";
+  let isText = (row.type == "@require") || !type
+      || /^text\/|javascript|ecmascript|json|xml|css/i.test(type);
+  openInBrowserTab(isText
+      ? GM_util.sourceViewerUrl(row.file, row.dependency.downloadURL)
+      : GM_util.getUriFromFile(row.file).spec);
+}
+
+function onExternalCopyAddress() {
+  let row = selectedExternal();
+  if (row) copyToClipboard(row.dependency.downloadURL);
+}
+
+/**
+ * Downloads the script's files again (Script.downloadDependenciesAgain),
+ * saying how it went beside the buttons; the list follows the script's
+ * change.
+ */
+function onExternalsDownloadAgain() {
+  if (gExternalsDownloading) return;
+  gExternalsDownloading = true;
+  setExternalsStatus(
+      localizedString("scriptPrefs.externals.downloading", "Downloading…"));
+  onExternalSelect();
+  gScript.downloadDependenciesAgain(function (aSuccess, aMessage) {
+    gExternalsDownloading = false;
+    try {
+      if (aSuccess) {
+        setExternalsStatus(localizedString(
+            "scriptPrefs.externals.downloadedAgain", "Downloaded again."));
+      } else {
+        setExternalsStatus(aMessage ? localizedString(
+            "scriptPrefs.externals.downloadFailed", "Not downloaded: %1")
+            .replace("%1", function () { return aMessage; }) : "");
+      }
+      populateExternalsTab();
+    } catch (e) {
+      // The window closed meanwhile.
+    }
+  });
+}
+
+/**
+ * @param {string} aText - Shown on one line, in full in its tooltip
+ *   (a download error runs over several).
+ */
+function setExternalsStatus(aText) {
+  let status = document.getElementById("externals-status");
+  status.value = aText.replace(/\s*\n\s*/g, " ");
+  status.setAttribute("tooltiptext", aText);
 }
 
 ////////////////////////////// Add / Edit / Delete /////////////////////////////

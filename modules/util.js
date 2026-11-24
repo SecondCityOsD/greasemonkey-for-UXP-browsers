@@ -32,6 +32,7 @@ var GM_util = {};
 
 // Do not edit below this line. Use "util.sh" to auto-populate.
 XPCOMUtils.defineLazyModuleGetter(GM_util, "alert", "chrome://greasemonkey-modules/content/util/alert.js");
+XPCOMUtils.defineLazyModuleGetter(GM_util, "browserIsDark", "chrome://greasemonkey-modules/content/util/browserIsDark.js");
 XPCOMUtils.defineLazyModuleGetter(GM_util, "compareVersion", "chrome://greasemonkey-modules/content/util/compareVersion.js");
 XPCOMUtils.defineLazyModuleGetter(GM_util, "createUserScript", "chrome://greasemonkey-modules/content/util/createUserScript.js");
 XPCOMUtils.defineLazyModuleGetter(GM_util, "emptyElm", "chrome://greasemonkey-modules/content/util/emptyElm.js");
@@ -53,12 +54,14 @@ XPCOMUtils.defineLazyModuleGetter(GM_util, "getTempFile", "chrome://greasemonkey
 XPCOMUtils.defineLazyModuleGetter(GM_util, "getUriFromFile", "chrome://greasemonkey-modules/content/util/getUriFromFile.js");
 XPCOMUtils.defineLazyModuleGetter(GM_util, "getUriFromUrl", "chrome://greasemonkey-modules/content/util/getUriFromUrl.js");
 XPCOMUtils.defineLazyModuleGetter(GM_util, "hash", "chrome://greasemonkey-modules/content/util/hash.js");
+XPCOMUtils.defineLazyModuleGetter(GM_util, "hashFile", "chrome://greasemonkey-modules/content/util/hashFile.js");
 XPCOMUtils.defineLazyModuleGetter(GM_util, "installScriptFromSource", "chrome://greasemonkey-modules/content/util/installScriptFromSource.js");
 XPCOMUtils.defineLazyModuleGetter(GM_util, "isGreasemonkeyable", "chrome://greasemonkey-modules/content/util/isGreasemonkeyable.js");
 XPCOMUtils.defineLazyModuleGetter(GM_util, "logError", "chrome://greasemonkey-modules/content/util/logError.js");
 XPCOMUtils.defineLazyModuleGetter(GM_util, "memoize", "chrome://greasemonkey-modules/content/util/memoize.js");
 XPCOMUtils.defineLazyModuleGetter(GM_util, "newUserScript", "chrome://greasemonkey-modules/content/util/newUserScript.js");
 XPCOMUtils.defineLazyModuleGetter(GM_util, "openInEditor", "chrome://greasemonkey-modules/content/util/openInEditor.js");
+XPCOMUtils.defineLazyModuleGetter(GM_util, "openScriptOptions", "chrome://greasemonkey-modules/content/util/openScriptOptions.js");
 XPCOMUtils.defineLazyModuleGetter(GM_util, "parseMetaLine", "chrome://greasemonkey-modules/content/util/parseMetaLine.js");
 XPCOMUtils.defineLazyModuleGetter(GM_util, "scriptDir", "chrome://greasemonkey-modules/content/util/scriptDir.js");
 XPCOMUtils.defineLazyModuleGetter(GM_util, "scriptMatchesUrlAndRuns", "chrome://greasemonkey-modules/content/util/scriptMatchesUrlAndRuns.js");
@@ -66,6 +69,7 @@ XPCOMUtils.defineLazyModuleGetter(GM_util, "setEditor", "chrome://greasemonkey-m
 XPCOMUtils.defineLazyModuleGetter(GM_util, "setEnabled", "chrome://greasemonkey-modules/content/util/setEnabled.js");
 XPCOMUtils.defineLazyModuleGetter(GM_util, "showInstallDialog", "chrome://greasemonkey-modules/content/util/showInstallDialog.js");
 XPCOMUtils.defineLazyModuleGetter(GM_util, "sniffGrants", "chrome://greasemonkey-modules/content/util/sniffGrants.js");
+XPCOMUtils.defineLazyModuleGetter(GM_util, "sourceViewerUrl", "chrome://greasemonkey-modules/content/util/sourceViewerUrl.js");
 XPCOMUtils.defineLazyModuleGetter(GM_util, "timeout", "chrome://greasemonkey-modules/content/util/timeout.js");
 XPCOMUtils.defineLazyModuleGetter(GM_util, "uuid", "chrome://greasemonkey-modules/content/util/uuid.js");
 XPCOMUtils.defineLazyModuleGetter(GM_util, "windowId", "chrome://greasemonkey-modules/content/util/windowId.js");

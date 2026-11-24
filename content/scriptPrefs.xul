@@ -66,17 +66,30 @@
     oncommand="onMetaSelectAll(event);"/>
 </menupopup>
 
-<!-- ── Three-tab top-level ───────────────────────────────────────────────
+<!-- Right-click on the Externals list. -->
+<menupopup id="externals-context-menu"
+  onpopupshowing="return onExternalContextShowing();">
+  <menuitem id="externals-context-view"
+    label="&scriptPrefs.externals.view;"
+    oncommand="onExternalView();"/>
+  <menuitem label="&scriptPrefs.externals.copyAddress;"
+    oncommand="onExternalCopyAddress();"/>
+</menupopup>
+
+<!-- ── Four-tab top-level ────────────────────────────────────────────────
      Settings:         Metadata / Behaviour / Script-declared pages
                        (read-only) / Permissions.
      User Preferences: the user's own include / match / exclude rules.
      Values:           GM_setValue browser, populated in M3.
+     Externals:        the @require and @resource files, as in
+                       Violentmonkey.
      ────────────────────────────────────────────────────────────────────── -->
 <tabbox id="prefs-tabbox" flex="1">
   <tabs id="prefs-tabs">
     <tab id="tab-settings"  label="&scriptPrefs.tab.settings;"/>
     <tab id="tab-userprefs" label="&scriptPrefs.tab.userPrefs;"/>
     <tab id="tab-values"    label="&scriptPrefs.tab.values;"/>
+    <tab id="tab-externals" label="&scriptPrefs.tab.externals;"/>
   </tabs>
 
   <tabpanels id="prefs-tabpanels" flex="1">
@@ -415,6 +428,55 @@
         <hbox align="center" id="values-empty" hidden="true">
           <spacer flex="1"/>
           <label value="&scriptPrefs.values.empty;"
+            class="values-empty-label"/>
+          <spacer flex="1"/>
+        </hbox>
+      </vbox>
+    </tabpanel>
+
+    <!-- ─── Externals tab — the script's @require and @resource files:
+         where each comes from, its downloaded copy and its state.
+         Filled by scriptPrefs.js populateExternalsTab. ─────────────── -->
+    <tabpanel flex="1" orient="vertical">
+      <vbox flex="1" id="externals-pane" class="values-pane">
+        <hbox align="center" id="externals-toolbar">
+          <label id="externals-count" value=""/>
+          <label id="externals-status" value="" crop="end" flex="1"/>
+          <button id="externals-view" label="&scriptPrefs.externals.view;"
+            tooltiptext="&scriptPrefs.externals.view.tooltip;"
+            oncommand="onExternalView();" disabled="true"/>
+          <button id="externals-download"
+            label="&scriptPrefs.externals.downloadAgain;"
+            tooltiptext="&scriptPrefs.externals.downloadAgain.tooltip;"
+            oncommand="onExternalsDownloadAgain();" disabled="true"/>
+        </hbox>
+        <tree id="externals-tree" flex="1" seltype="single"
+          context="externals-context-menu"
+          onselect="onExternalSelect();" ondblclick="onExternalView();">
+          <treecols>
+            <treecol id="externals-col-type"
+              label="&scriptPrefs.externals.type;" flex="2" persist="width"/>
+            <splitter class="tree-splitter"/>
+            <treecol id="externals-col-address"
+              label="&scriptPrefs.externals.address;" flex="5"
+              persist="width"/>
+            <splitter class="tree-splitter"/>
+            <treecol id="externals-col-size"
+              label="&scriptPrefs.externals.size;" flex="1" persist="width"/>
+            <splitter class="tree-splitter"/>
+            <treecol id="externals-col-state"
+              label="&scriptPrefs.externals.state;" flex="2"
+              persist="width"/>
+            <splitter class="tree-splitter"/>
+            <treecol id="externals-col-integrity"
+              label="&scriptPrefs.externals.integrity;" flex="2"
+              persist="width"/>
+          </treecols>
+          <treechildren id="externals-treechildren"/>
+        </tree>
+        <hbox align="center" id="externals-empty" hidden="true">
+          <spacer flex="1"/>
+          <label value="&scriptPrefs.externals.empty;"
             class="values-empty-label"/>
           <spacer flex="1"/>
         </hbox>

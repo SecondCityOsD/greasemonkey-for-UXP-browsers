@@ -1,0 +1,37 @@
+/* Scratchpad as a user script editor (content/scratchpadTools.js): the
+   Metadata summary above the code.  Colours come from the developer tools'
+   theme variables, so it follows Scratchpad's light or dark theme; the
+   fallbacks are for a build without them. */
+
+#gm-sp-meta {
+  padding: 3px 6px;
+  background: var(--theme-sidebar-background, -moz-Dialog);
+  color: var(--theme-body-color, -moz-DialogText);
+  border-bottom: 1px solid var(--theme-splitter-color, ThreeDShadow);
+}
+
+.gm-sp-meta-key {
+  margin: 0 8px 0 0;
+  color: var(--theme-comment, GrayText);
+}
+
+.gm-sp-meta-value {
+  margin: 0;
+  min-width: 0;
+}
+
+.gm-sp-meta-jump {
+  cursor: pointer;
+}
+
+.gm-sp-meta-jump:hover {
+  text-decoration: underline;
+}
+
+.gm-sp-meta-row[kind="warning"] > .gm-sp-meta-value {
+  color: var(--theme-highlight-orange, #b26b00);
+}
+
+.gm-sp-meta-row[kind="error"] > .gm-sp-meta-value {
+  color: var(--theme-highlight-red, #c00000);
+}

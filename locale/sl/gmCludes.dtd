@@ -15,6 +15,7 @@
 <!ENTITY promptForNewPage.title "Dodaj stran">
 <!ENTITY scriptPrefs.tab.settings           "Settings">
 <!ENTITY scriptPrefs.tab.values             "Values">
+<!ENTITY scriptPrefs.tab.externals          "Externals">
 
 <!-- Section captions in the Settings tab -->
 <!ENTITY scriptPrefs.section.metadata       "Metadata">
@@ -69,6 +70,19 @@
 <!ENTITY scriptPrefs.values.type            "Vrsta">
 <!ENTITY scriptPrefs.values.value           "Vrednost">
 <!ENTITY scriptPrefs.values.empty           "Ta skript nima shranjenih vrednosti.">
+
+<!-- Externals tab: the script's @require and @resource files -->
+<!ENTITY scriptPrefs.externals.type        "Type">
+<!ENTITY scriptPrefs.externals.address     "Address">
+<!ENTITY scriptPrefs.externals.size        "Size">
+<!ENTITY scriptPrefs.externals.state       "State">
+<!ENTITY scriptPrefs.externals.integrity   "Integrity">
+<!ENTITY scriptPrefs.externals.view        "View">
+<!ENTITY scriptPrefs.externals.view.tooltip "Shows the downloaded copy, read-only, in a browser tab.">
+<!ENTITY scriptPrefs.externals.copyAddress "Copy Address">
+<!ENTITY scriptPrefs.externals.downloadAgain "Download Again">
+<!ENTITY scriptPrefs.externals.downloadAgain.tooltip "Downloads the files again from their addresses, checking any pinned hash. This also repairs a script whose files are missing.">
+<!ENTITY scriptPrefs.externals.empty       "This script uses no @require or @resource files.">
 <!ENTITY scriptPrefs.label.noFramesTooltip  "When checked, the script runs only in the top-level page and is skipped inside iframes / child frames.  Maps to the @noframes metadata directive.">
 <!ENTITY scriptPrefs.label.noFramesTooltip.short "@noframes — skip iframes / child frames">
 <!ENTITY scriptPrefs.label.metaSize          "Size">

@@ -542,19 +542,22 @@ ScriptAddon.prototype.toString = function () {
 
 /**
  * Marks this add-on as pending uninstall and notifies AOM listeners.
- * Actual removal is deferred until performUninstall() is called.
+ * Actual removal is deferred until performUninstall() is called, when
+ * the Add-ons Manager page closes (addonsOverlay.js unload); until then
+ * the script is out of use (Script.setNeedsUninstall).
  */
 ScriptAddon.prototype.uninstall = function () {
+  this._script.setNeedsUninstall(true);
   AddonManagerPrivate.callAddonListeners("onUninstalling", this, false);
-  // TODO:
-  // Pick an appropriate time, and act on these pending uninstalls.
   this.pendingOperations |= AddonManager.PENDING_UNINSTALL;
   AddonManagerPrivate.callAddonListeners("onUninstalled", this);
 };
 
 /** Cancels a pending uninstall operation and notifies AOM listeners. */
 ScriptAddon.prototype.cancelUninstall = function () {
-  this.pendingOperations ^= AddonManager.PENDING_UNINSTALL;
+  this._script.setNeedsUninstall(false);
+  // Not ^=: called when nothing was pending, that toggled it on.
+  this.pendingOperations &= ~AddonManager.PENDING_UNINSTALL;
   AddonManagerPrivate.callAddonListeners("onOperationCancelled", this);
 };
 

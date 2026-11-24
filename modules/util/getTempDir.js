@@ -4,7 +4,7 @@
  * system temp directory (or a provided root directory).
  */
 
-const EXPORTED_SYMBOLS = ["getTempDir"];
+const EXPORTED_SYMBOLS = ["cleanOldTempDirs", "getTempDir"];
 
 if (typeof Cc === "undefined") {
   var Cc = Components.classes;
@@ -52,4 +52,47 @@ function getTempDir(aRoot) {
   dir.createUnique(DIRECTORY_TYPE, GM_CONSTANTS.directoryMask);
 
   return dir;
+}
+
+/** How old a leftover temporary folder must be to be removed. */
+const OLD_TEMP_DIR_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Removes Greasemonkey's temporary folders ("gm-temp", "gm-temp-...")
+ * that are more than a day old: a download or import cut short (the
+ * browser closed or crashed) leaves its folder behind.  A download in
+ * flight has a fresh one, whatever profile or browser it belongs to.
+ * All off the main thread (OS.File); errors are ignored.
+ *
+ * @param {nsIFile} [aRoot] - Where to look; the system temp directory.
+ * @returns {Promise} Settles when done; never rejects.
+ */
+function cleanOldTempDirs(aRoot) {
+  let scope = {};
+  Cu.import("resource://gre/modules/osfile.jsm", scope);
+  let OS = scope.OS;
+  let name = new RegExp(
+      "^" + GM_CONSTANTS.directoryTempName + "(-.*)?$", "i");
+  let before = Date.now() - OLD_TEMP_DIR_MS;
+  let old = [];
+  let iterator = new OS.File.DirectoryIterator((aRoot || DIRECTORY_TEMP).path);
+  return iterator.forEach(function (aEntry) {
+    if (aEntry.isDir && name.test(aEntry.name)) {
+      old.push(aEntry.path);
+    }
+  }).then(function () {
+    iterator.close();
+    return Promise.all(old.map(function (aPath) {
+      return OS.File.stat(aPath).then(function (aInfo) {
+        if (aInfo.lastModificationDate.getTime() < before) {
+          return OS.File.removeDir(aPath, {"ignoreAbsent": true});
+        }
+        return undefined;
+      }).catch(function () {});
+    }));
+  }).catch(function () {
+    try {
+      iterator.close();
+    } catch (e) {}
+  });
 }
