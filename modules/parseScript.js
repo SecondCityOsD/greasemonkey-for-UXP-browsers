@@ -260,10 +260,13 @@ function parse(aSource, aUri, aFailWhenMissing) {
   for (let i = 0, metaLine = ""; metaLine = meta[i]; i++) {
     var data;
     try {
-      // trimRight(), not replace(/\s+$/): that regex takes quadratic time
-      // on a long run of spaces with text after it (30,000 spaces: most of
-      // a second per line).
-      data = GM_util.parseMetaLine(metaLine.trimRight());
+      // trim(), not replace(/\s+$/): that regex takes quadratic time on a
+      // long run of spaces with text after it (30,000 spaces: most of a
+      // second per line).  Both ends: a line may be indented
+      // (" // @grant GM_addStyle"), which Violentmonkey and Tampermonkey
+      // accept; such lines were skipped, and with them the script's
+      // @grant, @require and @run-at.
+      data = GM_util.parseMetaLine(metaLine.trim());
     } catch (e) {
       // Ignore invalid/unsupported meta lines.
       continue;
