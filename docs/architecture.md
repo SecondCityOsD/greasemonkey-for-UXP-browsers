@@ -133,6 +133,21 @@ everything else is invoked through it.
 │     · GM_windowClose / GM_windowFocus — miscApis.js (fork-specific)      │
 └──────────────────────────────────────────────────────────────────────────┘
 
+**Where a script runs** (3.10; `scriptRealm` in `modules/sandbox.js`, which
+`GM_info.injectInto` reports):
+
+| Script | Realm | How |
+|--------|-------|-----|
+| `@grant none` | page | `Cu.Sandbox(contentWin, {sandboxPrototype: contentWin, wantXrays: false})`: the page's principal, no X-rays; `GM_info` and `unsafeWindow` on its global. |
+| `@inject-into page`, no GM APIs | page | A real `<script>` element (`injectScriptIntoPage` in `scriptInjector.js`), with the page's CSP nonce; the sandbox above if that is blocked. |
+| GM APIs, injected into **content** | content | `Cu.Sandbox([contentWin], {wantXrays: true})`: an expanded principal that sees the page through X-rays; the GM APIs on its global. The classic sandbox. |
+| GM APIs, injected into **page** (the default) | page | The page's principal and no X-rays, as for `@grant none`, so the page can use what the script makes (Violentmonkey's way). The page can reach this sandbox's global (through any function the script hands it), so the GM APIs never go there: `runInPageWorld` wraps the script and its `@require`s in one function whose local variables are the APIs, `window` and its aliases (`self`, `top`...). That `window` is `PageWindowSandbox`, a Proxy of the real one that keeps the script's own `window.x` private and calls window methods on the real window. Its standard constructors (`Array`, `Promise`...) get a `Symbol.hasInstance` that also accepts the page's instances (`CrossRealmInstanceofSandbox`), as does a `@grant none` sandbox; on a page whose CSP forbids eval, the sandbox gets the page's origin without that policy (`pageWorldPrincipal`). The menu's and `onurlchange`'s listeners are added from chrome, through X-rays, so the page can't take them. |
+
+A script with GM APIs goes by its "Inject into" setting (Script Options),
+else its `@inject-into`, else Preferences > Advanced > Injection mode
+(`injectInto.default`). Tests: `gm-uxp-harness/page-world-test.js`, and in
+Basilisk `gm-device-test/pagemode` (a hostile page hunting for the APIs).
+
 ┌──────────────────────────────────────────────────────────────────────────┐
 │                         Persistence layer                                │
 │                                                                          │
@@ -294,7 +309,9 @@ For each Script in service.config.scripts:
    │
    ▼
 modules/sandbox.js → createSandbox(script, contentWindow)
-   ├─ sandbox = new Cu.Sandbox(systemPrincipal, {sandboxPrototype: contentWindow})
+   ├─ sandbox = new Cu.Sandbox(principal, {sandboxPrototype: contentWindow})
+   │     ↳ the principal and X-rays depend on where the script runs: see
+   │       "Where a script runs" in §3 (the page's world: runInPageWorld)
    ├─ attach GM_info object
    ├─ attach every native GM_* API (closure bound to this sandbox)
    ├─ load each @require body via Cu.evalInSandbox
@@ -535,7 +552,7 @@ Defined in `modules/script.js`. Fields (subset):
 | `localized.name`, `localized.description` | string | from `@name:xx-YY` / `@description:xx-YY` matched via `getBestLocaleMatch` |
 | `runAt` | one of `document-start` / `document-body` / `document-end` / `document-idle` | metadata or default |
 | `noframes` | boolean | `@noframes` |
-| `injectInto` | one of `auto` / `page` / `content` | `@inject-into` |
+| `injectInto` | one of `auto` / `page` / `content` | the "Inject into" setting, else `@inject-into`; `auto`: Preferences' Injection mode for a script with GM APIs (see "Where a script runs" in §3) |
 | `enabled` | boolean | persisted in config.xml |
 | `userOverride` | boolean | maintainer-only-rules toggle |
 | `includes` / `excludes` / `matches` | string[] / MatchPattern[] | from metadata |
@@ -626,6 +643,7 @@ Notable prefs:
 | `api.GM_cookie` | false | Gates the third-party `GM_cookie` polyfill (Phase 7: native, default true) |
 | `cors_override` / `csp_override` | false | Lets scripts override response headers |
 | `editor` | (unset) | Path to external editor; unset → Scratchpad |
+| `injectInto.default` | `page` | Where scripts with GM APIs run unless their own setting chooses: `page` (the page's world, as in Violentmonkey and Tampermonkey) or `content` (the classic sandbox); Preferences > Advanced > Injection mode, explained on the wiki's Injection modes page (3.10) |
 | `editor.type` | n/a | Window mode for external editor |
 | `sortBy` | `uiState,name` | about:addons GM tab sort order |
 | `scriptPrefs.windowWidth` / `windowHeight` | 720 / 720 | Per-script Options dialog size (3.7.0) |

@@ -3,7 +3,7 @@
  * @overview Creates the isolated JavaScript sandbox in which userscripts
  *   execute, and injects the GM_* / GM.* APIs into it.
  *
- * Two functions are exported:
+ * Exports:
  *
  *   createSandbox(aContentWin, aUrl, aScript, aRunAt)
  *     Constructs a Cu.Sandbox for the given script, then injects whichever
@@ -13,6 +13,9 @@
  *     Builds the GM.* Promise-wrapper API surface (buildGMObject), loads all
  *     @require files in order, then loads the script itself.
  *
+ *   scriptRealm(aScript)
+ *     "page" or "content": where a script with GM APIs runs (see below).
+ *
  * ── Sandbox modes ──────────────────────────────────────────────────────────
  *
  *   @grant none   (or no @grant at all)
@@ -20,9 +23,19 @@
  *     The script runs almost as if it were a page script.
  *     Only GM_info and a compatibility unsafeWindow alias are injected.
  *
- *   @grant <anything else>
+ *   @grant <anything else>, injected into "content" (the classic way)
  *     A full Xray sandbox.  Only the explicitly listed GM_* functions are
  *     injected; everything else is absent.
+ *
+ *   @grant <anything else>, injected into "page" (Violentmonkey's way)
+ *     A sandbox with the page's own principal, as for @grant none, so the
+ *     objects and functions the script makes belong to the page and the
+ *     page can use them.  The page can reach that sandbox's global (from
+ *     any function the script hands it, through its constructor), so the
+ *     GM APIs are never put there: they are local variables of a function
+ *     wrapped around the script and its @requires (runInPageWorld), and
+ *     `window` is a wrapper of the real window that keeps the script's own
+ *     window.x private (PageWindowSandbox), as in Violentmonkey.
  *
  * ── API injection pattern ──────────────────────────────────────────────────
  *
@@ -70,11 +83,16 @@
  *   must @grant it explicitly.
  */
 
-const EXPORTED_SYMBOLS = ["createSandbox", "runScriptInSandbox"];
+const EXPORTED_SYMBOLS = ["createSandbox", "runScriptInSandbox", "scriptRealm"];
 
+if (typeof Ci === "undefined") {
+  var Ci = Components.interfaces;
+}
 if (typeof Cu === "undefined") {
   var Cu = Components.utils;
 }
+
+Cu.import("resource://gre/modules/Services.jsm");
 
 Cu.import("chrome://greasemonkey-modules/content/constants.js");
 
@@ -198,6 +216,265 @@ function GMRequestPromiseSandbox(aGM, aName, aRequest) {
 `;
 
 /**
+ * The `window` of a script that runs in the page's world with GM APIs: a
+ * Proxy of the sandbox's global (aLocal) that reads through to the real
+ * window (aPage), as Violentmonkey's window is for such scripts.
+ *
+ *   - Reads: the script's own window.x if it set one, else the page's.
+ *     A window method (addEventListener, setTimeout, fetch) comes bound to
+ *     the real window, which it needs as `this`; also when the page has
+ *     replaced it with a function of its own (hooking addEventListener,
+ *     say), which would otherwise get this wrapper as `this`.  A method is
+ *     one of the platform's (aMethodNames), or any function without a
+ *     prototype; a page's constructor or library (jQuery, with its .fn)
+ *     comes as it is.  The real window itself (window.self, window.top in
+ *     a top window...) reads as this wrapper, so `window.top === window`.
+ *   - Writes stay the script's own (an @require'd jQuery doesn't replace
+ *     the page's), except the real window's accessors (window.onload,
+ *     window.location), which act on the page.
+ *   - Its target is the sandbox's global, so window.x and a bare x agree.
+ *   - Its own properties are the script's and the real window's, as a
+ *     window's are: Object.getOwnPropertyDescriptor(window, "frameElement")
+ *     finds the platform's (AdGuard Popup Blocker stopped at once without
+ *     it), and Object.keys(window) lists both.  The real window's come as
+ *     configurable, as a Proxy must report a property its target lacks.
+ *
+ * Everything it uses is taken from the sandbox's own built-ins when it is
+ * made, never from the page, which can replace its own at will.
+ *
+ * Held as a string and kept ASCII, with no backslash, backtick or "${",
+ * for the reason given at GMRequestPromiseSandbox.
+ *
+ * Arguments of the function it defines:
+ *   aLocal       - The sandbox's global.
+ *   aPage        - The real window.
+ *   aMethodNames - The platform's window methods, comma-separated (see
+ *                  windowMethodNames).
+ */
+var PageWindowSandbox = `
+function PageWindowSandbox(aLocal, aPage, aMethodNames) {
+  var apply = Reflect.apply;
+  var bind = Function.prototype.bind;
+  var defineProperty = Reflect.defineProperty;
+  var getOwnPropertyDescriptor = Object.getOwnPropertyDescriptor;
+  var getPrototypeOf = Object.getPrototypeOf;
+  var hasOwnProperty = Object.prototype.hasOwnProperty;
+  var isExtensible = Reflect.isExtensible;
+  var ownKeys = Reflect.ownKeys;
+  var push = Array.prototype.push;
+  var reflectGet = Reflect.get;
+  var reflectSet = Reflect.set;
+  var setAdd = Set.prototype.add;
+  var setHas = Set.prototype.has;
+  var SandboxSet = Set;
+  var weakGet = WeakMap.prototype.get;
+  var weakSet = WeakMap.prototype.set;
+  var bound = new WeakMap();
+  var methods = Object.create(null);
+  var wrapper = null;
+
+  var names = aMethodNames ? aMethodNames.split(",") : [];
+  for (var i = 0; i < names.length; i++) {
+    methods[names[i]] = true;
+  }
+
+  function own(aObject, aName) {
+    return apply(hasOwnProperty, aObject, [aName]);
+  }
+
+  function pageAccessor(aName) {
+    for (var object = aPage; object; object = getPrototypeOf(object)) {
+      var desc = getOwnPropertyDescriptor(object, aName);
+      if (desc) {
+        return (desc.get || desc.set) ? desc : null;
+      }
+    }
+    return null;
+  }
+
+  wrapper = new Proxy(aLocal, {
+    "get": function (aTarget, aName) {
+      var value;
+      if (own(aLocal, aName)) {
+        value = aLocal[aName];
+        return (value === aLocal) ? wrapper : value;
+      }
+      value = reflectGet(aPage, aName);
+      if (value === aPage) {
+        return wrapper;
+      }
+      if ((typeof value == "function")
+          && ((methods[aName] === true) || !own(value, "prototype"))) {
+        var method = apply(weakGet, bound, [value]);
+        if (!method) {
+          method = apply(bind, value, [aPage]);
+          apply(weakSet, bound, [value, method]);
+        }
+        return method;
+      }
+      return value;
+    },
+    "set": function (aTarget, aName, aValue) {
+      if (own(aLocal, aName)) {
+        return reflectSet(aLocal, aName, aValue);
+      }
+      var desc = pageAccessor(aName);
+      if (desc) {
+        return desc.set ? reflectSet(aPage, aName, aValue) : false;
+      }
+      return defineProperty(aLocal, aName, {
+        "configurable": true, "enumerable": true,
+        "value": aValue, "writable": true,
+      });
+    },
+    "getOwnPropertyDescriptor": function (aTarget, aName) {
+      var desc = getOwnPropertyDescriptor(aLocal, aName);
+      if (!desc) {
+        if (!isExtensible(aLocal)) {
+          return undefined;
+        }
+        desc = getOwnPropertyDescriptor(aPage, aName);
+        if (!desc) {
+          return undefined;
+        }
+        desc.configurable = true;
+      }
+      if ((desc.value === aLocal) || (desc.value === aPage)) {
+        desc.value = wrapper;
+      }
+      return desc;
+    },
+    "ownKeys": function () {
+      var keys = ownKeys(aLocal);
+      if (!isExtensible(aLocal)) {
+        return keys;
+      }
+      var seen = new SandboxSet();
+      var i;
+      for (i = 0; i < keys.length; i++) {
+        apply(setAdd, seen, [keys[i]]);
+      }
+      var pageKeys = ownKeys(aPage);
+      for (i = 0; i < pageKeys.length; i++) {
+        if (!apply(setHas, seen, [pageKeys[i]])) {
+          apply(push, keys, [pageKeys[i]]);
+        }
+      }
+      return keys;
+    },
+  });
+  return wrapper;
+}`;
+
+/**
+ * `instanceof` across the two realms of the page's world, for a sandbox
+ * there (@grant none, or injected into the page).  Its script has the
+ * sandbox's own Array, Promise, Error... (the page can't tamper with
+ * them), so the page's objects weren't instances of them:
+ * `pageArray instanceof Array` was false, where it is true in
+ * Violentmonkey.  Each of those constructors gets a Symbol.hasInstance
+ * that also accepts the page's instances, checked against the page's own
+ * constructor (the platform's, read through X-rays, not one the page put
+ * in its place).  Defined on the sandbox's constructors only: the page
+ * sees nothing.
+ *
+ * Held as a string and kept ASCII, with no backslash, backtick or "${",
+ * for the reason given at GMRequestPromiseSandbox.
+ *
+ * Arguments of the function it defines:
+ *   aLocal - The sandbox's global.
+ *   aNames - The constructors' names, comma-separated.
+ *   ...    - The page's constructors, in that order.
+ */
+var CrossRealmInstanceofSandbox = `
+function CrossRealmInstanceofSandbox(aLocal, aNames) {
+  var apply = Reflect.apply;
+  var defineProperty = Reflect.defineProperty;
+  var hasInstance = Function.prototype[Symbol.hasInstance];
+  var names = aNames.split(",");
+  var share = function (aOwn, aPage) {
+    if ((typeof aOwn != "function") || (typeof aPage != "function")
+        || (aOwn === aPage)) {
+      return;
+    }
+    defineProperty(aOwn, Symbol.hasInstance, {
+      "configurable": true,
+      "value": function (aValue) {
+        return apply(hasInstance, aOwn, [aValue])
+            || apply(hasInstance, aPage, [aValue]);
+      },
+    });
+  };
+  for (var i = 0; i < names.length; i++) {
+    share(aLocal[names[i]], arguments[i + 2]);
+  }
+}`;
+
+/** The constructors CrossRealmInstanceofSandbox shares. */
+const CROSS_REALM_CONSTRUCTORS = [
+  "Array", "ArrayBuffer", "Boolean", "DataView", "Date", "Error",
+  "EvalError", "Float32Array", "Float64Array", "Function", "Int16Array",
+  "Int32Array", "Int8Array", "Map", "Number", "Object", "Promise",
+  "RangeError", "ReferenceError", "RegExp", "Set", "String", "SyntaxError",
+  "TypeError", "URIError", "Uint16Array", "Uint32Array", "Uint8Array",
+  "Uint8ClampedArray", "WeakMap", "WeakSet",
+];
+
+/**
+ * Lets a page-world sandbox's `instanceof` accept the page's objects: see
+ * CrossRealmInstanceofSandbox.  Whatever fails, the script still runs.
+ *
+ * @param {Sandbox} aSandbox
+ * @param {Window}  aContentWin - Its page (X-ray: its own constructors).
+ */
+function shareInstanceof(aSandbox, aContentWin) {
+  try {
+    let pageConstructors = CROSS_REALM_CONSTRUCTORS.map(function (aName) {
+      return aContentWin[aName];
+    });
+    Cu.evalInSandbox("(" + CrossRealmInstanceofSandbox + ")", aSandbox)(
+        aSandbox, CROSS_REALM_CONSTRUCTORS.join(","), ...pageConstructors);
+  } catch (e) {
+    // The page is gone, or isn't an ordinary one: plain instanceof.
+  }
+}
+
+/** Where a script with GM APIs runs when nothing chooses for it. */
+const DEFAULT_REALM = "page";
+
+/**
+ * Where a script runs: "page", the page's own world (as in Violentmonkey),
+ * or "content", the classic sandbox apart from the page.  A @grant none
+ * script always runs in the page's world.  For one with GM APIs, its
+ * "Inject into" setting decides, else its @inject-into, else the
+ * injectInto.default preference ("auto" leaves it to the next one); a
+ * value that is none of these is the default, page.
+ *
+ * @param {IPCScript} aScript
+ * @returns {string} "page" or "content".
+ */
+function scriptRealm(aScript) {
+  if ((aScript.grants || []).includes("none")) {
+    return "page";
+  }
+  let realm = aScript.injectInto;
+  if ((realm != "page") && (realm != "content")) {
+    realm = GM_prefRoot.getValue("injectInto.default", DEFAULT_REALM);
+  }
+  return ((realm == "page") || (realm == "content")) ? realm : DEFAULT_REALM;
+}
+
+/**
+ * The GM APIs of each page-world sandbox, from createSandbox to
+ * runScriptInSandbox: an object of name -> value, every value already the
+ * sandbox's own (an exported function, a GM_info clone...).  Never on the
+ * sandbox's global, which the page can reach.
+ *
+ * @type {WeakMap<Sandbox, Object>}
+ */
+var gPageWorldApis = new WeakMap();
+
+/**
  * Creates and returns the JavaScript sandbox for a userscript.
  *
  * @param {Window}    aContentWin - The content window the script runs in;
@@ -242,7 +519,7 @@ function createSandbox(aContentWin, aUrl, aScript, aRunAt) {
     // If there is an explicit none grant, use a plain unwrapped sandbox
     // with no other content.
     var contentSandbox = new Cu.Sandbox(
-        aContentWin, {
+        pageWorldPrincipal(aContentWin), {
           "sameZoneAs": aContentWin,
           "sandboxName": aScript.id,
           "sandboxPrototype": aContentWin,
@@ -250,7 +527,10 @@ function createSandbox(aContentWin, aUrl, aScript, aRunAt) {
         });
 
     // GM_info is always provided.
-    injectGMInfo(contentSandbox, aContentWin, aScript);
+    injectGMInfo(contentSandbox, aContentWin, aScript, "page");
+
+    // The page's objects are instances of its Array, Promise... too.
+    shareInstanceof(contentSandbox, aContentWin);
 
     // Alias unsafeWindow for compatibility.
     Cu.evalInSandbox(unsafeWindowDefault, contentSandbox);
@@ -258,24 +538,36 @@ function createSandbox(aContentWin, aUrl, aScript, aRunAt) {
     return contentSandbox;
   }
 
+  // The page's own world (its principal, no X-rays), or the classic
+  // sandbox apart from it (an expanded principal seeing the page through
+  // X-rays): see scriptRealm and this file's header.
+  let pageWorld = (scriptRealm(aScript) == "page");
   var sandbox = new Cu.Sandbox(
-      [aContentWin], {
+      pageWorld ? pageWorldPrincipal(aContentWin) : [aContentWin], {
         "sameZoneAs": aContentWin,
         "sandboxName": aScript.id,
         "sandboxPrototype": aContentWin,
-        "wantXrays": true,
+        "wantXrays": !pageWorld,
         "wantExportHelpers": true,
       });
+  // Where the GM APIs go: the classic sandbox's global, or, in the page's
+  // world, an object of our own that runInPageWorld hands to the script
+  // privately (the page can reach that sandbox's global).
+  let api = pageWorld ? Object.create(null) : sandbox;
 
   // http://bugzil.la/1043958
   // Note that because waivers aren't propagated between origins,
   // we need the unsafeWindow getter to live in the sandbox.
   // See also:
   // toolkit/commonjs/sdk/content/sandbox.js
-  let _unsafeWindowGrant = GM_prefRoot.getValue("api.unsafeWindow.grant");
+  // (The page's world needs no getter: the real window is its own.  Its
+  // unsafeWindow is set with its window, in preparePageWorld.)
   _API1 = "unsafeWindow";
-  if (!_unsafeWindowGrant || (_unsafeWindowGrant
-      && aScript.grants.includes(_API1))) {
+  let realUnsafeWindow = !GM_prefRoot.getValue("api.unsafeWindow.grant")
+      || aScript.grants.includes(_API1);
+  if (pageWorld) {
+    // See preparePageWorld.
+  } else if (realUnsafeWindow) {
     let unsafeWindowGetter = new sandbox.Function (
         "return window.wrappedJSObject || window;");
     Object.defineProperty(sandbox, _API1, {
@@ -289,7 +581,7 @@ function createSandbox(aContentWin, aUrl, aScript, aRunAt) {
   _API2 = _API1.replace(
       API_PREFIX_REGEXP, GM_CONSTANTS.addonAPIPrefix2 + "$2");
   if (hasGrant(_API1, _API2)) {
-    sandbox[_API1] = GM_addElement.bind(
+    api[_API1] = GM_addElement.bind(
         null, aContentWin, aScript.fileURL, aRunAt);
   }
 
@@ -297,7 +589,7 @@ function createSandbox(aContentWin, aUrl, aScript, aRunAt) {
   _API2 = _API1.replace(
       API_PREFIX_REGEXP, GM_CONSTANTS.addonAPIPrefix2 + "$2");
   if (hasGrant(_API1, _API2)) {
-    sandbox[_API1] = GM_addStyle.bind(
+    api[_API1] = GM_addStyle.bind(
         null, aContentWin, aScript.fileURL, aRunAt);
   }
 
@@ -310,7 +602,7 @@ function createSandbox(aContentWin, aUrl, aScript, aRunAt) {
       // on top of Services.cookies.  buildGMObject's special-case picks
       // up the object shape and mirrors it as GM.cookie (Promise-wrapped
       // methods).
-      sandbox[_API1] = createGMCookieAPI(
+      api[_API1] = createGMCookieAPI(
           aContentWin, sandbox, aScript.fileURL, aUrl, aScript.connects,
           aScript.httpOnlyCookies);
     }
@@ -325,57 +617,57 @@ function createSandbox(aContentWin, aUrl, aScript, aRunAt) {
   _API2 = _API1.replace(
       API_PREFIX_REGEXP, GM_CONSTANTS.addonAPIPrefix2 + "$2");
   if (hasGrant(_API1, _API2)) {
-    sandbox[_API1] = scriptStorage.deleteValue.bind(scriptStorage);
+    api[_API1] = scriptStorage.deleteValue.bind(scriptStorage);
   }
   _API1 = "GM_deleteValues";
   _API2 = _API1.replace(
       API_PREFIX_REGEXP, GM_CONSTANTS.addonAPIPrefix2 + "$2");
   if (hasGrant(_API1, _API2)) {
-    sandbox[_API1] = scriptStorage.deleteValues.bind(scriptStorage);
+    api[_API1] = scriptStorage.deleteValues.bind(scriptStorage);
   }
   _API1 = "GM_getValue";
   _API2 = _API1.replace(
       API_PREFIX_REGEXP, GM_CONSTANTS.addonAPIPrefix2 + "$2");
   if (hasGrant(_API1, _API2)) {
-    sandbox[_API1] = scriptStorage.getValue.bind(scriptStorage);
+    api[_API1] = scriptStorage.getValue.bind(scriptStorage);
   }
   _API1 = "GM_getValues";
   _API2 = _API1.replace(
       API_PREFIX_REGEXP, GM_CONSTANTS.addonAPIPrefix2 + "$2");
   if (hasGrant(_API1, _API2)) {
-    sandbox[_API1] = scriptStorage.getValues.bind(scriptStorage);
+    api[_API1] = scriptStorage.getValues.bind(scriptStorage);
   }
   _API1 = "GM_setValue";
   _API2 = _API1.replace(
       API_PREFIX_REGEXP, GM_CONSTANTS.addonAPIPrefix2 + "$2");
   if (hasGrant(_API1, _API2)) {
-    sandbox[_API1] = scriptStorage.setValue.bind(scriptStorage);
+    api[_API1] = scriptStorage.setValue.bind(scriptStorage);
   }
   _API1 = "GM_setValues";
   _API2 = _API1.replace(
       API_PREFIX_REGEXP, GM_CONSTANTS.addonAPIPrefix2 + "$2");
   if (hasGrant(_API1, _API2)) {
-    sandbox[_API1] = scriptStorage.setValues.bind(scriptStorage);
+    api[_API1] = scriptStorage.setValues.bind(scriptStorage);
   }
 
   _API1 = "GM_listValues";
   _API2 = _API1.replace(
       API_PREFIX_REGEXP, GM_CONSTANTS.addonAPIPrefix2 + "$2");
   if (hasGrant(_API1, _API2)) {
-    sandbox[_API1] = scriptStorage.listValues.bind(scriptStorage);
+    api[_API1] = scriptStorage.listValues.bind(scriptStorage);
   }
 
   _API1 = "GM_addValueChangeListener";
   _API2 = _API1.replace(
       API_PREFIX_REGEXP, GM_CONSTANTS.addonAPIPrefix2 + "$2");
   if (hasGrant(_API1, _API2)) {
-    sandbox[_API1] = scriptStorage.addValueChangeListener.bind(scriptStorage);
+    api[_API1] = scriptStorage.addValueChangeListener.bind(scriptStorage);
   }
   _API1 = "GM_removeValueChangeListener";
   _API2 = _API1.replace(
       API_PREFIX_REGEXP, GM_CONSTANTS.addonAPIPrefix2 + "$2");
   if (hasGrant(_API1, _API2)) {
-    sandbox[_API1] = scriptStorage.removeValueChangeListener.bind(scriptStorage);
+    api[_API1] = scriptStorage.removeValueChangeListener.bind(scriptStorage);
   }
 
   let scriptResources = new GM_Resources(aScript);
@@ -383,7 +675,7 @@ function createSandbox(aContentWin, aUrl, aScript, aRunAt) {
   _API2 = _API1.replace(
       API_PREFIX_REGEXP, GM_CONSTANTS.addonAPIPrefix2 + "$2");
   if (hasGrant(_API1, _API2)) {
-    sandbox[_API1] = scriptResources.getResourceText.bind(
+    api[_API1] = scriptResources.getResourceText.bind(
         scriptResources,
         aContentWin, sandbox, aScript.fileURL);
   }
@@ -391,7 +683,7 @@ function createSandbox(aContentWin, aUrl, aScript, aRunAt) {
   _API2 = _API1.replace(
       API_PREFIX_REGEXP, GM_CONSTANTS.addonAPIPrefix2 + "$2");
   if (hasGrant(_API1, _API2)) {
-    sandbox[_API1] = scriptResources.getResourceURL.bind(
+    api[_API1] = scriptResources.getResourceURL.bind(
         scriptResources,
         aContentWin, sandbox, aScript);
   }
@@ -402,7 +694,7 @@ function createSandbox(aContentWin, aUrl, aScript, aRunAt) {
   if (hasGrant(_API1, _API2)) {
     {
       let _logger = new GM_ScriptLogger(aScript);
-      sandbox[_API1] = _logger.log.bind(_logger);
+      api[_API1] = _logger.log.bind(_logger);
     }
   }
 
@@ -414,7 +706,7 @@ function createSandbox(aContentWin, aUrl, aScript, aRunAt) {
       let _notifier = new GM_notificationer(
           getChromeWinForContentWin(aContentWin), aContentWin, sandbox,
           aScript.fileURL, aScript.localized.name);
-      sandbox[_API1] = _notifier.contentStart.bind(_notifier);
+      api[_API1] = _notifier.contentStart.bind(_notifier);
     }
   }
 
@@ -439,19 +731,19 @@ function createSandbox(aContentWin, aUrl, aScript, aRunAt) {
     _API2 = _API1.replace(
         API_PREFIX_REGEXP, GM_CONSTANTS.addonAPIPrefix2 + "$2");
     if (hasGrant(_API1, _API2)) {
-      sandbox[_API1] = gmTabApi.getTab;
+      api[_API1] = gmTabApi.getTab;
     }
     _API1 = "GM_saveTab";
     _API2 = _API1.replace(
         API_PREFIX_REGEXP, GM_CONSTANTS.addonAPIPrefix2 + "$2");
     if (hasGrant(_API1, _API2)) {
-      sandbox[_API1] = gmTabApi.saveTab;
+      api[_API1] = gmTabApi.saveTab;
     }
     _API1 = "GM_getTabs";
     _API2 = _API1.replace(
         API_PREFIX_REGEXP, GM_CONSTANTS.addonAPIPrefix2 + "$2");
     if (hasGrant(_API1, _API2)) {
-      sandbox[_API1] = gmTabApi.getTabs;
+      api[_API1] = gmTabApi.getTabs;
     }
   }
 
@@ -464,7 +756,7 @@ function createSandbox(aContentWin, aUrl, aScript, aRunAt) {
     // GM_openInTab finds the chrome window via getChromeWinForContentWin
     // and calls GM_BrowserUI.openInTab / .tabClose directly.
     let _openInTabFn = GM_openInTab.bind(null, aContentWin, aUrl);
-    sandbox[_API1] = function (aTabUrl, aTabOptions) {
+    api[_API1] = function (aTabUrl, aTabOptions) {
       let chromeHandle = _openInTabFn(aTabUrl, aTabOptions);
       if (!chromeHandle) {
         // No browser window to open it in.
@@ -514,33 +806,35 @@ function createSandbox(aContentWin, aUrl, aScript, aRunAt) {
     // MenuCommandSandbox is the function's source held as a string (see
     // menuCommand.js): a module function's own toString() can't be trusted
     // in UXP, as GMRequestPromiseSandbox above explains.
-    Cu.evalInSandbox(
-        "this._MenuCommandSandbox = " + MenuCommandSandbox, sandbox);
-    sandbox._MenuCommandSandbox(
-        aContentWin,
-        aScript.uuid, aScript.localized.name, aScript.fileURL,
-        MenuCommandRespond,
-        GM_CONSTANTS.localeStringBundle.createBundle(
-            GM_CONSTANTS.localeGreasemonkeyProperties)
-            .GetStringFromName("error.menu.callbackIsNotFunction"),
-        GM_CONSTANTS.localeStringBundle.createBundle(
-            GM_CONSTANTS.localeGreasemonkeyProperties)
-            .GetStringFromName("error.menu.couldNotRun"),
-        GM_CONSTANTS.localeStringBundle.createBundle(
-            GM_CONSTANTS.localeGreasemonkeyProperties)
-            .GetStringFromName("error.menu.invalidAccesskey"),
-        MenuCommandEventNameSuffix);
-    // MenuCommandSandbox's closure is what keeps commands/commandFuncs
-    // alive; the global reference was just a transport vehicle.
-    Cu.evalInSandbox(
-        "delete this._MenuCommandSandbox;", sandbox);
+    let strings = GM_CONSTANTS.localeStringBundle.createBundle(
+        GM_CONSTANTS.localeGreasemonkeyProperties);
+    let menuArgs = [
+      aContentWin,
+      aScript.uuid, aScript.localized.name, aScript.fileURL,
+      MenuCommandRespond,
+      strings.GetStringFromName("error.menu.callbackIsNotFunction"),
+      strings.GetStringFromName("error.menu.couldNotRun"),
+      strings.GetStringFromName("error.menu.invalidAccesskey"),
+      MenuCommandEventNameSuffix,
+    ];
+    if (pageWorld) {
+      registerPageWorldMenu(sandbox, api, aContentWin, menuArgs);
+    } else {
+      Cu.evalInSandbox(
+          "this._MenuCommandSandbox = " + MenuCommandSandbox, sandbox);
+      sandbox._MenuCommandSandbox(...menuArgs);
+      // MenuCommandSandbox's closure is what keeps commands/commandFuncs
+      // alive; the global reference was just a transport vehicle.
+      Cu.evalInSandbox(
+          "delete this._MenuCommandSandbox;", sandbox);
+    }
   }
 
   _API1 = "GM_setClipboard";
   _API2 = _API1.replace(
       API_PREFIX_REGEXP, GM_CONSTANTS.addonAPIPrefix2 + "$2");
   if (hasGrant(_API1, _API2)) {
-    sandbox[_API1] = GM_setClipboard.bind(
+    api[_API1] = GM_setClipboard.bind(
         null, aContentWin, aScript.fileURL);
   }
 
@@ -551,7 +845,7 @@ function createSandbox(aContentWin, aUrl, aScript, aRunAt) {
       API_PREFIX_REGEXP, GM_CONSTANTS.addonAPIPrefix2 + "$2");
   if (hasGrant(_API1, _API2)
       || aScript.grants.includes("window.close")) {
-    sandbox[_API1] = GM_window.bind(
+    api[_API1] = GM_window.bind(
         null, aContentWin, aScript.fileURL, "close");
   }
   _API1 = "GM_windowFocus";
@@ -559,7 +853,7 @@ function createSandbox(aContentWin, aUrl, aScript, aRunAt) {
       API_PREFIX_REGEXP, GM_CONSTANTS.addonAPIPrefix2 + "$2");
   if (hasGrant(_API1, _API2)
       || aScript.grants.includes("window.focus")) {
-    sandbox[_API1] = GM_window.bind(
+    api[_API1] = GM_window.bind(
         null, aContentWin, aScript.fileURL, "focus");
   }
 
@@ -570,12 +864,12 @@ function createSandbox(aContentWin, aUrl, aScript, aRunAt) {
     {
       let _xhr = new GM_xmlHttpRequester(
           aContentWin, sandbox, aScript.fileURL, aUrl, aScript.connects);
-      sandbox[_API1] = _xhr.contentStartRequest.bind(_xhr);
+      api[_API1] = _xhr.contentStartRequest.bind(_xhr);
     }
   }
 
   // See #2129.
-  Object.getOwnPropertyNames(sandbox).forEach(function (aProp) {
+  Object.getOwnPropertyNames(api).forEach(function (aProp) {
     if (aProp.indexOf(GM_CONSTANTS.addonAPIPrefix1) == 0) {
       // Only re-clone CALLABLE GM_* APIs.  The GM_cookie methods-object is
       // not a function: cloning it through the chrome Xray view strips its
@@ -583,11 +877,11 @@ function createSandbox(aContentWin, aUrl, aScript, aRunAt) {
       // properties), which broke GM_cookie.* at runtime.  It is already a
       // proper sandbox object (createObjectIn + exportFunction), so leave
       // it untouched.
-      if (typeof sandbox[aProp] !== "function") {
+      if (typeof api[aProp] !== "function") {
         return undefined;
       }
-      sandbox[aProp] = Cu.cloneInto(
-          sandbox[aProp], sandbox, {
+      api[aProp] = Cu.cloneInto(
+          api[aProp], sandbox, {
             "cloneFunctions": true,
             "wrapReflectors": true,
           });
@@ -607,17 +901,266 @@ function createSandbox(aContentWin, aUrl, aScript, aRunAt) {
     _API2 = _API1.replace(
         API_PREFIX_REGEXP, GM_CONSTANTS.addonAPIPrefix2 + "$2");
     if (hasGrant(_API1, _API2)) {
-      sandbox[_API1] = createGMDownloadAPI(
+      api[_API1] = createGMDownloadAPI(
           aContentWin, sandbox, aScript.fileURL, aUrl);
     }
   }
 
+  if (pageWorld) {
+    preparePageWorld(sandbox, api, aContentWin, aScript, realUnsafeWindow);
+    return sandbox;
+  }
+
   // GM_info is always provided.
-  injectGMInfo(sandbox, aContentWin, aScript);
+  injectGMInfo(sandbox, aContentWin, aScript, "content");
 
   installUrlChangeSupport(sandbox);
 
   return sandbox;
+}
+
+/**
+ * The principal of a sandbox in the page's world (@grant none, or injected
+ * into the page): the page's own, except on a page whose Content Security
+ * Policy forbids eval.  There, a principal of the same origin but without
+ * that policy, so the script's own eval and new Function work, as they do
+ * in the classic sandbox (the policy belongs to a principal, and its eval
+ * check goes by the running code's).  The page can still use what the
+ * script makes (same origin), and what the script puts into the page
+ * (<script> elements...) still follows the page's policy.
+ *
+ * Not where the page has set document.domain (seen as a document.domain
+ * other than its host): a principal without it would no longer count as
+ * the page's origin.  Not for a page whose own principal isn't an ordinary
+ * one (a sandboxed frame's null principal).  Whatever goes wrong, the
+ * page's own.
+ *
+ * @param {Window} aContentWin
+ * @returns {nsIPrincipal|Window} What Cu.Sandbox takes.
+ */
+function pageWorldPrincipal(aContentWin) {
+  try {
+    let doc = aContentWin.document;
+    let principal = doc.nodePrincipal;
+    if (!principal.isCodebasePrincipal || !principal.URI
+        || (doc.domain != principal.URI.host)
+        || !pageForbidsEval(aContentWin)) {
+      return aContentWin;
+    }
+    return Services.scriptSecurityManager.createCodebasePrincipal(
+        principal.URI, principal.originAttributes);
+  } catch (e) {
+    return aContentWin;
+  }
+}
+
+/**
+ * Whether the page's Content Security Policy forbids eval: a policy whose
+ * script-src (else default-src) lacks 'unsafe-eval', from its response
+ * header or a <meta http-equiv>.  Read there because UXP gives chrome code
+ * no way to ask a principal for its policy.  (A report-only policy forbids
+ * nothing; a <meta> the page hasn't reached yet, at document-start, isn't
+ * seen, nor in force yet.)
+ *
+ * @param {Window} aContentWin
+ * @returns {boolean}
+ */
+function pageForbidsEval(aContentWin) {
+  let policies = [];
+  try {
+    let channel = aContentWin.QueryInterface(Ci.nsIInterfaceRequestor)
+        .getInterface(Ci.nsIWebNavigation)
+        .QueryInterface(Ci.nsIDocShell)
+        .currentDocumentChannel.QueryInterface(Ci.nsIHttpChannel);
+    policies = channel.getResponseHeader("Content-Security-Policy")
+        .split(",");
+  } catch (e) {
+    // No such header, or not loaded over HTTP.
+  }
+  try {
+    let metas = aContentWin.document.querySelectorAll("meta[http-equiv]");
+    for (let i = 0; i < metas.length; i++) {
+      if (/^\s*content-security-policy\s*$/i.test(
+          metas[i].getAttribute("http-equiv"))) {
+        policies.push(metas[i].getAttribute("content") || "");
+      }
+    }
+  } catch (e) {
+    // No document yet.
+  }
+  return policies.some(function (aPolicy) {
+    let directives = {};
+    aPolicy.split(";").forEach(function (aDirective) {
+      let parts = aDirective.trim().split(/\s+/);
+      let name = parts.shift().toLowerCase();
+      // The first of a name counts, as in a browser.
+      if (name && !directives.hasOwnProperty(name)) {
+        directives[name] = parts;
+      }
+    });
+    let sources = directives["script-src"] || directives["default-src"];
+    return !!sources && !sources.some(function (aSource) {
+      return aSource.toLowerCase() == "'unsafe-eval'";
+    });
+  });
+}
+
+/** See windowMethodNames. */
+var gWindowMethodNames = null;
+
+/**
+ * The platform's window methods (alert, addEventListener, setTimeout...),
+ * comma-separated, for PageWindowSandbox.  Read once, through the X-ray
+ * view, which shows the platform's own members even where the page has
+ * replaced them, and none of the page's.
+ *
+ * @param {Window} aContentWin - Any content window (X-ray).
+ * @returns {string}
+ */
+function windowMethodNames(aContentWin) {
+  if (gWindowMethodNames === null) {
+    let names = new Set();
+    for (let object = aContentWin; object;
+        object = Object.getPrototypeOf(object)) {
+      Object.getOwnPropertyNames(object).forEach(function (aName) {
+        let desc = Object.getOwnPropertyDescriptor(object, aName);
+        if (desc && (typeof desc.value == "function")
+            && /^[a-z]/.test(aName)) {
+          names.add(aName);
+        }
+      });
+    }
+    gWindowMethodNames = Array.from(names).join(",");
+  }
+  return gWindowMethodNames;
+}
+
+/**
+ * Completes a page-world sandbox's APIs (see this file's header) and keeps
+ * them for runScriptInSandbox: GM_info; `window`, the wrapper of the real
+ * window (PageWindowSandbox), with its other names (self, frames,
+ * globalThis, and top / parent when they are this window), which the
+ * script gets as local variables; and unsafeWindow, the real window.
+ *
+ * @param {Sandbox}   aSandbox
+ * @param {Object}    aApis       - The script's GM APIs, name -> value.
+ * @param {Window}    aContentWin
+ * @param {IPCScript} aScript
+ * @param {boolean}   aRealUnsafeWindow - Whether unsafeWindow is the real
+ *   window (else, under api.unsafeWindow.grant without the grant, it is
+ *   the script's window, as in the classic sandbox).
+ */
+function preparePageWorld(
+    aSandbox, aApis, aContentWin, aScript, aRealUnsafeWindow) {
+  let pageWindow = Cu.evalInSandbox("(" + PageWindowSandbox + ")", aSandbox)(
+      aSandbox, aContentWin, windowMethodNames(aContentWin));
+  aApis.window = pageWindow;
+  aApis.self = pageWindow;
+  aApis.frames = pageWindow;
+  aApis.globalThis = pageWindow;
+  if (aContentWin.top == aContentWin) {
+    aApis.top = pageWindow;
+  }
+  if (aContentWin.parent == aContentWin) {
+    aApis.parent = pageWindow;
+  }
+  aApis.unsafeWindow = aRealUnsafeWindow ? aContentWin : pageWindow;
+
+  // GM_info is always provided.
+  aApis.GM_info = makeGMInfo(aSandbox, aContentWin, aScript, "page");
+
+  installPageWorldUrlChangeSupport(aSandbox, aContentWin, pageWindow);
+
+  // The page's objects are instances of its Array, Promise... too.
+  shareInstanceof(aSandbox, aContentWin);
+
+  gPageWorldApis.set(aSandbox, aApis);
+}
+
+/**
+ * GM_registerMenuCommand / GM_unregisterMenuCommand in the page's world.
+ * MenuCommandSandbox listens for the menu's events itself, which in the
+ * page's world would go through the page's addEventListener, stopPropagation
+ * and detail, all of which the page can replace: it would learn the
+ * events' secret names and get the listeners.  So the listening happens
+ * here, through the X-ray view, and the sandbox side gets an object with
+ * only the event's detail and its two stop methods.
+ *
+ * @param {Sandbox} aSandbox
+ * @param {Object}  aApis     - Gets the two functions.
+ * @param {Window}  aContentWin
+ * @param {Array}   aMenuArgs - MenuCommandSandbox's arguments.
+ */
+function registerPageWorldMenu(aSandbox, aApis, aContentWin, aMenuArgs) {
+  let listen = function (aType, aListener, aCapture) {
+    aContentWin.addEventListener(aType, function (aEvent) {
+      aListener(Cu.cloneInto({
+        "detail": aEvent.detail,
+        "stopImmediatePropagation": function () {
+          aEvent.stopImmediatePropagation();
+        },
+        "stopPropagation": function () {
+          aEvent.stopPropagation();
+        },
+      }, aSandbox, {"cloneFunctions": true}));
+    }, aCapture);
+  };
+  let args = aMenuArgs.slice();
+  args[0] = Cu.cloneInto(
+      {"addEventListener": listen}, aSandbox, {"cloneFunctions": true});
+  args[4] = Cu.exportFunction(args[4], aSandbox);
+  let holder = Cu.createObjectIn(aSandbox);
+  // Called with the holder as `this`, where it defines the two functions.
+  Cu.evalInSandbox(
+      "(function (aHolder) {"
+      + " var define = " + MenuCommandSandbox + ";"
+      + " return function () { return define.apply(aHolder, arguments); };"
+      + "})", aSandbox)(holder)(...args);
+  let waived = Cu.waiveXrays(holder);
+  aApis.GM_registerMenuCommand = waived.GM_registerMenuCommand;
+  aApis.GM_unregisterMenuCommand = waived.GM_unregisterMenuCommand;
+}
+
+/**
+ * window.onurlchange in the page's world.  The script's `window` keeps its
+ * own onurlchange (set on the sandbox's global, null until it sets one, as
+ * Tampermonkey's support check expects); this listener, added through the
+ * X-ray view so the page can't take it, calls it on each "urlchange" event
+ * with the event's `url` set.  The classic sandbox's way is
+ * installUrlChangeSupport.
+ *
+ * @param {Sandbox} aSandbox
+ * @param {Window}  aContentWin
+ * @param {Proxy}   aPageWindow - The script's window, the handler's `this`.
+ */
+function installPageWorldUrlChangeSupport(aSandbox, aContentWin, aPageWindow) {
+  if (!GM_prefRoot.getValue("api.window.onurlchange", true)) {
+    return undefined;
+  }
+  try {
+    Object.defineProperty(aSandbox, "onurlchange", {
+      "configurable": true, "enumerable": true,
+      "value": null, "writable": true,
+    });
+    aContentWin.addEventListener("urlchange", function (aEvent) {
+      // Its own only: once deleted, a read would find the page's.
+      let handler = Object.prototype.hasOwnProperty.call(
+          aSandbox, "onurlchange") ? aSandbox.onurlchange : null;
+      if (typeof handler != "function") {
+        return undefined;
+      }
+      try {
+        Cu.waiveXrays(aEvent).url = aEvent.detail.url;
+      } catch (e) {
+        // No detail: the handler still runs.
+      }
+      Reflect.apply(handler, aPageWindow, [aEvent]);
+      return undefined;
+    }, true);
+  } catch (e) {
+    // The page is gone: no support.
+  }
+  return undefined;
 }
 
 /**
@@ -658,25 +1201,46 @@ function installUrlChangeSupport(aSandbox) {
 }
 
 /**
- * Injects the GM_info object into the sandbox.
+ * Injects the GM_info object into the sandbox's global.
  * GM_info is always provided regardless of @grant list.
  *
  * Security: uses Reflect.set({}, key, value, sandbox) rather than
  * sandbox[key] = value to create an own property directly on the sandbox,
  * bypassing any inherited setter from the content window prototype chain.
  *
+ * @param {Cu.Sandbox} aSandbox    - The sandbox to inject GM_info into.
+ * @param {Window}     aContentWin - Content window (used for privacy check).
+ * @param {IPCScript}  aScript     - Script descriptor; info() provides the data.
+ * @param {string}     aRealm      - Where the script runs, for
+ *   GM_info.injectInto: "page" or "content".
+ */
+function injectGMInfo(aSandbox, aContentWin, aScript, aRealm) {
+  let info = makeGMInfo(aSandbox, aContentWin, aScript, aRealm);
+  if (info) {
+    Reflect.set({}, "GM_info", info, aSandbox);
+  }
+}
+
+/**
+ * The GM_info object, made in the sandbox.
+ *
+ * GM_info.injectInto is where the script actually runs, "page" or
+ * "content", as in Violentmonkey (never "auto").
+ *
  * Adds two lazy string getters on the GM_info object:
  *   scriptSource  — full source text of the script file (read on demand).
  *   scriptMetaStr — the ==UserScript== metadata block text (read on demand).
  *
- * Skips injection in environments where the sandbox content level is too
+ * Makes none in environments where the sandbox content level is too
  * high for safe property definition (e10s / multiprocess safety check).
  *
- * @param {Cu.Sandbox} aSandbox    - The sandbox to inject GM_info into.
- * @param {Window}     aContentWin - Content window (used for privacy check).
- * @param {IPCScript}  aScript     - Script descriptor; info() provides the data.
+ * @param {Cu.Sandbox} aSandbox
+ * @param {Window}     aContentWin
+ * @param {IPCScript}  aScript
+ * @param {string}     aRealm - "page" or "content".
+ * @returns {Object|undefined} The sandbox's GM_info.
  */
-function injectGMInfo(aSandbox, aContentWin, aScript) {
+function makeGMInfo(aSandbox, aContentWin, aScript, aRealm) {
   let _gEnvironment = GM_util.getEnvironment();
   if ((_gEnvironment.e10s
         && ((_gEnvironment.sandboxContentLevel != null)
@@ -686,11 +1250,10 @@ function injectGMInfo(aSandbox, aContentWin, aScript) {
     return undefined;
   }
 
-  let _API1 = "GM_info";
-
   var scriptInfoRaw = aScript.info();
   var scriptFileURL = aScript.fileURL;
 
+  scriptInfoRaw.injectInto = aRealm;
   scriptInfoRaw.isIncognito = GM_util.windowIsPrivate(aContentWin);
   scriptInfoRaw.isPrivate = scriptInfoRaw.isIncognito;
 
@@ -708,9 +1271,8 @@ function injectGMInfo(aSandbox, aContentWin, aScript) {
 
   // TODO:
   // Also delay top level clone via lazy getter (XPCOMUtils.defineLazyGetter)?
-  Reflect.set({}, _API1, Cu.cloneInto(scriptInfoRaw, aSandbox), aSandbox);
-
-  var waivedInfo = Cu.waiveXrays(aSandbox[_API1]);
+  var info = Cu.cloneInto(scriptInfoRaw, aSandbox);
+  var waivedInfo = Cu.waiveXrays(info);
   var fileCache = new Map();
 
   function getScriptSource() {
@@ -744,6 +1306,8 @@ function injectGMInfo(aSandbox, aContentWin, aScript) {
   Object.defineProperty(waivedInfo, "scriptMetaStr", {
     "get": Cu.exportFunction(getMeta, aSandbox),
   });
+
+  return info;
 }
 
 /**
@@ -882,20 +1446,33 @@ function runScriptInSandbox(aSandbox, aScript) {
    *     scripts can't reassign GM.X.
    *
    * @param {Cu.Sandbox} aSandbox - Target sandbox (created by createSandbox()).
+   * @param {Object}     aApis    - Where the GM_* APIs are and GM goes: the
+   *   sandbox's global, or a page-world script's own object.
    * @param {IPCScript}  aScript  - Script descriptor (for error attribution).
    * @returns {boolean} True on success; false if construction failed (the
    *                    caller aborts the script in that case).
    */
-  function buildGMObject(aSandbox, aScript) {
+  function buildGMObject(aSandbox, aApis, aScript) {
     try {
-      let gmObj = Cu.createObjectIn(aSandbox, { "defineAs": "GM" });
+      let gmObj = (aApis === aSandbox)
+          ? Cu.createObjectIn(aSandbox, { "defineAs": "GM" })
+          : Cu.createObjectIn(aSandbox);
       let defineRequestPromise = null;
+      // Only the APIs given to this script, its own properties: a @grant
+      // none sandbox's global has the page's own window as its prototype,
+      // so a plain read ran the page's getters for every GM_* name, and a
+      // function the page put there (window.GM_xmlhttpRequest) became the
+      // script's GM.xmlHttpRequest.
+      let api = function (aName) {
+        return Object.prototype.hasOwnProperty.call(aApis, aName)
+            ? aApis[aName] : undefined;
+      };
 
       for (let i = 0; i < GM_API_MAPPING.length; i++) {
         let pair = GM_API_MAPPING[i];
         let legacyName = pair[0];
         let modernName = pair[1];
-        let legacyFn = aSandbox[legacyName];
+        let legacyFn = api(legacyName);
         if (typeof legacyFn !== "function") {
           // Script didn't @grant this API; skip.
           continue;
@@ -938,9 +1515,10 @@ function runScriptInSandbox(aSandbox, aScript) {
 
       // GM_info is a frozen plain object already attached to the sandbox.
       // Mirror it as GM.info so scripts can read either name.
-      if (typeof aSandbox.GM_info !== "undefined") {
+      let info = api("GM_info");
+      if (typeof info !== "undefined") {
         let infoProp = "GM_info".replace(API_PREFIX_REGEXP, "$2");
-        gmObj[infoProp] = aSandbox.GM_info;
+        gmObj[infoProp] = info;
       }
 
       // GM_cookie special-case: sandbox.GM_cookie is a methods-object
@@ -949,15 +1527,15 @@ function runScriptInSandbox(aSandbox, aScript) {
       // skips it because typeof !== "function"; mirror the methods
       // here as GM.cookie.X with Promise wrapping so GM4 scripts can
       // do `await GM.cookie.list({})` etc.
-      if (aSandbox.GM_cookie
-          && (typeof aSandbox.GM_cookie === "object")) {
+      let cookie = api("GM_cookie");
+      if (cookie && (typeof cookie === "object")) {
         let cookieGmObj = Cu.createObjectIn(gmObj, { "defineAs": "cookie" });
         ["list", "set", "delete"].forEach(function (aMethod) {
           // Read the methods through a waived Xray: the cookie object's
           // .list/.set/.delete are callable expandos that the chrome Xray
           // view denies ("value is callable"), so a direct read would see
           // undefined and GM.cookie.* would never be built.
-          let method = Cu.waiveXrays(aSandbox.GM_cookie)[aMethod];
+          let method = Cu.waiveXrays(cookie)[aMethod];
           if (typeof method !== "function") return;
           let wrapper = (function (fn) {
             return function gmCookieAsyncWrapper() {
@@ -1000,8 +1578,11 @@ function runScriptInSandbox(aSandbox, aScript) {
         // Fallback — extremely rare; would only happen if Object is
         // somehow shadowed in the sandbox prototype chain.
         Cu.evalInSandbox(
-            "Object.freeze(this.GM);", aSandbox,
-            JAVASCRIPT_VERSION_MAX, aScript.fileURL, 1);
+            "(function (aGM) { Object.freeze(aGM); })", aSandbox,
+            JAVASCRIPT_VERSION_MAX, aScript.fileURL, 1)(gmObj);
+      }
+      if (aApis !== aSandbox) {
+        aApis.GM = gmObj;
       }
     } catch (e) {
       // The error itself goes along: the message alone ("async functions
@@ -1016,12 +1597,20 @@ function runScriptInSandbox(aSandbox, aScript) {
     return true;
   }
 
+  let pageWorldApis = gPageWorldApis.get(aSandbox);
+  gPageWorldApis.delete(aSandbox);
+
   // The pref name still says "polyfill" for backward-compatibility with
   // any user who set it explicitly; the implementation is now native.
   if (GM_prefRoot.getValue("api.object.polyfill")) {
-    if (!buildGMObject(aSandbox, aScript)) {
+    if (!buildGMObject(aSandbox, pageWorldApis || aSandbox, aScript)) {
       return undefined;
     }
+  }
+
+  if (pageWorldApis) {
+    runInPageWorld(aSandbox, pageWorldApis, aScript);
+    return undefined;
   }
 
   // @require evaluation: each library is independent.  A failure (404,
@@ -1050,4 +1639,129 @@ function runScriptInSandbox(aSandbox, aScript) {
   } else {
     evalWithCatch(aScript.fileURL);
   }
+}
+
+/** The page-world script's own function, among its @requires' names. */
+const PAGE_WORLD_SCRIPT_NAME = "__greasemonkeyUserScript__";
+
+/** JavaScript's line terminators, for line numbers. */
+const LINE_TERMINATORS = /\r\n|[\n\r\u2028\u2029]/;
+
+/** A name the generated source can declare. */
+const IDENTIFIER = /^[A-Za-z_$][\w$]*$/;
+
+/**
+ * Runs a page-world script (see this file's header), as Violentmonkey
+ * does: its @requires and itself in one function whose local variables
+ * are its GM APIs, its window and that window's other names; define,
+ * module and exports are undefined there, so an @require'd library puts
+ * itself on that window instead of the page's AMD loader.
+ *
+ * The APIs reach that function through a property of the sandbox's global
+ * with a random name, which its first statement reads and deletes, before
+ * the page can run anything; it is deleted here too if the code never ran
+ * (a syntax error).  Passing them as arguments would leave them in the
+ * function's `arguments`, which page code it calls can read through
+ * `caller`.
+ *
+ * The script comes first in the source, so the line numbers of its errors
+ * are its own; it runs last (its function is called after the @requires).
+ * The @requires' come after it: an error in one at load time is reported
+ * with its own file and line.  As in Violentmonkey, an @require that
+ * throws stops the script.
+ *
+ * @param {Sandbox}   aSandbox
+ * @param {Object}    aApis   - name -> value: see gPageWorldApis.
+ * @param {IPCScript} aScript
+ */
+function runInPageWorld(aSandbox, aApis, aScript) {
+  let read = function (aUrl) {
+    return GM_util.fileXhr(aUrl, "application/javascript");
+  };
+  let lineCount = function (aCode) {
+    return aCode.split(LINE_TERMINATORS).length;
+  };
+
+  let code;
+  try {
+    code = read(aScript.fileURL);
+  } catch (e) {
+    GM_util.logError(
+        "Error loading script " + aScript.fileURL + ":\n" + e,
+        false, aScript.fileURL, null);
+    return undefined;
+  }
+
+  // Where each part starts in the source: [url, first line, lines].
+  let parts = [[aScript.fileURL, 1, lineCount(code)]];
+  // The script's last line, then "};".
+  let line = parts[0][2] + 1;
+  let requires = [];
+  for (let i = 0, iLen = aScript.requires.length; i < iLen; i++) {
+    let url = aScript.requires[i].fileURL;
+    let requireCode;
+    try {
+      requireCode = read(url);
+    } catch (e) {
+      // As in the classic sandbox, a missing @require is reported and the
+      // rest go on.
+      GM_util.logError(
+          "Error loading @require " + url + ":\n" + e, false, url, null);
+      continue;
+    }
+    parts.push([url, line + 1, lineCount(requireCode)]);
+    line += lineCount(requireCode) + 1;
+    requires.push(requireCode);
+  }
+
+  let names = Object.keys(aApis).filter(function (aName) {
+    return IDENTIFIER.test(aName);
+  });
+  let key = "__gm" + GM_util.uuid().replace(/[^0-9a-z]/gi, "");
+  let bag = Cu.createObjectIn(aSandbox);
+  let waivedBag = Cu.waiveXrays(bag);
+  names.forEach(function (aName) {
+    waivedBag[aName] = aApis[aName];
+  });
+
+  let source = "(function () {"
+      + "var {" + names.join(", ") + "} = " + key + "; delete " + key + ";"
+      + " return (function (define, module, exports) {"
+      + " var " + PAGE_WORLD_SCRIPT_NAME + " = "
+      + (aScript.topLevelAwait ? "async " : "") + "function () {"
+      + code
+      + "\n};"
+      + requires.map(function (aCode) {
+        return "\n" + aCode + "\n;";
+      }).join("")
+      + "\nreturn " + PAGE_WORLD_SCRIPT_NAME + ".call(this);"
+      + "\n}).call(window);"
+      + "\n})();";
+
+  Object.defineProperty(aSandbox, key, {
+    "configurable": true,
+    "value": bag,
+  });
+  try {
+    Cu.evalInSandbox(
+        source, aSandbox, JAVASCRIPT_VERSION_MAX, aScript.fileURL, 1);
+  } catch (e) {
+    // Its own file and line, for an error in an @require.  (One raised
+    // elsewhere, in a page function the script called, say, has its own.)
+    let fileName = (e && e.fileName) || aScript.fileURL;
+    let lineNumber = e && e.lineNumber;
+    for (let i = parts.length - 1;
+        (fileName == aScript.fileURL) && (i > 0); i--) {
+      if ((lineNumber >= parts[i][1])
+          && (lineNumber < parts[i][1] + parts[i][2])) {
+        fileName = parts[i][0];
+        lineNumber = lineNumber - parts[i][1] + 1;
+        break;
+      }
+    }
+    GM_util.logError(e, false, fileName, lineNumber);
+  } finally {
+    delete aSandbox[key];
+  }
+  return undefined;
 }

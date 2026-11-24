@@ -163,6 +163,23 @@
   </groupbox>
   <groupbox>
     <caption id="script-apis-caption" label="Script APIs" />
+    <!-- Where scripts with GM APIs run unless their own setting says (the
+         injectInto.default pref).  As in Violentmonkey: the two values,
+         and a link to the page that explains them (the wiki's Injection
+         modes, GM_openInjectionModesHelp). -->
+    <hbox align="center">
+      <label id="inject-into-label" value="Injection mode:"
+        control="inject-into" />
+      <menulist id="inject-into">
+        <menupopup>
+          <menuitem id="inject-into-content" value="content" label="content" />
+          <menuitem id="inject-into-page" value="page" label="page" />
+        </menupopup>
+      </menulist>
+      <label id="inject-into-help" class="text-link"
+        value="Learn more about injection modes."
+        onclick="if (event.button &lt; 2) GM_openInjectionModesHelp();" />
+    </hbox>
     <!-- The tooltip on both lines, as in Violentmonkey. -->
     <checkbox id="http-only-cookies"
       label="Allow GM_cookie to access HTTP-only cookies"

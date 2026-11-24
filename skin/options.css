@@ -11,3 +11,11 @@ cludes {
 #new-script-template {
   font-family: monospace;
 }
+
+/*
+A tab scrolls when the window is made shorter than its settings, instead of
+cutting them off with no way to reach the rest.
+*/
+#options-tabbox > tabpanels > tabpanel {
+  overflow: auto;
+}

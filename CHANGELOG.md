@@ -8,11 +8,12 @@
 - Toolbar: the icon shows how many scripts ran on the tab; each script's commands can be folded
 - Preferences: open as a normal window; new **Advanced** tab (update notifications, badge type and color, HTTP-only cookies)
 - Preferences, as in Violentmonkey: **Use browser download API**, **Reload current tab after switching on/off a script from menu**, and **Disabled scripts:** show / group / hide in the toolbar menu
+- Scripts with GM APIs now run in the page's own world by default, as in Violentmonkey and Tampermonkey, so the page can use what they give them (AdGuard Popup Blocker's options page works); their GM APIs stay out of the page's reach, and `instanceof` recognises the page's objects. The classic sandbox is still there: **Injection mode** in Preferences (with a link to the [Injection modes](https://github.com/SecondCityOsD/greasemonkey-for-UXP-browsers/wiki/Injection-modes) wiki page), "Inject into" in a script's Options, or `@inject-into content`
 - Script Options: editor for stored values (text or JSON); separate Homepage, Script page and Contribute rows; `@contributionURL`; pinned hashes behind a "SHA" link
 - Pinned hashes in base64 (SRI) format are checked: sha256, sha384, sha512
 - Backups keep dependency files, the first-install date and the HTTP-only cookie choice, and these are imported from Violentmonkey too
 - Imports are much faster and no longer freeze the browser: scripts install at once and get their @require files and icons after, as in Violentmonkey, and the Add-ons Manager lists them when the import is done
-- `GM_info`, `GM_cookie` and `GM_download` work as they do in Violentmonkey
+- `GM_info`, `GM_cookie` and `GM_download` work as they do in Violentmonkey (`GM_info.injectInto` says where the script runs: page or content)
 - `GM_download` saves like any other download (the browser's download folder, asking where if the browser is set to ask); with the browser download API, straight into that folder, with subfolders, `conflictAction` and live progress
 - Compatible with Pale Moon 35; new text translated into 20 languages
 
@@ -21,6 +22,7 @@
 - Updating a script never loses the installed copy, its stored values or its settings
 - Scripts no longer run again when Back/Forward restores a page
 - An unusable `@match` is now ignored instead of the whole script being refused
+- Indented metadata lines (` // @grant ...`) count, as in Violentmonkey; they were skipped, and the script lost its `@grant`, `@require` or `@run-at`
 - `@downloadURL none` means not updatable; "null" is no longer saved as an update URL
 - `GM_cookie` gives HTTP-only cookies only when both Preferences and the script's Options allow it
 - `GM_xmlhttpRequest`: `@connect` is enforced on redirects; upload callbacks and `context` fixed
@@ -43,6 +45,9 @@
 - Closing the browser during an import: the import stops cleanly, and the scripts still getting their files get them at the next start
 - A change made just before closing the browser is no longer lost: the script list is written on quit, and at least once a second while changes keep coming
 - An imported script whose @require can't be downloaded tries again at the next start (it is switched off after three tries), and importing again replaces it
+- A page could slip its own functions into a `@grant none` script's `GM` object
+- `@grant none` scripts (and those injected into the page) can use `eval` and `new Function` on sites whose security policy forbids them, as in the classic sandbox; the page's own code stays bound by its policy
+- Preferences scrolls when its window is made shorter than its settings
 - Back/Forward, imports and Sync keep user rules, values and settings correctly
 
 #### 3.9

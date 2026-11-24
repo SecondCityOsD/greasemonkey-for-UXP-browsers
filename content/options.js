@@ -133,10 +133,31 @@ function GM_loadOptions() {
   document.getElementById("menu-disabled").value =
       (MENU_DISABLED_VALUES.indexOf(menuDisabled) != -1)
           ? menuDisabled : "show";
+  // Anything else is read as the default, "page" (sandbox.js scriptRealm),
+  // so it shows as that.
+  document.getElementById("inject-into").value =
+      (GM_prefRoot.getValue("injectInto.default", "page") == "content")
+          ? "content" : "page";
 }
 
 /** How the toolbar menu can list the page's disabled scripts. */
 const MENU_DISABLED_VALUES = ["show", "group", "hide"];
+
+/** The page that explains the injection modes (the project's wiki). */
+const INJECTION_MODES_HELP_URL =
+    "https://github.com/SecondCityOsD/greasemonkey-for-UXP-browsers/wiki/"
+    + "Injection-modes";
+
+/** "Learn more about injection modes.": the wiki page, in a new tab. */
+function GM_openInjectionModesHelp() {
+  let chromeWin = GM_util.getBrowserWindow();
+  if (!chromeWin) {
+    return undefined;
+  }
+  chromeWin.gBrowser.selectedTab =
+      chromeWin.gBrowser.addTab(INJECTION_MODES_HELP_URL);
+  return undefined;
+}
 
 /** What the toolbar badge can count ("none" hides it), and its colour as
  *  in defaults/preferences, for a stored value that isn't #rrggbb. */
@@ -198,6 +219,10 @@ function GM_localizeOptions() {
     ["menu-disabled-show", "label", "options.menuDisabled.show"],
     ["menu-disabled-group", "label", "options.menuDisabled.group"],
     ["menu-disabled-hide", "label", "options.menuDisabled.hide"],
+    ["inject-into-label", "value", "options.injectInto"],
+    ["inject-into-content", "label", "options.injectInto.content"],
+    ["inject-into-page", "label", "options.injectInto.page"],
+    ["inject-into-help", "value", "options.injectInto.learnMore"],
   ].forEach(function ([aId, aAttribute, aKey]) {
     let text;
     try {
@@ -269,6 +294,8 @@ function GM_saveOptions() {
       !!document.getElementById("menu-auto-reload").checked);
   GM_prefRoot.setValue("toolbarMenu.disabledScripts",
       document.getElementById("menu-disabled").value);
+  GM_prefRoot.setValue("injectInto.default",
+      document.getElementById("inject-into").value);
   // PARKED for 3.9 (scheduled backups): backup pref save removed here.
   // Changes to global excludes should be active after tab reload.
   // UXP is single-process, so we call broadcastScriptUpdates() directly

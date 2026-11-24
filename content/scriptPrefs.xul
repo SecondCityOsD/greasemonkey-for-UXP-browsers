@@ -213,9 +213,14 @@
                     tooltiptext="&scriptPrefs.label.noFramesTooltip;"/>
                 </hbox>
               </row>
+              <!-- The tooltip (on both) from greasemonkey.properties in
+                   scriptPrefs.js; the English here is its fallback. -->
               <row align="center">
-                <label class="prefs-meta-key" value="&scriptPrefs.label.injectInto;"/>
-                <menulist id="behave-injectinto">
+                <label id="behave-injectinto-label" class="prefs-meta-key"
+                  value="&scriptPrefs.label.injectInto;"
+                  tooltiptext="Where this script runs. Auto: as Preferences &gt; Advanced &gt; Injection mode says; its &quot;Learn more about injection modes&quot; link explains them."/>
+                <menulist id="behave-injectinto"
+                  tooltiptext="Where this script runs. Auto: as Preferences &gt; Advanced &gt; Injection mode says; its &quot;Learn more about injection modes&quot; link explains them.">
                   <menupopup>
                     <menuitem value="auto"    label="&scriptPrefs.injectInto.auto;"/>
                     <menuitem value="page"    label="&scriptPrefs.injectInto.page;"/>

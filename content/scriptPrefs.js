@@ -468,6 +468,12 @@ function populateBehaviourSection() {
   let injectInto = gScript.injectInto || "auto";
   let injectMenu = document.getElementById("behave-injectinto");
   selectMenuByValue(injectMenu, injectInto);
+  // What Auto means (Preferences' Injection mode), on the menu and its label.
+  let injectTip = localizedString(
+      "scriptPrefs.injectInto.tip", injectMenu.getAttribute("tooltiptext"));
+  injectMenu.setAttribute("tooltiptext", injectTip);
+  document.getElementById("behave-injectinto-label")
+      .setAttribute("tooltiptext", injectTip);
 
   // GM_cookie's HTTP-only cookies: offered to scripts that use GM_cookie,
   // or already have it on, as in Violentmonkey.  Both this and the

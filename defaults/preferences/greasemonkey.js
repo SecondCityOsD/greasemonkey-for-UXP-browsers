@@ -159,6 +159,13 @@ pref("extensions.greasemonkey.fileDependencyUrlIsDescendantOfDownloadUrl", false
 pref("extensions.greasemonkey.fileIsGreaseable", false);
 pref("extensions.greasemonkey.globalExcludes", "[]");
 pref("extensions.greasemonkey.haveInsertedToolbarbutton", false);
+// Where scripts with GM APIs run when neither their own "Inject into"
+// setting nor their @inject-into chooses (Preferences > Advanced >
+// Injection mode): "page", the page's own world, as in Violentmonkey and
+// Tampermonkey (the default), or "content", a sandbox apart from the page
+// (the classic Greasemonkey way).  See modules/sandbox.js scriptRealm.
+// @grant none scripts always run in the page's world.
+pref("extensions.greasemonkey.injectInto.default", "page");
 // Install window countdown, in ticks of 400 ms (2 = 0.8 seconds).  It
 // starts again whenever the window loses the focus.
 pref("extensions.greasemonkey.installDelay", 2);

@@ -474,6 +474,7 @@ function injectScriptIntoPage(aContentWin, aScript, aRunAt) {
   let gmInfoJson = "{}";
   try {
     let gmInfo = aScript.info();
+    gmInfo.injectInto = "page";
     gmInfo.isIncognito = GM_util.windowIsPrivate(aContentWin);
     gmInfo.isPrivate = gmInfo.isIncognito;
     gmInfo.scriptSource = scriptCode;
@@ -553,10 +554,9 @@ const PAGE_SAFE_GRANTS = [
  * Whether aScript runs as a <script> in the page: only for @inject-into
  * page, and only without GM APIs to grant.  A page script gets GM_info and
  * unsafeWindow and nothing else, so a script with, say, @grant GM_setValue
- * failed at its first call.  Those run in the sandbox instead, which has
- * the page through unsafeWindow (Violentmonkey bridges its API into the
- * page instead; exposing privileged functions to the page is what the
- * sandbox avoids).
+ * failed at its first call.  Those run in the page's world through
+ * createSandbox instead, which keeps their GM APIs out of the page's reach
+ * (sandbox.js, scriptRealm).
  *
  * @param {IPCScript} aScript
  * @returns {boolean}
@@ -608,10 +608,13 @@ function injectScripts(aScripts, aRunAt, aContentWin) {
       //         CSP risk that comes with it.  Built-in fallback in
       //         injectScriptIntoPage drops down to the sandbox path
       //         if the test-probe detects a CSP block.  With GM APIs
-      //         granted it takes the sandbox path (runsInPage).
+      //         granted it takes the sandbox path (runsInPage), in the
+      //         page's world (sandbox.js, scriptRealm).
       //
       //   everything else, INCLUDING @grant none
-      //       → sandbox-with-page-prototype via createSandbox.
+      //       → sandbox-with-page-prototype via createSandbox (a script
+      //         with GM APIs: in the page's world or the classic X-ray
+      //         sandbox, as scriptRealm says).
       //         Cu.Sandbox(contentWin, {sandboxPrototype: contentWin,
       //         wantXrays: false}) gives @grant none scripts the
       //         exact mechanism the pre-WebExtensions Greasemonkey
@@ -687,15 +690,15 @@ function runScripts(aRunAt, aContentWin) {
 /**
  * Whether a document-start script runs at TOPIC_EARLY, before the page has
  * any element: sandbox scripts without @require.  Scripts that need the
- * page's DOM (@grant none, @inject-into page, unless @inject-into content)
- * and those with @require (jQuery etc.) wait for TOPIC_NORMAL.
+ * page's DOM (those in the page's world: @grant none, or injected into the
+ * page; unless @inject-into content) and those with @require (jQuery etc.)
+ * wait for TOPIC_NORMAL.
  *
  * @param {IPCScript} aScript
  * @returns {boolean}
  */
 function runsEarly(aScript) {
-  let needsPageContext = aScript.grants.includes("none")
-      || (aScript.injectInto == "page");
+  let needsPageContext = (scriptRealm(aScript) == "page");
   if (aScript.injectInto == "content") {
     needsPageContext = false;
   }

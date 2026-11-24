@@ -14,6 +14,7 @@ A lot of changes were made to fill the gap of 8 years of no updates. The key cha
 - **Script isolation and stability** — One broken script no longer takes down all your other scripts. Each script runs independently.
 - **Early injection for redirect scripts** — `@run-at document-start` now fires before the page begins rendering, fixing scripts like "Reddit Old Redirect."
 - **`@grant none` page-context injection** — Scripts without GM APIs now run directly in the page context (matching Violentmonkey/Tampermonkey behavior), wrapped in an IIFE to prevent conflicts.
+- **Injection mode** — Scripts with GM APIs run in the page's own world by default, as in Violentmonkey and Tampermonkey, so pages can use what they give them; their GM APIs stay out of the page's reach. The classic Greasemonkey sandbox is one click away: Preferences > Advanced, per script in its Options, or `@inject-into content`. See [Injection modes](https://github.com/SecondCityOsD/greasemonkey-for-UXP-browsers/wiki/Injection-modes).
 - **`@connect` enforcement** — `GM_xmlhttpRequest` is now restricted to declared domains, closing a security gap present in the old fork.
 - **12+ new GM APIs** — `GM_addElement`, `GM_addValueChangeListener`, `GM_removeValueChangeListener`, `GM_unregisterMenuCommand`, `GM_getValues`, `GM_setValues`, `GM_deleteValues`, `GM_openInTab` with `.close()`/`.onclose`, and more.
 - **New metadata directives** — `@exclude-match`, `@run-at document-body`, `@inject-into`, `@topLevelAwait`, `@connect`, `@supportURL`, `@antifeature`.
