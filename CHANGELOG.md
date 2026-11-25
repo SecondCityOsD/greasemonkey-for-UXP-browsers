@@ -14,7 +14,7 @@
 - Backups keep dependency files, the first-install date and the HTTP-only cookie choice, also when imported from Violentmonkey
 - `GM_info`, `GM_cookie` and `GM_download` work as in Violentmonkey; `GM_download` saves like any other download, or with the browser download API straight into the downloads folder, with subfolders, `conflictAction` and progress
 - Pinned hashes in base64 (SRI) are checked: sha256, sha384, sha512
-- Pale Moon 35; new text in 20 languages
+- Pale Moon 35; new text in 20 languages; Russian revised throughout (thanks, zanud)
 - [Wiki](https://github.com/SecondCityOsD/greasemonkey-for-UXP-browsers/wiki): Preferences, hidden settings, the scripting API, Script Options, backups, troubleshooting
 
 **Fixed**
@@ -40,6 +40,7 @@
 - Add-ons Manager updates show failures, cancel and progress
 - Script Options and the Add-ons Manager follow changes made elsewhere; Back/Forward, imports and Sync keep user rules, values and settings
 - The source viewer's address no longer shows the file's path; Options show "none (installed from a file)" instead of a local path
+- Script Options: each of the script's rule lists offers the right **Add as user include / exclude / match** buttons (the `@match` list's did nothing)
 - Labels are readable with dark themes; Preferences scroll when the window is short; counts read "1 entry", "1 file"
 
 #### 3.9

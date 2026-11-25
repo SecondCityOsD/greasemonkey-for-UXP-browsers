@@ -226,16 +226,27 @@ function populatePagesSection() {
 
   // The "moved to user-side via context-menu" callbacks no longer need a
   // tab switch (single-form layout), so the helpers just delegate.
-  gElm.scriptIncludes.pages = gScript.includes;
-  gElm.scriptIncludes.onAddUserExclude = function (aPage) {
+  // The script's own rules, each list with its "Add as user ..." buttons:
+  // its includes and excludes as a user include or exclude, its matches
+  // as a user match.
+  let addUserInclude = function (aPage) {
+    gElm.userIncludes.addPage(aPage);
+  };
+  let addUserExclude = function (aPage) {
     gElm.userExcludes.addPage(aPage);
   };
+  gElm.scriptIncludes.pages = gScript.includes;
+  gElm.scriptIncludes.onAddUserInclude = addUserInclude;
+  gElm.scriptIncludes.onAddUserExclude = addUserExclude;
 
   let matchesPattern = [];
   for (let i = 0, iLen = gScript.matches.length; i < iLen; i++) {
     matchesPattern.push(gScript.matches[i].pattern);
   }
   gElm.scriptMatches.pages = matchesPattern;
+  gElm.scriptMatches.onAddUserMatch = function (aPage) {
+    gElm.userMatches.addPage(aPage);
+  };
 
   let userMatchesPattern = [];
   for (let i = 0, iLen = gScript.userMatches.length; i < iLen; i++) {
@@ -244,9 +255,8 @@ function populatePagesSection() {
   gElm.userMatches.pages = userMatchesPattern;
 
   gElm.scriptExcludes.pages = gScript.excludes;
-  gElm.scriptExcludes.onAddUserInclude = function (aPage) {
-    gElm.userIncludes.addPage(aPage);
-  };
+  gElm.scriptExcludes.onAddUserInclude = addUserInclude;
+  gElm.scriptExcludes.onAddUserExclude = addUserExclude;
   gElm.userExcludes.pages = gScript.userExcludes;
 
   gElm.userOverride.checked = gScript.userOverride;

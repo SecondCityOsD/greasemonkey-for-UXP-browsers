@@ -1,5 +1,5 @@
-<!ENTITY edit "Изменить">
-<!ENTITY edit.accesskey "E">
+<!ENTITY edit "Редактировать">
+<!ENTITY edit.accesskey "Р">
 <!ENTITY edit.tooltip "Редактировать этот скрипт">
 <!ENTITY executeFirst "Выполнять первым">
 <!ENTITY executeLast "Выполнять последним">
@@ -19,22 +19,22 @@
 <!ENTITY newScript "Создать новый скрипт">
 <!ENTITY newScript.accesskey "C">
 <!ENTITY show "Показать содержащую папку">
-<!ENTITY show.accesskey "S">
+<!ENTITY show.accesskey "к">
 <!ENTITY sort.byExecution "Сортировать по порядку выполнения">
 <!ENTITY sort.byName "Сортировать по имени">
-<!ENTITY sort.byNamespace "Sort by namespace">
+<!ENTITY sort.byNamespace "Сортировать по пространству имён">
 <!ENTITY sort.byStatus "Сортировать по статусу">
 <!ENTITY sort.execution "Порядок выполнения">
 <!ENTITY sort.name "Имя">
-<!ENTITY sort.namespace "Namespace">
+<!ENTITY sort.namespace "Пространство имён">
 <!ENTITY sort.status "Статус">
-<!ENTITY backup.exportAll "Export All…">
-<!ENTITY backup.import "Import…">
+<!ENTITY backup.exportAll "Экспортировать все...">
+<!ENTITY backup.import "Импортировать...">
 
 <!-- 3.7.0: live-search placeholder; translate as needed. -->
-<!ENTITY greasemonkey.search.placeholder "Search scripts...">
+<!ENTITY greasemonkey.search.placeholder "Поиск скриптов...">
 
 <!-- 3.7.x: user-script context-menu actions (right-click in the list). -->
-<!ENTITY gmEnable  "Enable">
-<!ENTITY gmDisable "Disable">
-<!ENTITY gmRemove  "Remove">
+<!ENTITY gmEnable  "Включить">
+<!ENTITY gmDisable "Отключить">
+<!ENTITY gmRemove  "Удалить">

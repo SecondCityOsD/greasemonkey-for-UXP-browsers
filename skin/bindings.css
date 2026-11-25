@@ -18,7 +18,8 @@ cludes {
   -moz-binding: url("chrome://greasemonkey/content/bindings.xml#clude-editor-readonly-exclude");
 }
 
-.btn-user-clude-virtual, #user-clude-match #btn-user-clude {
+/* Spacers that keep the lists' button columns the same height. */
+.btn-user-clude-virtual {
   visibility: hidden;
 }
 
