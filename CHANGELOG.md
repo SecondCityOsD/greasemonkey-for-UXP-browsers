@@ -3,69 +3,44 @@
 #### 3.10
 
 **New**
-- Install window: shows the icon, source, `@require` / `@resource`, `@antifeature`, warnings and a "not encrypted" tag for `http://` addresses; dependencies download 4 at a time; countdown is 0.8 s
-- Source viewer: dark theme that follows the browser (Auto / Light / Dark), a metadata header, better find (highlight every match, match case, whole word, regex, F3), Ctrl+G to go to a line, and a status bar
-- Toolbar: the icon shows how many scripts ran on the tab; each script's commands can be folded
-- Preferences: open as a normal window; new **Advanced** tab (update notifications, badge type and color, HTTP-only cookies)
-- Preferences, as in Violentmonkey: **Use browser download API**, **Reload current tab after switching on/off a script from menu**, and **Disabled scripts:** show / group / hide in the toolbar menu
-- Scripts with GM APIs now run in the page's own world by default, as in Violentmonkey and Tampermonkey, so the page can use what they give them (AdGuard Popup Blocker's options page works); their GM APIs stay out of the page's reach, and `instanceof` recognises the page's objects. The classic sandbox is still there: **Injection mode** in Preferences (with a link to the [Injection modes](https://github.com/SecondCityOsD/greasemonkey-for-UXP-browsers/wiki/Injection-modes) wiki page), "Inject into" in a script's Options, or `@inject-into content`
-- Script Options: editor for stored values (text or JSON); separate Homepage, Script page and Contribute rows; `@contributionURL`; pinned hashes behind a "SHA" link
-- Script Options: **Externals** tab, as in Violentmonkey: the `@require` and `@resource` files with their size, state and whether they match their pinned hash; **View** one, or **Download Again** (which also repairs a script whose files went missing)
-- Scratchpad, when it edits a user script: the script's name in the title, a summary of its metadata above the code, hints for metadata keywords and GM API names as you type, the parser's warnings when you save, and **Options**, **View** and **Open Folder** buttons. **Enhance the Scratchpad editor** in Preferences > Advanced turns this off
-- Pinned hashes in base64 (SRI) format are checked: sha256, sha384, sha512
-- Backups keep dependency files, the first-install date and the HTTP-only cookie choice, and these are imported from Violentmonkey too
-- Imports are much faster and no longer freeze the browser: scripts install at once and get their @require files and icons after, as in Violentmonkey, and the Add-ons Manager lists them when the import is done
-- `GM_info`, `GM_cookie` and `GM_download` work as they do in Violentmonkey (`GM_info.injectInto` says where the script runs: page or content)
-- `GM_download` saves like any other download (the browser's download folder, asking where if the browser is set to ask); with the browser download API, straight into that folder, with subfolders, `conflictAction` and live progress
-- Compatible with Pale Moon 35; new text translated into 20 languages
+- Scripts with GM APIs run in the page's own world by default, as in Violentmonkey and Tampermonkey (AdGuard Popup Blocker's options page works); their GM APIs stay out of the page's reach, and `instanceof` recognises the page's objects. The classic sandbox is one choice away: **Injection mode** in Preferences, "Inject into" in a script's Options, or `@inject-into content`. See [Injection modes](https://github.com/SecondCityOsD/greasemonkey-for-UXP-browsers/wiki/Injection-modes)
+- Install window: icon, source, `@require` / `@resource`, `@antifeature`, warnings, a "not encrypted" tag for `http://`; files download 4 at a time; 0.8 s countdown
+- Source viewer: dark theme that follows the browser, metadata header, better find (all matches, case, whole word, regex, F3), Ctrl+G, status bar
+- Script Options: **Externals** tab (files, size, state, pinned-hash check, View, Download Again, which also repairs a script whose files went missing); editor for stored values (text or JSON); Homepage, Script page and Contribute rows; `@contributionURL`; pinned hashes behind a "SHA" link
+- Scratchpad, for a user script: its name as the title, a metadata summary above the code, hints for metadata keys and GM APIs, warnings on save, Options / View / Open Folder buttons (Preferences › Advanced › **Enhance the Scratchpad editor**)
+- Toolbar: the icon shows how many scripts ran on the tab; each script's commands fold
+- Preferences: a normal window with an **Advanced** tab; as in Violentmonkey, **Use browser download API**, **Reload current tab after switching on/off a script from menu** and **Disabled scripts:** show / group / hide
+- Imports are much faster and don't freeze the browser: scripts install at once and fetch their files after, as in Violentmonkey; a crash mid-import loses nothing
+- Backups keep dependency files, the first-install date and the HTTP-only cookie choice, also when imported from Violentmonkey
+- `GM_info`, `GM_cookie` and `GM_download` work as in Violentmonkey; `GM_download` saves like any other download, or with the browser download API straight into the downloads folder, with subfolders, `conflictAction` and progress
+- Pinned hashes in base64 (SRI) are checked: sha256, sha384, sha512
+- Pale Moon 35; new text in 20 languages
+- [Wiki](https://github.com/SecondCityOsD/greasemonkey-for-UXP-browsers/wiki): Preferences, hidden settings, the scripting API, Script Options, backups, troubleshooting
 
 **Fixed**
-- Updates never install without consent, and Update Now asks before overwriting your edits
-- Updating a script never loses the installed copy, its stored values or its settings
+- Updates never install without consent; Update Now asks before overwriting your edits; an update never loses the installed copy, its values or its settings
 - Scripts no longer run again when Back/Forward restores a page
-- An unusable `@match` is now ignored instead of the whole script being refused
-- Indented metadata lines (` // @grant ...`) count, as in Violentmonkey; they were skipped, and the script lost its `@grant`, `@require` or `@run-at`
-- `@downloadURL none` means not updatable; "null" is no longer saved as an update URL
-- `GM_cookie` gives HTTP-only cookies only when both Preferences and the script's Options allow it
-- `GM_xmlhttpRequest`: `@connect` is enforced on redirects; upload callbacks and `context` fixed
-- `GM.xmlHttpRequest` / `GM.download` promises; `GM_openInTab` is safer
-- Menu commands work from frames
-- CSP override with merged policies; nonces; early styles; `onurlchange`
-- Edits made in an external editor are noticed straight away; a failed `@require` download no longer blocks pages that are waiting on it
-- Saving a new script with an installed script's name/namespace is refused, and the editor stays open (#25)
-- Install from URL handles "/" (#27); Recover Orphans is safer and its errors readable (#28)
-- `.user.js` links with a query string are recognized
-- Downloads that can't start now fail instead of hanging
-- Add-ons Manager updates: failures, cancel and progress are shown
-- Script Options and the Add-ons Manager keep up with changes made elsewhere
-- Options open for disabled scripts and close when their script is updated or removed
-- Labels are readable with dark themes
-- Scratchpad shows its "not saved" alert again
-- The toolbar menu and its tooltip no longer fail on a script that is being uninstalled
-- Scripts that store values no longer slow down the Add-ons Manager while it's open
-- A script installed right after a failed download could fail to install (its download folder was deleted by the failed one's clean-up)
-- Closing the browser during an import: the import stops cleanly, and the scripts still getting their files get them at the next start
-- A change made just before closing the browser is no longer lost: the script list is written on quit, and at least once a second while changes keep coming
-- An imported script whose @require can't be downloaded tries again at the next start (it is switched off after three tries), and importing again replaces it
-- A page could slip its own functions into a `@grant none` script's `GM` object
-- `@grant none` scripts (and those injected into the page) can use `eval` and `new Function` on sites whose security policy forbids them, as in the classic sandbox; the page's own code stays bound by its policy
-- Preferences scrolls when its window is made shorter than its settings
-- Back/Forward, imports and Sync keep user rules, values and settings correctly
-- A crash during an import no longer leaves its newest scripts as orphaned folders: the next start adds them back, with their settings
-- An older write of the script list finishing late can no longer overwrite the one made on quit
-- A script removed in the Add-ons Manager, while Undo is still offered, stops running and leaves the toolbar menu and its counts
-- A script switched on or off during an import gets its row updated; new rows go where the list's sort puts them, and the list fills in smaller steps
-- `GM_info.version` is right on the first pages after startup
+- `@match`: an unusable pattern is skipped instead of refusing the script, and its warning names it once; indented metadata lines count, as in Violentmonkey
 - An `@icon` whose address can't be used no longer stops the install
-- `@topLevelAwait` errors give the script's own line numbers (they were one too high)
-- The warning for an unusable `@match` names the pattern once
-- Scratchpad shows "installed successfully" in its own bar; a failed download is reported once, not twice (Scratchpad, Recover Orphans)
-- Recover Orphans lists folders in natural order (2 before 10)
-- Leftover temporary folders more than a day old are removed
-- **Remove** is last in the Add-ons Manager's right-click menu
-- The source viewer's address no longer shows the file's path (with your user name)
-- Script Options: a script made in the editor or dropped in from a file shows "none (installed from a file)" for its update and download addresses, not a local path; the toolbar menu opens Options as the same window as the Add-ons Manager does
-- Counts read "1 entry" and "1 file", not "1 entries"
+- `@downloadURL none` means not updatable; "null" is no longer saved as an update address
+- `@topLevelAwait` errors give the script's own line numbers
+- `GM_cookie` gives HTTP-only cookies only when both Preferences and the script's Options allow it
+- `GM_xmlhttpRequest`: `@connect` is enforced on redirects; upload callbacks and `context`; `GM.xmlHttpRequest` / `GM.download` promises; `GM_openInTab` is safer
+- `@grant none` scripts can't be handed page functions in their `GM` object, and they (and page-world scripts) can use `eval` on sites whose policy forbids it
+- Menu commands work from frames; CSP override with merged policies; nonces; early styles; `onurlchange`
+- `GM_info.version` is right on the first pages after startup
+- Edits in an external editor are noticed at once; a failed `@require` download no longer blocks the pages waiting on it
+- Imports: closing the browser stops them cleanly; scripts still fetching files get them at the next start, after three failures they're switched off, and importing again replaces them
+- The script list is written on quit, at least once a second while changes keep coming, and an older write can no longer overwrite a newer one
+- A script removed in the Add-ons Manager (Undo still offered) stops running and leaves the toolbar menu, which no longer fails on a script being removed
+- Add-ons Manager: Options open for disabled scripts and close when their script is updated or removed; new rows are sorted; toggles during an import show; **Remove** is last in the right-click menu; scripts that store values no longer slow it down
+- Scratchpad: saving a script under an installed one's name is refused (#25); "not saved" and "installed successfully" show in its own window; a failed download is reported once
+- Install from URL handles "/" (#27); Recover Orphans is safer, readable (#28) and lists folders in natural order
+- `.user.js` links with a query string are recognised; downloads that can't start fail instead of hanging; a failed download no longer deletes the next install's folder; old temporary folders are cleaned up
+- Add-ons Manager updates show failures, cancel and progress
+- Script Options and the Add-ons Manager follow changes made elsewhere; Back/Forward, imports and Sync keep user rules, values and settings
+- The source viewer's address no longer shows the file's path; Options show "none (installed from a file)" instead of a local path
+- Labels are readable with dark themes; Preferences scroll when the window is short; counts read "1 entry", "1 file"
 
 #### 3.9
 

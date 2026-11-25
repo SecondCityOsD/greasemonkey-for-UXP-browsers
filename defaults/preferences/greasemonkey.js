@@ -170,7 +170,6 @@ pref("extensions.greasemonkey.injectInto.default", "page");
 // starts again whenever the window loses the focus.
 pref("extensions.greasemonkey.installDelay", 2);
 pref("extensions.greasemonkey.jarIsGreaseable", false);
-pref("extensions.greasemonkey.load.earlier", false);
 // 3.7.x: about:addons UI toggles (visible in about:config).  Default on;
 // set false to hide the Import/Export links or the live-search box.
 pref("extensions.greasemonkey.manager.importExport.enabled", true);
@@ -249,7 +248,6 @@ pref("extensions.greasemonkey.xmlhttprequest.allowAllHostsWithoutConnect", false
 pref("extensions.greasemonkey.xmlhttprequest.forceThirdPartyCookies", true);
 pref("services.sync.prefs.sync.extensions.greasemonkey.enableScriptRefreshing", true);
 pref("services.sync.prefs.sync.extensions.greasemonkey.globalExcludes", true);
-pref("services.sync.prefs.sync.extensions.greasemonkey.load.earlier", true);
 pref("services.sync.prefs.sync.extensions.greasemonkey.newScript.removeUnused", true);
 pref("services.sync.prefs.sync.extensions.greasemonkey.newScript.template", true);
 pref("services.sync.prefs.sync.extensions.greasemonkey.requireSecureUpdates", true);
